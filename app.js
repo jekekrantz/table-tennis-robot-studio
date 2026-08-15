@@ -58,7 +58,15 @@
     edgeLayer: $("edgeLayer"),
     nodeLayer: $("nodeLayer"),
     emptyHint: $("emptyHint"),
+    toolboxPanel: $("toolboxPanel"),
+    inspectorPanel: $("inspectorPanel"),
     inspectorContent: $("inspectorContent"),
+    mobileToolsBtn: $("mobileToolsBtn"),
+    mobileFitBtn: $("mobileFitBtn"),
+    mobileInspectorBtn: $("mobileInspectorBtn"),
+    closeToolboxBtn: $("closeToolboxBtn"),
+    closeInspectorBtn: $("closeInspectorBtn"),
+    mobileDrawerBackdrop: $("mobileDrawerBackdrop"),
     calibrationDialog: $("calibrationDialog"),
     closeCalibrationBtn: $("closeCalibrationBtn"),
     calibrationPoseTab: $("calibrationPoseTab"),
@@ -145,6 +153,8 @@
   let connectionDrag = null;
   let canvasPan = null;
   let graphZoom = 1;
+  const graphTouchPointers = new Map();
+  let pinchZoom = null;
   let poseDrag = null;
   let suppressClickUntil = 0;
   let toastTimer = null;
@@ -889,6 +899,7 @@
         event.stopPropagation();
         selection = { kind: "edge", id: edge.id };
         renderAll();
+        openMobileDrawer("inspector");
       });
       els.edgeLayer.appendChild(group);
     }
@@ -1083,6 +1094,126 @@
     applyGraphZoom(1);
   }
 
+  function isMobileWorkspace() {
+    return globalThis.matchMedia?.("(max-width: 760px)").matches ?? false;
+  }
+
+  function syncMobileDrawerUi() {
+    const toolsOpen = els.toolboxPanel.classList.contains("mobile-drawer-open");
+    const inspectorOpen = els.inspectorPanel.classList.contains("mobile-drawer-open");
+    els.mobileToolsBtn.setAttribute("aria-expanded", toolsOpen ? "true" : "false");
+    els.mobileInspectorBtn.setAttribute("aria-expanded", inspectorOpen ? "true" : "false");
+    els.mobileDrawerBackdrop.hidden = !(toolsOpen || inspectorOpen);
+  }
+
+  function closeMobileDrawers() {
+    els.toolboxPanel.classList.remove("mobile-drawer-open");
+    els.inspectorPanel.classList.remove("mobile-drawer-open");
+    syncMobileDrawerUi();
+  }
+
+  function openMobileDrawer(which) {
+    if (!isMobileWorkspace()) return;
+    const target = which === "tools" ? els.toolboxPanel : els.inspectorPanel;
+    const other = which === "tools" ? els.inspectorPanel : els.toolboxPanel;
+    other.classList.remove("mobile-drawer-open");
+    target.classList.add("mobile-drawer-open");
+    syncMobileDrawerUi();
+  }
+
+  function syncResponsiveWorkspace() {
+    if (isMobileWorkspace()) {
+      els.modeText.textContent = "Drag to pan · pinch to zoom";
+    } else {
+      closeMobileDrawers();
+      els.modeText.textContent = "Drag background to pan · wheel to zoom";
+    }
+  }
+
+  function cancelCanvasPan() {
+    if (!canvasPan) return;
+    document.removeEventListener("pointermove", onCanvasPointerMove);
+    document.removeEventListener("pointerup", onCanvasPointerUp);
+    try { els.graphViewport.releasePointerCapture?.(canvasPan.pointerId); } catch (_) {}
+    els.graphViewport.classList.remove("panning");
+    canvasPan = null;
+  }
+
+  function graphTouchDistance(a, b) {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+
+  function onGraphTouchPointerDown(event) {
+    if (event.pointerType !== "touch") return;
+    graphTouchPointers.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      background: isCanvasBackgroundTarget(event.target),
+    });
+
+    if (pinchZoom || graphTouchPointers.size !== 2 || nodeDrag || connectionDrag || poseDrag) return;
+    const points = [...graphTouchPointers.entries()];
+    if (!points.every(([, point]) => point.background)) return;
+
+    const [firstEntry, secondEntry] = points;
+    const first = firstEntry[1];
+    const second = secondEntry[1];
+    const distance = graphTouchDistance(first, second);
+    if (distance < 12) return;
+
+    cancelCanvasPan();
+    const rect = els.graphViewport.getBoundingClientRect();
+    const centerX = (first.clientX + second.clientX) / 2 - rect.left;
+    const centerY = (first.clientY + second.clientY) / 2 - rect.top;
+    pinchZoom = {
+      pointerIds: [firstEntry[0], secondEntry[0]],
+      startDistance: distance,
+      startZoom: graphZoom,
+      worldX: (els.graphViewport.scrollLeft + centerX) / graphZoom,
+      worldY: (els.graphViewport.scrollTop + centerY) / graphZoom,
+    };
+    els.graphViewport.classList.add("pinching");
+    suppressClickUntil = performance.now() + 250;
+    event.preventDefault();
+  }
+
+  function onGraphTouchPointerMove(event) {
+    if (event.pointerType !== "touch" || !graphTouchPointers.has(event.pointerId)) return;
+    const point = graphTouchPointers.get(event.pointerId);
+    point.clientX = event.clientX;
+    point.clientY = event.clientY;
+
+    if (!pinchZoom || !pinchZoom.pointerIds.includes(event.pointerId)) return;
+    const first = graphTouchPointers.get(pinchZoom.pointerIds[0]);
+    const second = graphTouchPointers.get(pinchZoom.pointerIds[1]);
+    if (!first || !second) return;
+
+    const distance = graphTouchDistance(first, second);
+    const zoom = clamp(pinchZoom.startZoom * distance / pinchZoom.startDistance, MIN_GRAPH_ZOOM, MAX_GRAPH_ZOOM, graphZoom);
+    const rect = els.graphViewport.getBoundingClientRect();
+    const centerX = (first.clientX + second.clientX) / 2 - rect.left;
+    const centerY = (first.clientY + second.clientY) / 2 - rect.top;
+
+    graphZoom = zoom;
+    els.graphWorld.style.transform = `scale(${graphZoom})`;
+    els.graphSurface.style.width = `${SURFACE_WIDTH * graphZoom}px`;
+    els.graphSurface.style.height = `${SURFACE_HEIGHT * graphZoom}px`;
+    els.zoomIndicator.textContent = `${Math.round(graphZoom * 100)}%`;
+    els.graphViewport.scrollLeft = pinchZoom.worldX * graphZoom - centerX;
+    els.graphViewport.scrollTop = pinchZoom.worldY * graphZoom - centerY;
+    event.preventDefault();
+  }
+
+  function onGraphTouchPointerEnd(event) {
+    if (event.pointerType !== "touch") return;
+    const wasPinching = pinchZoom?.pointerIds.includes(event.pointerId);
+    graphTouchPointers.delete(event.pointerId);
+    if (!wasPinching) return;
+    pinchZoom = null;
+    els.graphViewport.classList.remove("pinching");
+    suppressClickUntil = performance.now() + 250;
+  }
+
   function isCanvasBackgroundTarget(target) {
     if (!(target instanceof Element)) return false;
     return !target.closest(".flow-node, .edge-group, .output-port");
@@ -1090,7 +1221,8 @@
 
   function onCanvasPointerDown(event) {
     if (event.button !== 0) return;
-    if (nodeDrag || connectionDrag || poseDrag) return;
+    if (nodeDrag || connectionDrag || poseDrag || canvasPan || pinchZoom) return;
+    if (event.pointerType === "touch" && graphTouchPointers.size > 1) return;
     if (!isCanvasBackgroundTarget(event.target)) return;
 
     canvasPan = {
@@ -1192,6 +1324,7 @@
     if (performance.now() < suppressClickUntil) return;
     selection = { kind: "node", id: event.currentTarget.dataset.nodeId };
     renderAll();
+    openMobileDrawer("inspector");
   }
 
   function onPortPointerDown(event) {
@@ -3636,10 +3769,14 @@
       robot.addEventListener("disconnect", handleUnexpectedRobotDisconnect);
     }
 
-    els.addShotBtn.addEventListener("click", () => addNode("shot"));
-    els.addRandomBtn.addEventListener("click", () => addNode("random"));
-    els.addDrillNodeBtn.addEventListener("click", () => addNode("drill"));
-    els.addCounterBtn.addEventListener("click", () => addNode("counter"));
+    const addNodeFromToolbox = type => {
+      addNode(type);
+      if (isMobileWorkspace()) closeMobileDrawers();
+    };
+    els.addShotBtn.addEventListener("click", () => addNodeFromToolbox("shot"));
+    els.addRandomBtn.addEventListener("click", () => addNodeFromToolbox("random"));
+    els.addDrillNodeBtn.addEventListener("click", () => addNodeFromToolbox("drill"));
+    els.addCounterBtn.addEventListener("click", () => addNodeFromToolbox("counter"));
     els.deleteSelectionBtn.addEventListener("click", deleteSelection);
     els.fitBtn.addEventListener("click", fitGraph);
     els.newDrillBtn.addEventListener("click", createDrill);
@@ -3653,8 +3790,19 @@
     els.deleteDrillBtn.addEventListener("click", deleteActiveDrill);
     els.resetExamplesBtn.addEventListener("click", restoreExampleLibrary);
 
+    els.mobileToolsBtn.addEventListener("click", () => openMobileDrawer("tools"));
+    els.mobileInspectorBtn.addEventListener("click", () => openMobileDrawer("inspector"));
+    els.mobileFitBtn.addEventListener("click", fitGraph);
+    els.closeToolboxBtn.addEventListener("click", closeMobileDrawers);
+    els.closeInspectorBtn.addEventListener("click", closeMobileDrawers);
+    els.mobileDrawerBackdrop.addEventListener("click", closeMobileDrawers);
+
+    els.graphViewport.addEventListener("pointerdown", onGraphTouchPointerDown, { capture: true });
     els.graphViewport.addEventListener("pointerdown", onCanvasPointerDown);
     els.graphViewport.addEventListener("wheel", onGraphWheel, { passive: false });
+    window.addEventListener("pointermove", onGraphTouchPointerMove, { capture: true, passive: false });
+    window.addEventListener("pointerup", onGraphTouchPointerEnd, { capture: true });
+    window.addEventListener("pointercancel", onGraphTouchPointerEnd, { capture: true });
     els.graphSurface.addEventListener("click", () => {
       if (performance.now() < suppressClickUntil || connectionDrag) return;
       selection = null;
@@ -3740,7 +3888,16 @@
       if (callback) callback();
     });
 
-    window.addEventListener("resize", () => renderGraph());
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && (els.toolboxPanel.classList.contains("mobile-drawer-open") || els.inspectorPanel.classList.contains("mobile-drawer-open"))) {
+        closeMobileDrawers();
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      syncResponsiveWorkspace();
+      renderGraph();
+    });
     window.addEventListener("beforeunload", event => {
       if (!playbackRunning && !calibrationTestRunning && !robotIsActive()) return;
       event.preventDefault();
@@ -3754,6 +3911,7 @@
     Protocol.selfTest();
     repairLibraryIfNeeded();
     bindEvents();
+    syncResponsiveWorkspace();
     els.graphWorld.style.transform = `scale(${graphZoom})`;
     els.graphSurface.style.width = `${SURFACE_WIDTH * graphZoom}px`;
     els.graphSurface.style.height = `${SURFACE_HEIGHT * graphZoom}px`;

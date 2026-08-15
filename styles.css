@@ -1002,3 +1002,377 @@ button { color: inherit; }
   .test-shot-command-card { grid-template-columns:1fr; }
   .test-shot-wire-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
+
+/* --------------------------------------------------------------------------
+   Responsive workspace / phone layout
+   -------------------------------------------------------------------------- */
+.mobile-drawer-heading,
+.mobile-canvas-actions,
+.mobile-drawer-backdrop {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-header {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    min-height: 0;
+    max-height: 46dvh;
+    padding: 8px 10px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .brand-block h1 {
+    font-size: .98rem;
+    line-height: 1.2;
+  }
+
+  .brand-block p {
+    display: none;
+  }
+
+  .run-controls {
+    width: 100%;
+    min-width: 0;
+    justify-self: auto;
+    grid-template-columns: minmax(100px, 1fr) minmax(90px, 1fr) minmax(100px, 1fr);
+    gap: 6px;
+    padding: 7px;
+    overflow: visible;
+    border-radius: 10px;
+  }
+
+  .run-controls .header-field:first-child,
+  .run-controls .play-button,
+  .run-controls .delay-field {
+    min-width: 0;
+  }
+
+  .run-progress-block {
+    grid-column: 1 / -1;
+    min-height: 25px;
+  }
+
+  .header-field > span:first-child {
+    font-size: .58rem;
+    line-height: 1.15;
+  }
+
+  .set-stepper {
+    width: 100%;
+    grid-template-columns: 30px minmax(34px, 1fr) 30px;
+    gap: 3px;
+  }
+
+  .set-stepper button,
+  .set-stepper input {
+    height: 38px;
+  }
+
+  .play-button {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    padding: 0 8px;
+  }
+
+  .header-field input {
+    min-height: 38px;
+    padding: 6px;
+  }
+
+  .run-status {
+    min-height: 14px;
+    font-size: .66rem;
+  }
+
+  .progress-track {
+    height: 6px;
+  }
+
+  .header-actions {
+    width: 100%;
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .robot-connection-control {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px;
+    padding: 0;
+  }
+
+  .robot-connect-button,
+  .robot-status-button,
+  .header-actions > .button {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+  }
+
+  .robot-status-button {
+    max-width: none;
+    justify-content: center;
+  }
+
+  .header-actions > .button {
+    padding: 8px 7px;
+    font-size: .74rem;
+    white-space: nowrap;
+  }
+
+  .workspace {
+    flex: 1 1 auto;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .canvas-shell {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .canvas-toolbar {
+    min-height: 72px;
+    padding: 6px 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 5px 8px;
+  }
+
+  .canvas-toolbar #activeDrillTitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .canvas-toolbar #modeText {
+    display: none;
+  }
+
+  .canvas-toolbar .autosave-indicator {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .canvas-toolbar .autosave-indicator {
+    font-size: 0;
+  }
+
+  .canvas-toolbar .autosave-indicator #zoomIndicator {
+    font-size: .69rem;
+  }
+
+  .mobile-canvas-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .mobile-canvas-button {
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid #3a4658;
+    border-radius: 8px;
+    background: #18202b;
+    color: #dce5ef;
+    font-size: .7rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .mobile-canvas-button[aria-expanded="true"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent), transparent 83%);
+  }
+
+  .graph-viewport {
+    min-width: 0;
+    min-height: 0;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .toolbox,
+  .inspector {
+    display: block;
+    position: fixed;
+    z-index: 80;
+    top: 0;
+    bottom: 0;
+    width: min(88vw, 370px);
+    max-width: 100%;
+    padding: 0 14px 18px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: 0 16px 44px rgba(0,0,0,.52);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transition: transform 170ms ease;
+  }
+
+  .toolbox {
+    left: 0;
+    right: auto;
+    transform: translateX(-105%);
+    border-right: 1px solid var(--border);
+  }
+
+  .inspector {
+    left: auto;
+    right: 0;
+    transform: translateX(105%);
+    border-left: 1px solid var(--border);
+  }
+
+  .toolbox.mobile-drawer-open,
+  .inspector.mobile-drawer-open {
+    transform: translateX(0);
+  }
+
+  .mobile-drawer-heading {
+    position: sticky;
+    z-index: 3;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 52px;
+    margin: 0 -14px 14px;
+    padding: 8px 12px 8px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(23,28,38,.98);
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-drawer-heading strong {
+    font-size: .86rem;
+  }
+
+  .mobile-drawer-close {
+    width: 38px;
+    height: 38px;
+    border: 1px solid #3a4658;
+    border-radius: 9px;
+    background: #111820;
+    color: var(--text);
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .mobile-drawer-backdrop {
+    position: fixed;
+    z-index: 70;
+    inset: 0;
+    display: block;
+    background: rgba(4,7,11,.62);
+    backdrop-filter: blur(1px);
+  }
+
+  .mobile-drawer-backdrop[hidden] {
+    display: none;
+  }
+
+  .tool-button,
+  .button,
+  .field input,
+  .field select,
+  .connection-row input,
+  .connection-row select {
+    min-height: 40px;
+  }
+
+  .toast {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    max-width: none;
+  }
+
+  .calibration-dialog,
+  .preview-dialog,
+  .robot-dialog,
+  .confirm-dialog {
+    width: calc(100vw - 16px);
+    max-width: none;
+    max-height: calc(100dvh - 16px);
+    margin: auto;
+  }
+
+  .dialog-frame {
+    padding: 12px;
+  }
+
+  .calibration-frame {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .calibration-tabs {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .calibration-tab {
+    flex: none;
+  }
+}
+
+@media (max-width: 390px) {
+  .run-controls {
+    grid-template-columns: minmax(96px, 1fr) minmax(84px, .9fr) minmax(96px, 1fr);
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .set-stepper {
+    grid-template-columns: 28px minmax(30px, 1fr) 28px;
+  }
+
+  .header-actions > .button {
+    font-size: .69rem;
+    padding-inline: 5px;
+  }
+}
+
+@media (max-width: 760px) and (orientation: landscape) {
+  .app-header {
+    max-height: 52dvh;
+  }
+
+  .brand-block {
+    display: none;
+  }
+}

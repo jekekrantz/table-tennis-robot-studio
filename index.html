@@ -61,7 +61,11 @@
   </header>
 
   <main class="workspace">
-    <aside class="toolbox panel">
+    <aside id="toolboxPanel" class="toolbox panel">
+      <div class="mobile-drawer-heading">
+        <strong>Tools &amp; drills</strong>
+        <button id="closeToolboxBtn" class="mobile-drawer-close" type="button" aria-label="Close tools">×</button>
+      </div>
       <section class="drill-library-section">
         <div class="section-heading-row">
           <h2>Created drills</h2>
@@ -123,6 +127,11 @@
         <span id="activeDrillTitle">Drill</span>
         <span id="modeText">Drag background to pan · wheel to zoom</span>
         <span class="autosave-indicator"><span id="zoomIndicator">100%</span> · Autosaved locally</span>
+        <div class="mobile-canvas-actions" aria-label="Graph controls">
+          <button id="mobileToolsBtn" class="mobile-canvas-button" type="button" aria-controls="toolboxPanel" aria-expanded="false">Tools</button>
+          <button id="mobileFitBtn" class="mobile-canvas-button" type="button">Fit</button>
+          <button id="mobileInspectorBtn" class="mobile-canvas-button" type="button" aria-controls="inspectorPanel" aria-expanded="false">Inspector</button>
+        </div>
       </div>
       <div id="graphViewport" class="graph-viewport" tabindex="0" aria-label="Drill flow graph editor">
         <div id="graphSurface" class="graph-surface">
@@ -138,7 +147,11 @@
       </div>
     </section>
 
-    <aside class="inspector panel">
+    <aside id="inspectorPanel" class="inspector panel">
+      <div class="mobile-drawer-heading">
+        <strong>Inspector</strong>
+        <button id="closeInspectorBtn" class="mobile-drawer-close" type="button" aria-label="Close inspector">×</button>
+      </div>
       <div id="inspectorContent" class="inspector-content">
         <div class="empty-inspector">
           <h2>Inspector</h2>
@@ -147,6 +160,8 @@
       </div>
     </aside>
   </main>
+
+  <div id="mobileDrawerBackdrop" class="mobile-drawer-backdrop" hidden></div>
 
   <dialog id="calibrationDialog" class="calibration-dialog">
     <div class="dialog-frame calibration-frame">
