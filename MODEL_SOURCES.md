@@ -66,6 +66,46 @@ Reference sources:
 The browser implementation uses a fixed-step fourth-order Runge-Kutta
 integrator. The default step is 0.004 s and is user-adjustable.
 
+## Nova launch-speed and spin calibration
+
+The default raw-motor conversion combines two empirical sources:
+
+1. Local no-spin trajectory measurements, evaluated with the current geometry
+   constraint (nozzle height 0.225 m, base-back to nozzle 0.265 m):
+   raw 2025 -> 5.04 m/s, raw 2167 -> 5.39 m/s, raw 2388 -> 5.79 m/s.
+2. Spinsight measurements for Nova speed/spin settings. The published table reports
+   in-flight km/h and rps, so the speed values are not treated as nozzle-exit speed
+   directly. A least-squares overlap correction is first fit against the local
+   launch-speed observations.
+
+The corrected Spinsight speed observations and the local launch-speed observations
+are then fit with one first-order model rather than interpolated point-to-point:
+
+```text
+v_exit [m/s] = 2.431958 + 0.001333941 * raw_wheel_input
+RMSE = 0.160589 m/s over the 21 combined source observations
+```
+
+First-, second-, and third-order fits were compared; their RMSE values were
+approximately 0.1606, 0.1595, and 0.1590 m/s respectively. The negligible reduction
+from extra polynomial terms did not justify the added curvature, so the first-order
+model is used. Guided calibration likewise regularizes its fitted no-spin speed
+points to a straight line.
+
+Spin remains based on the published speed-dependent max-spin-setting / max-rps table.
+At any fixed Nova speed, rps is modeled linearly with the upper-minus-lower wheel
+command difference.
+
+Protocol setting formulas and Spinsight table:
+
+- https://github.com/olanga/nova/wiki/General-information
+- https://github.com/olanga/nova/wiki/Spinsight-measurements-with-Nova-S-Pro
+- Independent high-spin cross-check (7500 / 500 wheels ~= 67 rps):
+  https://www.tabletennisdaily.com/forum/topics/pongbot-nova-s-pro-owners-review-and-discussion-thread.36322/page-12
+
+This is an empirical command-to-ball model, not a manufacturer calibration. Robot-to-robot
+variation, wheel contamination, ball wear and measurement geometry can shift it.
+
 ## Remaining limitations
 
 - The launch state still depends on the current Nova speed/spin calibration.

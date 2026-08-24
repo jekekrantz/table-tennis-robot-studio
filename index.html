@@ -61,11 +61,7 @@
   </header>
 
   <main class="workspace">
-    <aside id="toolboxPanel" class="toolbox panel">
-      <div class="mobile-drawer-heading">
-        <strong>Tools &amp; drills</strong>
-        <button id="closeToolboxBtn" class="mobile-drawer-close" type="button" aria-label="Close tools">×</button>
-      </div>
+    <aside class="toolbox panel">
       <section class="drill-library-section">
         <div class="section-heading-row">
           <h2>Created drills</h2>
@@ -79,7 +75,7 @@
         <div class="library-actions">
           <button id="duplicateDrillBtn" class="button compact ghost" type="button">Duplicate</button>
           <button id="deleteDrillBtn" class="button compact danger" type="button">Delete</button>
-          <button id="resetExamplesBtn" class="button compact ghost" type="button">Load examples</button>
+          <button id="resetExamplesBtn" class="button compact ghost" type="button">Restore defaults</button>
         </div>
         <p id="libraryStatus" class="library-status" aria-live="polite"></p>
       </section>
@@ -127,11 +123,6 @@
         <span id="activeDrillTitle">Drill</span>
         <span id="modeText">Drag background to pan · wheel to zoom</span>
         <span class="autosave-indicator"><span id="zoomIndicator">100%</span> · Autosaved locally</span>
-        <div class="mobile-canvas-actions" aria-label="Graph controls">
-          <button id="mobileToolsBtn" class="mobile-canvas-button" type="button" aria-controls="toolboxPanel" aria-expanded="false">Tools</button>
-          <button id="mobileFitBtn" class="mobile-canvas-button" type="button">Fit</button>
-          <button id="mobileInspectorBtn" class="mobile-canvas-button" type="button" aria-controls="inspectorPanel" aria-expanded="false">Inspector</button>
-        </div>
       </div>
       <div id="graphViewport" class="graph-viewport" tabindex="0" aria-label="Drill flow graph editor">
         <div id="graphSurface" class="graph-surface">
@@ -147,11 +138,7 @@
       </div>
     </section>
 
-    <aside id="inspectorPanel" class="inspector panel">
-      <div class="mobile-drawer-heading">
-        <strong>Inspector</strong>
-        <button id="closeInspectorBtn" class="mobile-drawer-close" type="button" aria-label="Close inspector">×</button>
-      </div>
+    <aside class="inspector panel">
       <div id="inspectorContent" class="inspector-content">
         <div class="empty-inspector">
           <h2>Inspector</h2>
@@ -161,134 +148,154 @@
     </aside>
   </main>
 
-  <div id="mobileDrawerBackdrop" class="mobile-drawer-backdrop" hidden></div>
-
   <dialog id="calibrationDialog" class="calibration-dialog">
     <div class="dialog-frame calibration-frame">
-      <header>
+      <header class="calibration-header">
         <div>
-          <h2>Calibration and trajectory model</h2>
-          <p>Set the robot pose, physical table, air conditions, and aerodynamic model.</p>
+          <h2>Robot calibration</h2>
+          <p>Collect no-spin shots, fit raw motor input to launch speed, and estimate nozzle height.</p>
         </div>
         <button id="closeCalibrationBtn" class="icon-button" type="button" aria-label="Close">×</button>
       </header>
 
       <nav class="calibration-tabs" aria-label="Calibration sections">
-        <button id="calibrationPoseTab" class="calibration-tab active" type="button" data-calibration-tab="pose">Robot & trajectory</button>
-        <button id="calibrationTableTab" class="calibration-tab" type="button" data-calibration-tab="table">Table dimensions</button>
+        <button id="calibrationGuidedTab" class="calibration-tab active" type="button" data-calibration-tab="guided">Guided calibration</button>
+        <button id="calibrationPoseTab" class="calibration-tab" type="button" data-calibration-tab="pose">Model settings</button>
+        <button id="calibrationTableTab" class="calibration-tab" type="button" data-calibration-tab="table">Table</button>
       </nav>
 
-      <section id="calibrationPosePanel" class="calibration-panel">
-        <div class="calibration-grid">
-          <section class="calibration-visual-section">
-            <div class="section-title-row">
-              <div>
-                <h3>Unified top view</h3>
-                <p>Robot pose, table, net, trajectory, and landing use one metre-accurate coordinate system.</p>
-              </div>
-              <span class="model-badge physical-model-badge">Conti et al. 2026 free-flight model</span>
+      <section id="calibrationGuidedPanel" class="calibration-panel guided-calibration-panel">
+        <div class="guided-intro">
+          <div>
+            <strong>How to collect the data</strong>
+            <ol>
+              <li>Use no spin: top and bottom wheel inputs are kept equal.</li>
+              <li>Measure first-bounce distance in <strong>cm</strong>. Table mode can reference the net; ground mode always references the back of the robot base.</li>
+              <li>When calibrating on the table, you can optionally measure clearance from the <strong>bottom of the ball to the top of the net</strong>.</li>
+              <li>Press <strong>Save value & next</strong>. Blank fields are allowed and simply advance the plan.</li>
+            </ol>
+          </div>
+          <button id="guidedResetPlanBtn" class="button compact ghost" type="button">Reset plan</button>
+        </div>
+
+        <div class="guided-layout">
+          <section class="guided-card setup-card">
+            <div class="guided-card-title"><div><span class="step-number">1</span><h3>Setup</h3></div><span class="unit-chip">cm</span></div>
+
+            <fieldset class="placement-switch">
+              <legend>Robot placement</legend>
+              <label><input type="radio" name="guidedPlacement" id="guidedPlacementTable" value="table" checked><span>On table<small>Convenient</small></span></label>
+              <label><input type="radio" name="guidedPlacement" id="guidedPlacementGround" value="ground"><span>On ground<small>Flat floor · longest range</small></span></label>
+            </fieldset>
+
+            <div id="guidedPlacementHelp" class="setup-note"></div>
+
+            <div class="guided-field-grid two">
+              <label class="field"><span>Distance reference</span><select id="guidedDistanceReference"><option value="net">Net</option><option value="near_edge">Near table edge</option><option value="nozzle">Nozzle</option><option value="base_back">Back of robot base</option></select><small id="guidedReferenceHint">0 cm at the net; positive is toward the opponent.</small></label>
+              <label class="field"><span id="guidedNozzleXLabel">Nozzle from near edge</span><span class="input-with-unit"><input id="guidedNozzleXInput" type="number" step="0.1" value="26.5"><small>cm</small></span><small id="guidedNozzleXHint">Positive means over the tabletop.</small></label>
+              <label class="field" id="guidedTableHeightField" hidden><span>Table surface height</span><span class="input-with-unit"><input id="guidedTableHeightInput" type="number" step="0.5" value="76"><small>cm</small></span></label>
+              <label class="field"><span>Repeated balls</span><input id="guidedRepeatCountInput" type="number" min="1" max="12" step="1" value="3"><small>Used by continuous feed so wheel speed settles before you measure.</small></label>
             </div>
-            <svg id="poseSvg" class="pose-svg" viewBox="0 0 760 470" role="img" aria-label="Top view of table, robot pose, and predicted trajectory"></svg>
-            <div id="poseLandingSummary" class="landing-summary"></div>
+
+            <hr class="guided-divider">
+            <div class="guided-card-title compact"><div><h3>Test range</h3></div><span id="guidedShotCountBadge" class="status-badge neutral">15 shots</span></div>
+            <div class="guided-field-grid three">
+              <label class="field"><span>Min elevation</span><span class="input-with-unit"><input id="guidedElevationMinInput" type="number" step="1" value="10"><small>°</small></span></label>
+              <label class="field"><span>Max elevation</span><span class="input-with-unit"><input id="guidedElevationMaxInput" type="number" step="1" value="30"><small>°</small></span></label>
+              <label class="field"><span>Elevations</span><input id="guidedElevationCountInput" type="number" min="2" max="12" step="1" value="5"></label>
+              <label class="field"><span>Min raw speed</span><input id="guidedSpeedMinInput" type="number" step="1" value="2025"><small id="guidedSpeedMinHint">≈ 5.04 m/s from current blended model</small></label>
+              <label class="field"><span>Max raw speed</span><input id="guidedSpeedMaxInput" type="number" step="1" value="2388"><small id="guidedSpeedMaxHint">≈ 5.79 m/s from current blended model</small></label>
+              <label class="field"><span>Speeds / elevation</span><input id="guidedSpeedCountInput" type="number" min="2" max="8" step="1" value="3"></label>
+            </div>
+            <button id="guidedBuildPlanBtn" class="button wide" type="button">Update test plan</button>
           </section>
 
-          <section class="calibration-controls-section">
-            <h3>Robot pose</h3>
+          <section class="guided-card current-shot-card">
+            <div class="guided-card-title"><div><span class="step-number">2</span><h3>Current shot</h3></div><span id="guidedProgressText" class="status-badge neutral">1 / 15</span></div>
+            <div class="current-shot-readout">
+              <div><span>Elevation</span><strong id="guidedCurrentElevation">10°</strong></div>
+              <div><span>Raw wheel input</span><strong id="guidedCurrentSpeed">2025</strong><small id="guidedCurrentSpeedMps">≈ 5.04 m/s</small></div>
+              <div><span>No spin</span><strong>A = B</strong><small>same top / bottom speed</small></div>
+            </div>
+
+            <div class="feed-card">
+              <div><strong>Low-pace continuous feed</strong><small>0.5 Hz. Uses the repeated-ball count, then repeats until stopped.</small></div>
+              <button id="guidedFeedBtn" class="button primary" type="button">Start shooting</button>
+            </div>
+            <p id="guidedFeedStatus" class="helper">Connect Nova to use live shooting. Measurements can still be entered offline.</p>
+
+            <div class="measurement-entry">
+              <label class="field"><span id="guidedDistanceLabel">Landing distance</span><span class="measurement-input"><input id="guidedDistanceInput" inputmode="decimal" type="number" step="0.1" placeholder="e.g. 90"><small>cm</small></span></label>
+              <label class="field net-height-column" id="guidedNetHeightField"><span>Height over net <em>optional</em></span><span class="measurement-input"><input id="guidedNetHeightInput" inputmode="decimal" type="number" step="0.1" placeholder="e.g. 12"><small>cm</small></span><small>Clearance: bottom of ball above top of net.</small></label>
+            </div>
+            <button id="guidedSaveNextBtn" class="button primary guided-save-button" type="button">Save value & next</button>
+            <div class="guided-row-actions"><button id="guidedPreviousBtn" class="button ghost" type="button">← Previous</button><button id="guidedNextBtn" class="button ghost" type="button">Next →</button></div>
+            <p class="blank-ok">Blank values are valid: Save value & next will mark the shot visited and advance.</p>
+          </section>
+        </div>
+
+        <section class="guided-card measurements-card">
+          <div class="guided-card-title"><div><span class="step-number">3</span><h3>Measurements</h3></div><div id="guidedMeasurementSummary" class="measurement-summary"></div></div>
+          <div class="guided-table-wrap">
+            <table class="guided-table"><thead><tr><th>#</th><th>Elev.</th><th>Raw speed</th><th>Distance</th><th class="net-height-column">Net clearance</th><th>Status</th></tr></thead><tbody id="guidedMeasurementBody"></tbody></table>
+          </div>
+        </section>
+
+        <section class="guided-card compute-card">
+          <div class="guided-card-title"><div><span class="step-number">4</span><h3>Compute calibration</h3></div><span id="guidedFitBadge" class="status-badge neutral">Not computed</span></div>
+          <p id="guidedComputeHelp" class="helper">The fit estimates nozzle height and a monotonic raw-input → m/s map. Optional net-clearance values add vertical constraints. The horizontal nozzle reference stays fixed to your setup value.</p>
+          <button id="guidedComputeBtn" class="button primary wide" type="button">Compute calibration</button>
+          <div id="guidedComputeStatus" class="guided-compute-status" aria-live="polite"></div>
+          <div id="guidedResults" class="guided-results" hidden></div>
+        </section>
+      </section>
+
+      <section id="calibrationPosePanel" class="calibration-panel" hidden>
+        <div class="model-settings-layout">
+          <section class="guided-card">
+            <h3>Robot pose & launch model</h3>
+            <p class="helper">Guided calibration updates these values. Fine-tune only if you have independent measurements.</p>
             <div class="field-grid three">
               <label class="field"><span>Robot X from near edge</span><span class="input-with-unit"><input id="poseXInput" type="number" step="0.01"><small>m</small></span></label>
               <label class="field"><span>Robot Y from centre</span><span class="input-with-unit"><input id="poseYInput" type="number" step="0.01"><small>m</small></span></label>
               <label class="field"><span>Direction</span><span class="input-with-unit"><input id="poseYawInput" type="number" step="1"><small>°</small></span></label>
             </div>
+            <label class="field"><span>Physical head orientation</span><select id="rotationTypeInput"><option value="0">Top/underspin — standard (type 0)</option><option value="1">Side/mixed orientation A (type 1)</option><option value="2">Side/mixed orientation B (type 2)</option><option value="3">Side/mixed orientation C (type 3)</option><option value="4">Top/underspin — reversed wheels (type 4)</option><option value="5">Side/mixed A — reversed wheels (type 5)</option><option value="6">Side/mixed B — reversed wheels (type 6)</option><option value="7">Side/mixed C — reversed wheels (type 7)</option></select></label>
+            <label class="field compact-model-field"><span>Nozzle height above support surface</span><span class="input-with-unit"><input id="nozzleHeightInput" type="number" min="0.05" max="1.5" step="0.001"><small>m</small></span></label>
+            <div id="poseLandingSummary" class="landing-summary" hidden></div>
+            <svg id="poseSvg" hidden viewBox="0 0 760 470"></svg>
+            <svg id="calibrationSideTrajectory" hidden viewBox="0 0 760 330"></svg>
+          </section>
 
-            <label class="field">
-              <span>Physical head orientation</span>
-              <select id="rotationTypeInput">
-                <option value="0">Top/underspin — standard (type 0)</option>
-                <option value="1">Side/mixed orientation A (type 1)</option>
-                <option value="2">Side/mixed orientation B (type 2)</option>
-                <option value="3">Side/mixed orientation C (type 3)</option>
-                <option value="4">Top/underspin — reversed wheels (type 4)</option>
-                <option value="5">Side/mixed A — reversed wheels (type 5)</option>
-                <option value="6">Side/mixed B — reversed wheels (type 6)</option>
-                <option value="7">Side/mixed C — reversed wheels (type 7)</option>
-              </select>
-            </label>
-            <p class="helper warning-text">Orientation names are provisional until every physical head position is verified.</p>
-
-            <section class="trajectory-model-summary">
-              <div class="trajectory-model-heading">
-                <div>
-                  <h3>Trajectory model</h3>
-                  <p>Drag and Magnus model from <a href="https://arxiv.org/abs/2606.28805" target="_blank" rel="noopener noreferrer">Conti et al. (2026), arXiv:2606.28805</a> for the first free-flight segment. Spin is held constant during this short flight, matching the published model.</p>
-                </div>
-                <span class="model-preset-chip">Conti et al. 2026</span>
-              </div>
-
-              <label class="field compact-model-field">
-                <span>Nozzle height above table</span>
-                <span class="input-with-unit"><input id="nozzleHeightInput" type="number" min="0.05" max="1.5" step="0.001"><small>m</small></span>
-              </label>
-
-              <div class="model-defaults-summary">
-                <span>40 mm ball</span>
-                <span>2.7 g</span>
-                <span>20 °C</span>
-                <span>101.325 kPa</span>
-                <span>No wind</span>
-              </div>
-            </section>
-
+          <section class="guided-card">
+            <h3>Trajectory model</h3>
+            <p class="helper">Drag and Magnus model from <a href="https://arxiv.org/abs/2606.28805" target="_blank" rel="noopener noreferrer">Conti et al. (2026), arXiv:2606.28805</a>.</p>
             <details class="advanced-panel trajectory-advanced-panel">
               <summary>Advanced trajectory settings</summary>
-              <p class="helper">Normally leave these at the published-model/ITTF defaults. Change them only for environmental correction, experiments, or model fitting.</p>
-
               <div class="field-grid three advanced-fields">
                 <label class="field"><span>Ball diameter</span><span class="input-with-unit"><input id="ballDiameterInput" type="number" min="0.01" max="0.1" step="0.0001"><small>m</small></span></label>
                 <label class="field"><span>Ball mass</span><span class="input-with-unit"><input id="ballMassInput" type="number" min="0.5" max="20" step="0.01"><small>g</small></span></label>
                 <label class="field"><span>Gravity</span><span class="input-with-unit"><input id="gravityInput" type="number" min="1" max="20" step="0.0001"><small>m/s²</small></span></label>
-
                 <label class="field"><span>Air temperature</span><span class="input-with-unit"><input id="airTemperatureInput" type="number" min="-30" max="60" step="0.1"><small>°C</small></span></label>
                 <label class="field"><span>Air pressure</span><span class="input-with-unit"><input id="airPressureInput" type="number" min="70" max="110" step="0.01"><small>kPa</small></span></label>
                 <label class="field"><span>Integration step</span><span class="input-with-unit"><input id="timeStepInput" type="number" min="0.001" max="0.02" step="0.001"><small>s</small></span></label>
-
                 <label class="field"><span>Wind along table</span><span class="input-with-unit"><input id="windXInput" type="number" min="-10" max="10" step="0.01"><small>m/s</small></span></label>
                 <label class="field"><span>Wind across table</span><span class="input-with-unit"><input id="windYInput" type="number" min="-10" max="10" step="0.01"><small>m/s</small></span></label>
                 <label class="field"><span>Vertical air movement</span><span class="input-with-unit"><input id="windZInput" type="number" min="-10" max="10" step="0.01"><small>m/s</small></span></label>
-
                 <label class="field"><span>Drag coefficient scale</span><input id="dragScaleInput" type="number" min="0.1" max="3" step="0.01"></label>
                 <label class="field"><span>Magnus coefficient scale</span><input id="magnusScaleInput" type="number" min="0.1" max="3" step="0.01"></label>
                 <label class="field"><span>Maximum flight time</span><span class="input-with-unit"><input id="maxFlightInput" type="number" min="0.5" max="10" step="0.1"><small>s</small></span></label>
               </div>
-
               <div class="physics-readouts" id="physicsReadouts"></div>
-
-              <details class="nested-advanced-panel">
-                <summary>Air-property constants</summary>
-                <p class="helper">Dry-air density uses the ideal-gas equation. Dynamic viscosity uses Sutherland’s law.</p>
-                <div class="field-grid three advanced-fields">
-                  <label class="field"><span>Dry-air gas constant</span><span class="input-with-unit"><input id="airGasConstantInput" type="number" min="250" max="330" step="0.01"><small>J/(kg·K)</small></span></label>
-                  <label class="field"><span>Reference viscosity</span><span class="input-with-unit"><input id="sutherlandMu0Input" type="number" min="0.000001" max="0.0001" step="0.0000001"><small>Pa·s</small></span></label>
-                  <label class="field"><span>Reference temperature</span><span class="input-with-unit"><input id="sutherlandT0Input" type="number" min="150" max="500" step="0.01"><small>K</small></span></label>
-                  <label class="field"><span>Sutherland constant</span><span class="input-with-unit"><input id="sutherlandSInput" type="number" min="1" max="500" step="0.1"><small>K</small></span></label>
-                </div>
-              </details>
-
-              <details class="nested-advanced-panel">
-                <summary>Aerodynamic coefficients and diagnostics</summary>
-                <p class="helper">The fitted coefficient tables are shown for inspection. The application normally uses them unchanged.</p>
-                <div id="aeroCoefficientTables" class="aero-coefficient-tables"></div>
-                <div id="aeroDiagnostics" class="aero-diagnostics"></div>
-              </details>
-
-              <div class="model-action-row">
-                <button id="resetPhysicsBtn" class="button compact ghost" type="button">Reset published-model defaults</button>
-              </div>
+              <details class="nested-advanced-panel"><summary>Air-property constants</summary><div class="field-grid three advanced-fields"><label class="field"><span>Dry-air gas constant</span><span class="input-with-unit"><input id="airGasConstantInput" type="number" min="250" max="330" step="0.01"><small>J/(kg·K)</small></span></label><label class="field"><span>Reference viscosity</span><span class="input-with-unit"><input id="sutherlandMu0Input" type="number" min="0.000001" max="0.0001" step="0.0000001"><small>Pa·s</small></span></label><label class="field"><span>Reference temperature</span><span class="input-with-unit"><input id="sutherlandT0Input" type="number" min="150" max="500" step="0.01"><small>K</small></span></label><label class="field"><span>Sutherland constant</span><span class="input-with-unit"><input id="sutherlandSInput" type="number" min="1" max="500" step="0.1"><small>K</small></span></label></div></details>
+              <details class="nested-advanced-panel"><summary>Aerodynamic coefficients and diagnostics</summary><div id="aeroCoefficientTables" class="aero-coefficient-tables"></div><div id="aeroDiagnostics" class="aero-diagnostics"></div></details>
+              <button id="resetPhysicsBtn" class="button compact ghost" type="button">Reset published-model defaults</button>
             </details>
+          </section>
 
-            <details class="advanced-panel nova-scaling-panel">
-              <summary>Nova motor scaling and Spinsight measurements</summary>
-              <p class="helper">The default curve uses measured ball speed and maximum backspin results. The first three low-speed rows are smooth estimates because those measurements were unavailable.</p>
-
+          <section class="guided-card">
+            <details class="advanced-panel nova-scaling-panel" open>
+              <summary>Nova motor scaling</summary>
               <div class="field-grid three advanced-fields">
                 <label class="field"><span>Wheel base speed</span><span class="input-with-unit"><input id="wheelBaseRpmInput" type="number" min="0" max="20000" step="0.001"><small>rpm</small></span></label>
                 <label class="field"><span>RPM per Nova speed unit</span><span class="input-with-unit"><input id="wheelRpmPerSpeedInput" type="number" min="0" max="5000" step="0.001"><small>rpm</small></span></label>
@@ -297,80 +304,26 @@
                 <label class="field"><span>Up/down units per degree</span><input id="upDownPerDegreeInput" type="number" min="0.01" max="30" step="0.01"></label>
                 <label class="field"><span>Yaw degrees per placement unit</span><span class="input-with-unit"><input id="yawPerPlacementInput" type="number" min="0.01" max="30" step="0.01"><small>°</small></span></label>
               </div>
-
-              <div class="nova-scale-heading">
-                <div>
-                  <h4>Spinsight reference curve</h4>
-                  <p>Speed is interpolated from measured km/h. Spin setting is scaled against the maximum measured rps at that speed.</p>
-                </div>
-                <button id="resetSpinsightBtn" class="button compact ghost" type="button">Reset measured defaults</button>
-              </div>
-
-              <div class="nova-scale-table-wrap">
-                <table class="nova-scale-table">
-                  <thead>
-                    <tr>
-                      <th>Nova speed</th>
-                      <th>Ball speed</th>
-                      <th>Maximum spin setting</th>
-                      <th>Maximum ball spin</th>
-                    </tr>
-                  </thead>
-                  <tbody id="novaScaleTableBody"></tbody>
-                </table>
-              </div>
-              <p class="helper">Rows marked estimated are extrapolated below the first measured speed. All other defaults come from the Spinsight capability test.</p>
+              <div class="nova-scale-table-wrap"><table class="nova-scale-table"><thead><tr><th>Nova speed</th><th>Ball speed</th><th>Maximum spin setting</th><th>Maximum ball spin</th></tr></thead><tbody id="novaScaleTableBody"></tbody></table></div>
+              <button id="resetSpinsightBtn" class="button compact ghost" type="button">Reset measured defaults</button>
             </details>
+          </section>
 
-            <section class="test-shot-panel">
-              <h3>Calibration test shot</h3>
-              <div class="field-grid two">
-                <label class="field"><span>Ball speed</span><span class="input-with-unit"><input id="testSpeedInput" type="number" min="1" max="20" step="0.1"><small>m/s</small></span></label>
-                <label class="field"><span>Spin</span><span class="input-with-unit"><input id="testSpinInput" type="number" min="-120" max="120" step="1"><small>rps</small></span></label>
-                <label class="field"><span>Elevation</span><span class="input-with-unit"><input id="testElevationInput" type="number" min="-20" max="45" step="0.5"><small>°</small></span></label>
-                <label class="field"><span>Aim left/right</span><span class="input-with-unit"><input id="testAimInput" type="number" min="-60" max="60" step="0.5"><small>°</small></span></label>
-              </div>
-              <p class="spin-explainer"><strong>Spin:</strong> negative = underspin, 0 = no spin, positive = topspin.</p>
-              <div class="test-shot-command-card">
-                <div>
-                  <strong>Physical one-ball test</strong>
-                  <p id="testShotConnectionState">Connect a Nova to fire the configured shot.</p>
-                </div>
-                <div id="testShotWireSummary" class="test-shot-wire-summary"></div>
-              </div>
-              <button id="simulateTestShotBtn" class="button primary wide" type="button">Connect &amp; fire one test ball</button>
-            </section>
+          <section class="guided-card test-shot-panel">
+            <h3>Physical test shot</h3>
+            <div class="field-grid two"><label class="field"><span>Ball speed</span><span class="input-with-unit"><input id="testSpeedInput" type="number" min="1" max="20" step="0.1"><small>m/s</small></span></label><label class="field"><span>Spin</span><span class="input-with-unit"><input id="testSpinInput" type="number" min="-120" max="120" step="1"><small>rps</small></span></label><label class="field"><span>Elevation</span><span class="input-with-unit"><input id="testElevationInput" type="number" min="-20" max="45" step="0.5"><small>°</small></span></label><label class="field"><span>Aim left/right</span><span class="input-with-unit"><input id="testAimInput" type="number" min="-60" max="60" step="0.5"><small>°</small></span></label></div>
+            <div class="test-shot-command-card"><div><strong>Physical one-ball test</strong><p id="testShotConnectionState">Connect a Nova to fire the configured shot.</p></div><div id="testShotWireSummary" class="test-shot-wire-summary"></div></div>
+            <button id="simulateTestShotBtn" class="button primary wide" type="button">Connect & fire one test ball</button>
           </section>
         </div>
-
-        <section class="single-side-result">
-          <h3>Side view — same physical scale in both axes</h3>
-          <svg id="calibrationSideTrajectory" class="trajectory-chart" viewBox="0 0 760 330"></svg>
-        </section>
       </section>
 
       <section id="calibrationTablePanel" class="calibration-panel" hidden>
-        <div class="table-calibration-grid">
-          <section>
-            <div class="section-title-row">
-              <div>
-                <h3>Table and net</h3>
-                <p>Defaults are regulation dimensions. All trajectory views use these values.</p>
-              </div>
-              <button id="resetRegulationBtn" class="button compact ghost" type="button">Reset regulation defaults</button>
-            </div>
-            <div class="field-grid two table-dimension-fields">
-              <label class="field"><span>Table length</span><span class="input-with-unit"><input id="tableLengthInput" type="number" min="0.5" max="10" step="0.001"><small>m</small></span></label>
-              <label class="field"><span>Table width</span><span class="input-with-unit"><input id="tableWidthInput" type="number" min="0.3" max="5" step="0.001"><small>m</small></span></label>
-              <label class="field"><span>Net height above surface</span><span class="input-with-unit"><input id="netHeightInput" type="number" min="0.01" max="1" step="0.0005"><small>m</small></span></label>
-            </div>
-            <p class="helper">Ball diameter is configured under Robot & trajectory. Net clearance is measured from the bottom of the ball to the top of the net.</p>
-          </section>
-          <section>
-            <h3>Scale-accurate dimensions</h3>
-            <svg id="tableDimensionSvg" class="table-dimension-svg" viewBox="0 0 760 520" role="img" aria-label="Scale accurate top and side views of the configured table"></svg>
-          </section>
-        </div>
+        <section class="guided-card table-settings-card">
+          <div class="section-title-row"><div><h3>Table and net</h3><p>Regulation defaults are used by the trajectory and guided calibration models.</p></div><button id="resetRegulationBtn" class="button compact ghost" type="button">Reset regulation defaults</button></div>
+          <div class="field-grid three table-dimension-fields"><label class="field"><span>Table length</span><span class="input-with-unit"><input id="tableLengthInput" type="number" min="0.5" max="10" step="0.001"><small>m</small></span></label><label class="field"><span>Table width</span><span class="input-with-unit"><input id="tableWidthInput" type="number" min="0.3" max="5" step="0.001"><small>m</small></span></label><label class="field"><span>Net height above surface</span><span class="input-with-unit"><input id="netHeightInput" type="number" min="0.01" max="1" step="0.0005"><small>m</small></span></label></div>
+          <svg id="tableDimensionSvg" hidden viewBox="0 0 760 520"></svg>
+        </section>
       </section>
     </div>
   </dialog>
@@ -442,6 +395,8 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="pongbot-protocol.js"></script>
   <script src="pongbot-ble.js"></script>
+  <script src="guided-calibration.js"></script>
+  <script src="launch-model.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

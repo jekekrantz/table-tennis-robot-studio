@@ -6,7 +6,7 @@
   // Working geometric estimate: center of the Nova S Pro ball exit above the table
   // with the head nominally level. This is not a manufacturer-specified dimension;
   // calibrate against the physical robot for precision trajectory work.
-  const DEFAULT_NOVA_NOZZLE_HEIGHT_M = 0.205;
+  const DEFAULT_NOVA_NOZZLE_HEIGHT_M = 0.225;
   const SURFACE_WIDTH = 2600;
   const SURFACE_HEIGHT = 1800;
   const MIN_GRAPH_ZOOM = 0.45;
@@ -16,6 +16,8 @@
   const MAX_TRANSITIONS = 1200;
 
   const $ = (id) => document.getElementById(id);
+  const GuidedCalibration = globalThis.GuidedCalibration;
+  const LaunchModel = globalThis.NovaLaunchModel;
   const els = {
     repetitionsInput: $("repetitionsInput"),
     repetitionsDownBtn: $("repetitionsDownBtn"),
@@ -58,21 +60,57 @@
     edgeLayer: $("edgeLayer"),
     nodeLayer: $("nodeLayer"),
     emptyHint: $("emptyHint"),
-    toolboxPanel: $("toolboxPanel"),
-    inspectorPanel: $("inspectorPanel"),
     inspectorContent: $("inspectorContent"),
-    mobileToolsBtn: $("mobileToolsBtn"),
-    mobileFitBtn: $("mobileFitBtn"),
-    mobileInspectorBtn: $("mobileInspectorBtn"),
-    closeToolboxBtn: $("closeToolboxBtn"),
-    closeInspectorBtn: $("closeInspectorBtn"),
-    mobileDrawerBackdrop: $("mobileDrawerBackdrop"),
     calibrationDialog: $("calibrationDialog"),
     closeCalibrationBtn: $("closeCalibrationBtn"),
     calibrationPoseTab: $("calibrationPoseTab"),
     calibrationTableTab: $("calibrationTableTab"),
     calibrationPosePanel: $("calibrationPosePanel"),
     calibrationTablePanel: $("calibrationTablePanel"),
+    calibrationGuidedTab: $("calibrationGuidedTab"),
+    calibrationGuidedPanel: $("calibrationGuidedPanel"),
+    guidedResetPlanBtn: $("guidedResetPlanBtn"),
+    guidedPlacementTable: $("guidedPlacementTable"),
+    guidedPlacementGround: $("guidedPlacementGround"),
+    guidedPlacementHelp: $("guidedPlacementHelp"),
+    guidedDistanceReference: $("guidedDistanceReference"),
+    guidedReferenceHint: $("guidedReferenceHint"),
+    guidedNozzleXLabel: $("guidedNozzleXLabel"),
+    guidedNozzleXInput: $("guidedNozzleXInput"),
+    guidedNozzleXHint: $("guidedNozzleXHint"),
+    guidedTableHeightField: $("guidedTableHeightField"),
+    guidedTableHeightInput: $("guidedTableHeightInput"),
+    guidedRepeatCountInput: $("guidedRepeatCountInput"),
+    guidedElevationMinInput: $("guidedElevationMinInput"),
+    guidedElevationMaxInput: $("guidedElevationMaxInput"),
+    guidedElevationCountInput: $("guidedElevationCountInput"),
+    guidedSpeedMinInput: $("guidedSpeedMinInput"),
+    guidedSpeedMaxInput: $("guidedSpeedMaxInput"),
+    guidedSpeedCountInput: $("guidedSpeedCountInput"),
+    guidedSpeedMinHint: $("guidedSpeedMinHint"),
+    guidedSpeedMaxHint: $("guidedSpeedMaxHint"),
+    guidedShotCountBadge: $("guidedShotCountBadge"),
+    guidedBuildPlanBtn: $("guidedBuildPlanBtn"),
+    guidedProgressText: $("guidedProgressText"),
+    guidedCurrentElevation: $("guidedCurrentElevation"),
+    guidedCurrentSpeed: $("guidedCurrentSpeed"),
+    guidedCurrentSpeedMps: $("guidedCurrentSpeedMps"),
+    guidedFeedBtn: $("guidedFeedBtn"),
+    guidedFeedStatus: $("guidedFeedStatus"),
+    guidedDistanceLabel: $("guidedDistanceLabel"),
+    guidedDistanceInput: $("guidedDistanceInput"),
+    guidedNetHeightField: $("guidedNetHeightField"),
+    guidedNetHeightInput: $("guidedNetHeightInput"),
+    guidedSaveNextBtn: $("guidedSaveNextBtn"),
+    guidedPreviousBtn: $("guidedPreviousBtn"),
+    guidedNextBtn: $("guidedNextBtn"),
+    guidedMeasurementBody: $("guidedMeasurementBody"),
+    guidedMeasurementSummary: $("guidedMeasurementSummary"),
+    guidedComputeBtn: $("guidedComputeBtn"),
+    guidedComputeHelp: $("guidedComputeHelp"),
+    guidedComputeStatus: $("guidedComputeStatus"),
+    guidedFitBadge: $("guidedFitBadge"),
+    guidedResults: $("guidedResults"),
     poseSvg: $("poseSvg"),
     poseLandingSummary: $("poseLandingSummary"),
     poseXInput: $("poseXInput"),
@@ -153,8 +191,6 @@
   let connectionDrag = null;
   let canvasPan = null;
   let graphZoom = 1;
-  const graphTouchPointers = new Map();
-  let pinchZoom = null;
   let poseDrag = null;
   let suppressClickUntil = 0;
   let toastTimer = null;
@@ -163,6 +199,8 @@
   let playbackRunning = false;
   let calibrationTestRunning = false;
   let calibrationTestMessage = "";
+  let calibrationFeedRunning = false;
+  let calibrationFeedToken = 0;
   let activeNodeRef = null;
   let activeEdgeRef = null;
   let runtimeCounterDisplay = new Map();
@@ -186,7 +224,7 @@
   function initializeLibrary() {
     const loaded = loadLibrary();
     if (loaded && Array.isArray(loaded.drills) && loaded.drills.length > 0) return loaded;
-    startupNotice = "No usable saved drill library was found, so the example drills were restored.";
+    startupNotice = "No usable saved drill library was found, so the default training library was restored.";
     return makeSampleLibrary();
   }
 
@@ -285,12 +323,49 @@
       upDownPerDegree: 3,
       yawDegreesPerPlacement: 2.2,
       spinsightCurve: spinsightReferenceCurve(),
+      rawSpeedMap: LaunchModel
+        ? LaunchModel.constants.LOCAL_EXIT_SPEED_MAP.map(point => ({ raw: point.raw, speedMps: point.speedMps }))
+        : [
+            { raw: 2025, speedMps: 5.04 },
+            { raw: 2167, speedMps: 5.39 },
+            { raw: 2388, speedMps: 5.79 },
+          ],
+    };
+  }
+
+  function defaultGuidedCalibration() {
+    const plan = GuidedCalibration ? GuidedCalibration.buildPlan({
+      placement: "table",
+      elevationMinDeg: 10,
+      elevationMaxDeg: 30,
+      elevationCount: 5,
+      speedMinRaw: 2025,
+      speedMaxRaw: 2388,
+      speedCount: 3,
+    }) : { shots: [] };
+    return {
+      placement: "table",
+      distanceReference: "net",
+      nozzleXcm: 26.5,
+      tableHeightCm: 76,
+      repeatCount: 3,
+      elevationMinDeg: 10,
+      elevationMaxDeg: 30,
+      elevationCount: 5,
+      speedMinRaw: 2025,
+      speedMaxRaw: 2388,
+      speedCount: 3,
+      currentIndex: 0,
+      shots: plan.shots || [],
+      lastResult: null,
     };
   }
 
   function defaultCalibration() {
     return {
-      pose: { x: -0.18, y: 0, yawDeg: 0 },
+      pose: { x: 0.265, y: 0, yawDeg: 0 },
+      placementMode: "table",
+      tableHeight: 0.76,
       table: regulationTable(),
       rotationType: 0,
       nozzleHeight: DEFAULT_NOVA_NOZZLE_HEIGHT_M,
@@ -300,6 +375,7 @@
       physics: defaultPhysicsCalibration(),
       nova: defaultNovaCalibration(),
       testShot: { speedMps: 8.0, spinRps: 22, elevationDeg: 4, aimDeg: 0 },
+      guided: defaultGuidedCalibration(),
     };
   }
 
@@ -360,59 +436,297 @@
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  function makeSampleLibrary() {
-    const serve = defaultDrill("Serve + third ball");
-    const serve1 = makeShot(serve, "Short underspin serve");
-    serve1.x = 210; serve1.y = 260;
-    serve1.params = { speedMps: 5.5, spinRps: -30, elevationDeg: 5, aimDeg: -3 };
-    const serve2 = makeShot(serve, "Third-ball forehand");
-    serve2.x = 560; serve2.y = 260;
-    serve2.params = { speedMps: 9.2, spinRps: 30, elevationDeg: 3.5, aimDeg: 8 };
-    serve.nodes.push(serve1, serve2);
-    serve.startNodeId = serve1.id;
-    serve.edges.push({
-      id: makeId("edge"), source: serve1.id, sourceSlot: "next", target: serve2.id,
-      weight: 1, delaySeconds: 1.1
+  const DEFAULT_LIBRARY_VERSION = 2;
+  const LEGACY_BUILT_IN_DRILL_NAMES = [
+    "Match-play mix",
+    "Serve + third ball",
+    "Two forehands then backhand",
+  ];
+
+  // These feeds were solved against the current default trajectory model with the
+  // robot centered at the near edge (nozzle x=0.265 m, y=0) and a 22.5 cm nozzle
+  // height. Targets deliberately stay well inside the table and use 8–12 cm of
+  // modeled net clearance so a few centimetres of real-world placement variation
+  // should not turn normal feeds into edge/net balls.
+  const DEFAULT_SHOT_PRESETS = Object.freeze({
+    noSpinCenter: {
+      label: "No-spin center",
+      params: { speedMps: 5.97, spinRps: 0, elevationDeg: 12.5, aimDeg: 0 },
+      target: { xM: 2.154, yM: 0, netClearanceCm: 10.1 },
+    },
+    shortNoSpin: {
+      label: "Short no-spin",
+      params: { speedMps: 5.01, spinRps: 0, elevationDeg: 17.1, aimDeg: 0 },
+      target: { xM: 1.950, yM: 0, netClearanceCm: 10.0 },
+    },
+    topspinForehand: {
+      label: "Topspin to forehand",
+      params: { speedMps: 7.63, spinRps: 22, elevationDeg: 11.0, aimDeg: 13.6 },
+      target: { xM: 2.253, yM: 0.481, netClearanceCm: 10.1 },
+    },
+    topspinBackhand: {
+      label: "Topspin to backhand",
+      params: { speedMps: 7.63, spinRps: 22, elevationDeg: 11.0, aimDeg: -13.6 },
+      target: { xM: 2.253, yM: -0.481, netClearanceCm: 10.1 },
+    },
+    topspinElbow: {
+      label: "Topspin to elbow",
+      params: { speedMps: 7.35, spinRps: 22, elevationDeg: 11.3, aimDeg: 0 },
+      target: { xM: 2.252, yM: 0, netClearanceCm: 10.0 },
+    },
+    heavyTopspin: {
+      label: "Heavy topspin center",
+      params: { speedMps: 7.06, spinRps: 35, elevationDeg: 13.3, aimDeg: 0 },
+      target: { xM: 2.249, yM: 0, netClearanceCm: 12.0 },
+    },
+    backspinForehand: {
+      label: "Backspin to forehand",
+      params: { speedMps: 5.12, spinRps: -18, elevationDeg: 15.3, aimDeg: 13.0 },
+      target: { xM: 2.082, yM: 0.419, netClearanceCm: 12.1 },
+    },
+    backspinBackhand: {
+      label: "Backspin to backhand",
+      params: { speedMps: 5.12, spinRps: -18, elevationDeg: 15.3, aimDeg: -13.0 },
+      target: { xM: 2.082, yM: -0.419, netClearanceCm: 12.1 },
+    },
+    backspinCenter: {
+      label: "Backspin center",
+      params: { speedMps: 5.00, spinRps: -18, elevationDeg: 15.7, aimDeg: 0 },
+      target: { xM: 2.081, yM: 0, netClearanceCm: 12.0 },
+    },
+    fastDeepForehand: {
+      label: "Fast deep to forehand",
+      params: { speedMps: 8.64, spinRps: 15, elevationDeg: 8.9, aimDeg: 12.4 },
+      target: { xM: 2.450, yM: 0.480, netClearanceCm: 10.0 },
+    },
+    fastDeepBackhand: {
+      label: "Fast deep to backhand",
+      params: { speedMps: 8.64, spinRps: 15, elevationDeg: 8.9, aimDeg: -12.4 },
+      target: { xM: 2.450, yM: -0.480, netClearanceCm: 10.0 },
+    },
+    fastDeepCenter: {
+      label: "Fast deep center",
+      params: { speedMps: 8.38, spinRps: 15, elevationDeg: 9.1, aimDeg: 0 },
+      target: { xM: 2.450, yM: 0, netClearanceCm: 10.0 },
+    },
+    middleForehandTopspin: {
+      label: "Topspin to forehand-middle",
+      params: { speedMps: 7.40, spinRps: 22, elevationDeg: 11.2, aimDeg: 5.75 },
+      target: { xM: 2.249, yM: 0.200, netClearanceCm: 10.0 },
+    },
+    middleBackhandTopspin: {
+      label: "Topspin to backhand-middle",
+      params: { speedMps: 7.40, spinRps: 22, elevationDeg: 11.2, aimDeg: -5.75 },
+      target: { xM: 2.249, yM: -0.200, netClearanceCm: 10.0 },
+    },
+  });
+
+  function presetShot(drill, key, label = null) {
+    const preset = DEFAULT_SHOT_PRESETS[key];
+    if (!preset) throw new Error(`Unknown built-in shot preset ${key}`);
+    const shot = makeShot(drill, label || preset.label);
+    shot.params = { ...preset.params };
+    return shot;
+  }
+
+  function layoutSequence(nodes) {
+    nodes.forEach((node, index) => {
+      const column = index % 4;
+      const row = Math.floor(index / 4);
+      node.x = 150 + column * 320;
+      node.y = 220 + row * 230;
     });
+  }
 
-    const pattern = defaultDrill("Two forehands then backhand");
-    const fh = makeShot(pattern, "Forehand drive");
-    fh.x = 190; fh.y = 250;
-    fh.params = { speedMps: 8.7, spinRps: 25, elevationDeg: 4, aimDeg: 9 };
-    const counter = makeCounter("Repeat forehand once");
-    counter.x = 500; counter.y = 250; counter.startCount = 1;
-    const bh = makeShot(pattern, "Backhand push");
-    bh.x = 830; bh.y = 390;
-    bh.params = { speedMps: 6.2, spinRps: -22, elevationDeg: 6, aimDeg: -8 };
-    pattern.nodes.push(fh, counter, bh);
-    pattern.startNodeId = fh.id;
-    pattern.edges.push(
-      { id: makeId("edge"), source: fh.id, sourceSlot: "next", target: counter.id, weight: 1, delaySeconds: .85 },
-      { id: makeId("edge"), source: counter.id, sourceSlot: "A", target: fh.id, weight: 1, delaySeconds: .8 },
-      { id: makeId("edge"), source: counter.id, sourceSlot: "B", target: bh.id, weight: 1, delaySeconds: .9 }
-    );
+  function sequenceDrill(name, steps, {
+    repetitions = 12,
+    intervalSeconds = .78,
+    labels = [],
+  } = {}) {
+    const drill = defaultDrill(name);
+    drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
+    const nodes = steps.map((key, index) => presetShot(drill, key, labels[index] || null));
+    layoutSequence(nodes);
+    drill.nodes.push(...nodes);
+    drill.startNodeId = nodes[0]?.id ?? null;
+    nodes.slice(0, -1).forEach((node, index) => {
+      drill.edges.push({
+        id: makeId("edge"), source: node.id, sourceSlot: "next", target: nodes[index + 1].id,
+        weight: 1, delaySeconds: intervalSeconds,
+      });
+    });
+    return drill;
+  }
 
-    const main = defaultDrill("Match-play mix");
-    main.settings = { repetitions: 5, delayBetweenSets: 1.5 };
-    const random = makeRandom("Choose a rally pattern");
-    random.x = 220; random.y = 300;
-    const serveNode = makeDrillNode("Serve pattern", serve.id);
-    serveNode.x = 570; serveNode.y = 190;
-    const rallyNode = makeDrillNode("Rally pattern", pattern.id);
-    rallyNode.x = 570; rallyNode.y = 430;
-    main.nodes.push(random, serveNode, rallyNode);
-    main.startNodeId = random.id;
-    main.edges.push(
-      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: serveNode.id, weight: 60, delaySeconds: 0 },
-      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: rallyNode.id, weight: 40, delaySeconds: 0 }
+  function singleShotDrill(name, presetKey, { repetitions = 30, intervalSeconds = .8 } = {}) {
+    return sequenceDrill(name, [presetKey], { repetitions, intervalSeconds });
+  }
+
+  function randomDrill(name, choices, {
+    repetitions = 30,
+    intervalSeconds = .8,
+    randomLabel = "Random placement",
+  } = {}) {
+    const drill = defaultDrill(name);
+    drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
+    const random = makeRandom(randomLabel);
+    random.x = 170; random.y = 330;
+    drill.nodes.push(random);
+    drill.startNodeId = random.id;
+    choices.forEach((choice, index) => {
+      const shot = presetShot(drill, choice.key, choice.label || null);
+      shot.x = 560;
+      shot.y = 130 + index * 210;
+      drill.nodes.push(shot);
+      drill.edges.push({
+        id: makeId("edge"), source: random.id, sourceSlot: "branch", target: shot.id,
+        weight: choice.weight ?? 1, delaySeconds: 0,
+      });
+    });
+    return drill;
+  }
+
+  function backhandRandomForehandDrill() {
+    const drill = defaultDrill("Drill: Backhand + random forehand");
+    drill.settings = { repetitions: 16, delayBetweenSets: .8 };
+    const bh = presetShot(drill, "topspinBackhand", "Backhand corner");
+    bh.x = 150; bh.y = 330;
+    const random = makeRandom("Middle or wide forehand");
+    random.x = 475; random.y = 330;
+    const middle = presetShot(drill, "middleForehandTopspin", "Forehand from middle");
+    middle.x = 820; middle.y = 180;
+    const wide = presetShot(drill, "topspinForehand", "Wide forehand");
+    wide.x = 820; wide.y = 480;
+    drill.nodes.push(bh, random, middle, wide);
+    drill.startNodeId = bh.id;
+    drill.edges.push(
+      { id: makeId("edge"), source: bh.id, sourceSlot: "next", target: random.id, weight: 1, delaySeconds: .8 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: middle.id, weight: 1, delaySeconds: 0 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: wide.id, weight: 1, delaySeconds: 0 },
     );
+    return drill;
+  }
+
+  function forehandBackhandRandomDrill() {
+    const drill = defaultDrill("Drill: Forehand, backhand, random");
+    drill.settings = { repetitions: 12, delayBetweenSets: .78 };
+    const fh = presetShot(drill, "topspinForehand", "Forehand");
+    const bh = presetShot(drill, "topspinBackhand", "Backhand");
+    const random = makeRandom("Third ball anywhere");
+    fh.x = 140; fh.y = 330;
+    bh.x = 445; bh.y = 330;
+    random.x = 750; random.y = 330;
+    const options = [
+      presetShot(drill, "topspinBackhand", "Random · backhand"),
+      presetShot(drill, "topspinElbow", "Random · elbow"),
+      presetShot(drill, "topspinForehand", "Random · forehand"),
+    ];
+    options.forEach((shot, index) => { shot.x = 1080; shot.y = 100 + index * 230; });
+    drill.nodes.push(fh, bh, random, ...options);
+    drill.startNodeId = fh.id;
+    drill.edges.push(
+      { id: makeId("edge"), source: fh.id, sourceSlot: "next", target: bh.id, weight: 1, delaySeconds: .78 },
+      { id: makeId("edge"), source: bh.id, sourceSlot: "next", target: random.id, weight: 1, delaySeconds: .78 },
+      ...options.map(shot => ({ id: makeId("edge"), source: random.id, sourceSlot: "branch", target: shot.id, weight: 1, delaySeconds: 0 })),
+    );
+    return drill;
+  }
+
+  function makeSampleLibrary() {
+    // Common coaching patterns: alternating FH/BH, 2-2, Falkenberg/two-one,
+    // systematic side-to-side footwork, semi-random placement, and three-spot
+    // random work. Shot presets are also exposed as simple repeatable drills.
+    const alternating = sequenceDrill(
+      "Drill: Forehand / backhand alternating",
+      ["topspinForehand", "topspinBackhand"],
+      { repetitions: 18, intervalSeconds: .78, labels: ["Forehand", "Backhand"] }
+    );
+    const twoTwo = sequenceDrill(
+      "Drill: 2-2 forehand / backhand",
+      ["topspinForehand", "topspinForehand", "topspinBackhand", "topspinBackhand"],
+      { repetitions: 10, intervalSeconds: .76, labels: ["Forehand 1", "Forehand 2", "Backhand 1", "Backhand 2"] }
+    );
+    const falkenberg = sequenceDrill(
+      "Drill: Falkenberg",
+      ["topspinBackhand", "topspinBackhand", "topspinForehand"],
+      { repetitions: 12, intervalSeconds: .82, labels: ["Backhand", "Pivot forehand", "Wide forehand"] }
+    );
+    const threePoint = sequenceDrill(
+      "Drill: Three-point footwork",
+      ["topspinBackhand", "topspinElbow", "topspinForehand"],
+      { repetitions: 14, intervalSeconds: .8, labels: ["Backhand", "Elbow", "Forehand"] }
+    );
+    const forehandHalf = sequenceDrill(
+      "Drill: Forehand half-table footwork",
+      ["middleForehandTopspin", "topspinForehand"],
+      { repetitions: 18, intervalSeconds: .8, labels: ["Middle forehand", "Wide forehand"] }
+    );
+    const backhandHalf = sequenceDrill(
+      "Drill: Backhand half-table footwork",
+      ["middleBackhandTopspin", "topspinBackhand"],
+      { repetitions: 18, intervalSeconds: .8, labels: ["Middle backhand", "Wide backhand"] }
+    );
+    const bhRandomFh = backhandRandomForehandDrill();
+    const fhBhRandom = forehandBackhandRandomDrill();
+    const threeSpots = randomDrill("Drill: Three spots random", [
+      { key: "topspinBackhand", label: "Backhand" },
+      { key: "topspinElbow", label: "Elbow" },
+      { key: "topspinForehand", label: "Forehand" },
+    ], { repetitions: 36, intervalSeconds: .78, randomLabel: "Backhand · elbow · forehand" });
+    const spinSwitch = sequenceDrill(
+      "Drill: Topspin / backspin switching",
+      ["heavyTopspin", "backspinCenter"],
+      { repetitions: 16, intervalSeconds: .9, labels: ["Heavy topspin", "Backspin"] }
+    );
+    const backspinCorners = sequenceDrill(
+      "Drill: Backspin corners",
+      ["backspinBackhand", "backspinForehand"],
+      { repetitions: 18, intervalSeconds: .92, labels: ["Backspin · backhand", "Backspin · forehand"] }
+    );
+    const fastDeepRandom = randomDrill("Drill: Fast deep random", [
+      { key: "fastDeepBackhand", label: "Deep backhand" },
+      { key: "fastDeepCenter", label: "Deep elbow" },
+      { key: "fastDeepForehand", label: "Deep forehand" },
+    ], { repetitions: 30, intervalSeconds: .72, randomLabel: "Fast deep · three spots" });
+
+    const shotDrills = [
+      singleShotDrill("Shot: No-spin center", "noSpinCenter"),
+      singleShotDrill("Shot: Short no-spin", "shortNoSpin", { intervalSeconds: .9 }),
+      singleShotDrill("Shot: Topspin to forehand", "topspinForehand"),
+      singleShotDrill("Shot: Topspin to backhand", "topspinBackhand"),
+      singleShotDrill("Shot: Topspin to elbow", "topspinElbow"),
+      singleShotDrill("Shot: Heavy topspin center", "heavyTopspin", { intervalSeconds: .85 }),
+      singleShotDrill("Shot: Backspin center", "backspinCenter", { intervalSeconds: .95 }),
+      singleShotDrill("Shot: Fast deep center", "fastDeepCenter", { intervalSeconds: .72 }),
+    ];
 
     return {
       schemaVersion: SCHEMA_VERSION,
-      activeDrillId: main.id,
+      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
+      activeDrillId: alternating.id,
       calibration: defaultCalibration(),
-      drills: [main, serve, pattern],
+      drills: [
+        alternating,
+        twoTwo,
+        falkenberg,
+        threePoint,
+        forehandHalf,
+        backhandHalf,
+        bhRandomFh,
+        fhBhRandom,
+        threeSpots,
+        spinSwitch,
+        backspinCorners,
+        fastDeepRandom,
+        ...shotDrills,
+      ],
     };
+  }
+
+  function isLegacyBuiltInLibrary(raw) {
+    if (!raw || !Array.isArray(raw.drills) || raw.drills.length !== LEGACY_BUILT_IN_DRILL_NAMES.length) return false;
+    const names = raw.drills.map(drill => String(drill?.name || "")).sort();
+    return LEGACY_BUILT_IN_DRILL_NAMES.slice().sort().every((name, index) => names[index] === name);
   }
 
   function activeDrill() {
@@ -448,6 +762,8 @@
     const windRaw = physicsRaw.wind || {};
     const novaRaw = raw.nova || {};
     const novaBase = base.nova;
+    const guidedRaw = raw.guided || {};
+    const guidedBase = base.guided;
     const rawCurve = Array.isArray(novaRaw.spinsightCurve) ? novaRaw.spinsightCurve : novaBase.spinsightCurve;
     const curveByLevel = new Map(rawCurve.map(point => [Number(point?.level), point]));
     const sanitizedCurve = novaBase.spinsightCurve.map(defaultPoint => {
@@ -460,19 +776,45 @@
         estimated: Boolean(defaultPoint.estimated),
       };
     });
+    const rawSpeedMapSource = Array.isArray(novaRaw.rawSpeedMap) ? novaRaw.rawSpeedMap : novaBase.rawSpeedMap;
+    const oldSeedMap = [
+      { raw: 2025, speedMps: 4.925 },
+      { raw: 2167, speedMps: 5.277 },
+      { raw: 2388, speedMps: 5.687 },
+    ];
+    const isOldUntouchedSpeedMap = rawSpeedMapSource.length === oldSeedMap.length
+      && rawSpeedMapSource.every((point, index) => Math.abs(finite(point?.raw, 0) - oldSeedMap[index].raw) < 1e-9
+        && Math.abs(finite(point?.speedMps, 0) - oldSeedMap[index].speedMps) < 1e-9);
+    const rawSpeedMap = (isOldUntouchedSpeedMap ? novaBase.rawSpeedMap : rawSpeedMapSource)
+      .map(point => ({ raw: clamp(point?.raw, 400, 7500, 2025), speedMps: clamp(point?.speedMps, 1, 20, 5) }))
+      .sort((a,b) => a.raw - b.raw);
+    const oldDefaultGeometry = Math.abs(finite(raw.nozzleHeight, base.nozzleHeight) - 0.205) < 1e-9
+      && Math.abs(finite(pose.x, base.pose.x) - 0.34) < 1e-9;
+    const oldGuidedNozzleDefault = Math.abs(finite(guidedRaw.nozzleXcm, guidedBase.nozzleXcm) - 34) < 1e-9;
+    const guidedShots = Array.isArray(guidedRaw.shots) ? guidedRaw.shots.map((shot, index) => ({
+      id: String(shot?.id || `cal-${index + 1}`),
+      index,
+      rawSpeed: clamp(shot?.rawSpeed, 400, 7500, 2025),
+      elevationDeg: clamp(shot?.elevationDeg, -20, 60, 10),
+      distanceCm: shot?.distanceCm === null || shot?.distanceCm === "" || shot?.distanceCm === undefined ? null : finite(shot.distanceCm, null),
+      netClearanceCm: shot?.netClearanceCm === null || shot?.netClearanceCm === "" || shot?.netClearanceCm === undefined ? null : finite(shot.netClearanceCm, null),
+      saved: Boolean(shot?.saved),
+    })) : guidedBase.shots;
     return {
       pose: {
-        x: clamp(pose.x, -1.5, 10, base.pose.x),
+        x: oldDefaultGeometry ? base.pose.x : clamp(pose.x, -3, 10, base.pose.x),
         y: clamp(pose.y, -5, 5, base.pose.y),
         yawDeg: clamp(pose.yawDeg, -180, 180, base.pose.yawDeg),
       },
+      placementMode: raw.placementMode === "ground" ? "ground" : "table",
+      tableHeight: clamp(raw.tableHeight, .4, 1.2, base.tableHeight),
       table: {
         length: clamp(table.length, .5, 10, base.table.length),
         width: clamp(table.width, .3, 5, base.table.width),
         netHeight: clamp(table.netHeight, .01, 1, base.table.netHeight),
       },
       rotationType: Math.round(clamp(raw.rotationType, 0, 7, base.rotationType)),
-      nozzleHeight: clamp(raw.nozzleHeight, .05, 1.5, base.nozzleHeight),
+      nozzleHeight: oldDefaultGeometry ? base.nozzleHeight : clamp(raw.nozzleHeight, .05, 1.5, base.nozzleHeight),
       gravity: clamp(raw.gravity, 1, 20, base.gravity),
       timeStep: clamp(raw.timeStep, .001, .02, base.timeStep),
       maxFlightTime: clamp(raw.maxFlightTime, .5, 10, base.maxFlightTime),
@@ -506,6 +848,32 @@
         upDownPerDegree: clamp(novaRaw.upDownPerDegree, .01, 30, novaBase.upDownPerDegree),
         yawDegreesPerPlacement: clamp(novaRaw.yawDegreesPerPlacement, .01, 30, novaBase.yawDegreesPerPlacement),
         spinsightCurve: sanitizedCurve,
+        rawSpeedMap,
+      },
+      guided: {
+        placement: guidedRaw.placement === "ground" ? "ground" : "table",
+        distanceReference: guidedRaw.placement === "ground"
+          ? "base_back"
+          : (["net","near_edge","nozzle"].includes(guidedRaw.distanceReference) ? guidedRaw.distanceReference : guidedBase.distanceReference),
+        // Migrate the short-lived old ground mode where negative values meant
+        // "behind the table". Ground calibration now uses the robot-base back
+        // as x=0, with a positive base-back → nozzle offset.
+        nozzleXcm: guidedRaw.placement === "ground" && finite(guidedRaw.nozzleXcm, 26.5) < 0
+          ? 26.5
+          : oldGuidedNozzleDefault
+            ? guidedBase.nozzleXcm
+            : clamp(guidedRaw.nozzleXcm, guidedRaw.placement === "ground" ? 0 : -300, 300, guidedBase.nozzleXcm),
+        tableHeightCm: clamp(guidedRaw.tableHeightCm, 40, 120, guidedBase.tableHeightCm),
+        repeatCount: Math.round(clamp(guidedRaw.repeatCount, 1, 12, guidedBase.repeatCount)),
+        elevationMinDeg: clamp(guidedRaw.elevationMinDeg, -20, 60, guidedBase.elevationMinDeg),
+        elevationMaxDeg: clamp(guidedRaw.elevationMaxDeg, -20, 60, guidedBase.elevationMaxDeg),
+        elevationCount: Math.round(clamp(guidedRaw.elevationCount, 2, 12, guidedBase.elevationCount)),
+        speedMinRaw: Math.round(clamp(guidedRaw.speedMinRaw, 400, 7500, guidedBase.speedMinRaw)),
+        speedMaxRaw: Math.round(clamp(guidedRaw.speedMaxRaw, 400, 7500, guidedBase.speedMaxRaw)),
+        speedCount: Math.round(clamp(guidedRaw.speedCount, 2, 8, guidedBase.speedCount)),
+        currentIndex: Math.max(0, Math.round(finite(guidedRaw.currentIndex, 0))),
+        shots: guidedShots,
+        lastResult: guidedRaw.lastResult && typeof guidedRaw.lastResult === "object" ? guidedRaw.lastResult : null,
       },
       testShot: {
         speedMps: clamp(test.speedMps, 1, 20, base.testShot.speedMps),
@@ -587,6 +955,7 @@
     const ids = new Set(drills.map(d => d.id));
     return {
       schemaVersion: SCHEMA_VERSION,
+      builtInLibraryVersion: Math.max(0, Math.round(finite(raw.builtInLibraryVersion, 0))),
       activeDrillId: ids.has(String(raw.activeDrillId)) ? String(raw.activeDrillId) : drills[0].id,
       calibration: sanitizeCalibration(raw.calibration),
       drills,
@@ -610,8 +979,14 @@
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed?.drills) && parsed.drills.length === 0) {
-        startupNotice = "An empty saved library was ignored and the examples were restored.";
+        startupNotice = "An empty saved library was ignored and the default training library was restored.";
         return null;
+      }
+      if (isLegacyBuiltInLibrary(parsed)) {
+        const replacement = makeSampleLibrary();
+        replacement.calibration = sanitizeCalibration(parsed.calibration);
+        startupNotice = "The old built-in examples were replaced by the new default training library; calibration settings were preserved.";
+        return replacement;
       }
       return sanitizeLibrary(parsed);
     } catch (error) {
@@ -899,7 +1274,6 @@
         event.stopPropagation();
         selection = { kind: "edge", id: edge.id };
         renderAll();
-        openMobileDrawer("inspector");
       });
       els.edgeLayer.appendChild(group);
     }
@@ -1094,126 +1468,6 @@
     applyGraphZoom(1);
   }
 
-  function isMobileWorkspace() {
-    return globalThis.matchMedia?.("(max-width: 760px)").matches ?? false;
-  }
-
-  function syncMobileDrawerUi() {
-    const toolsOpen = els.toolboxPanel.classList.contains("mobile-drawer-open");
-    const inspectorOpen = els.inspectorPanel.classList.contains("mobile-drawer-open");
-    els.mobileToolsBtn.setAttribute("aria-expanded", toolsOpen ? "true" : "false");
-    els.mobileInspectorBtn.setAttribute("aria-expanded", inspectorOpen ? "true" : "false");
-    els.mobileDrawerBackdrop.hidden = !(toolsOpen || inspectorOpen);
-  }
-
-  function closeMobileDrawers() {
-    els.toolboxPanel.classList.remove("mobile-drawer-open");
-    els.inspectorPanel.classList.remove("mobile-drawer-open");
-    syncMobileDrawerUi();
-  }
-
-  function openMobileDrawer(which) {
-    if (!isMobileWorkspace()) return;
-    const target = which === "tools" ? els.toolboxPanel : els.inspectorPanel;
-    const other = which === "tools" ? els.inspectorPanel : els.toolboxPanel;
-    other.classList.remove("mobile-drawer-open");
-    target.classList.add("mobile-drawer-open");
-    syncMobileDrawerUi();
-  }
-
-  function syncResponsiveWorkspace() {
-    if (isMobileWorkspace()) {
-      els.modeText.textContent = "Drag to pan · pinch to zoom";
-    } else {
-      closeMobileDrawers();
-      els.modeText.textContent = "Drag background to pan · wheel to zoom";
-    }
-  }
-
-  function cancelCanvasPan() {
-    if (!canvasPan) return;
-    document.removeEventListener("pointermove", onCanvasPointerMove);
-    document.removeEventListener("pointerup", onCanvasPointerUp);
-    try { els.graphViewport.releasePointerCapture?.(canvasPan.pointerId); } catch (_) {}
-    els.graphViewport.classList.remove("panning");
-    canvasPan = null;
-  }
-
-  function graphTouchDistance(a, b) {
-    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-  }
-
-  function onGraphTouchPointerDown(event) {
-    if (event.pointerType !== "touch") return;
-    graphTouchPointers.set(event.pointerId, {
-      clientX: event.clientX,
-      clientY: event.clientY,
-      background: isCanvasBackgroundTarget(event.target),
-    });
-
-    if (pinchZoom || graphTouchPointers.size !== 2 || nodeDrag || connectionDrag || poseDrag) return;
-    const points = [...graphTouchPointers.entries()];
-    if (!points.every(([, point]) => point.background)) return;
-
-    const [firstEntry, secondEntry] = points;
-    const first = firstEntry[1];
-    const second = secondEntry[1];
-    const distance = graphTouchDistance(first, second);
-    if (distance < 12) return;
-
-    cancelCanvasPan();
-    const rect = els.graphViewport.getBoundingClientRect();
-    const centerX = (first.clientX + second.clientX) / 2 - rect.left;
-    const centerY = (first.clientY + second.clientY) / 2 - rect.top;
-    pinchZoom = {
-      pointerIds: [firstEntry[0], secondEntry[0]],
-      startDistance: distance,
-      startZoom: graphZoom,
-      worldX: (els.graphViewport.scrollLeft + centerX) / graphZoom,
-      worldY: (els.graphViewport.scrollTop + centerY) / graphZoom,
-    };
-    els.graphViewport.classList.add("pinching");
-    suppressClickUntil = performance.now() + 250;
-    event.preventDefault();
-  }
-
-  function onGraphTouchPointerMove(event) {
-    if (event.pointerType !== "touch" || !graphTouchPointers.has(event.pointerId)) return;
-    const point = graphTouchPointers.get(event.pointerId);
-    point.clientX = event.clientX;
-    point.clientY = event.clientY;
-
-    if (!pinchZoom || !pinchZoom.pointerIds.includes(event.pointerId)) return;
-    const first = graphTouchPointers.get(pinchZoom.pointerIds[0]);
-    const second = graphTouchPointers.get(pinchZoom.pointerIds[1]);
-    if (!first || !second) return;
-
-    const distance = graphTouchDistance(first, second);
-    const zoom = clamp(pinchZoom.startZoom * distance / pinchZoom.startDistance, MIN_GRAPH_ZOOM, MAX_GRAPH_ZOOM, graphZoom);
-    const rect = els.graphViewport.getBoundingClientRect();
-    const centerX = (first.clientX + second.clientX) / 2 - rect.left;
-    const centerY = (first.clientY + second.clientY) / 2 - rect.top;
-
-    graphZoom = zoom;
-    els.graphWorld.style.transform = `scale(${graphZoom})`;
-    els.graphSurface.style.width = `${SURFACE_WIDTH * graphZoom}px`;
-    els.graphSurface.style.height = `${SURFACE_HEIGHT * graphZoom}px`;
-    els.zoomIndicator.textContent = `${Math.round(graphZoom * 100)}%`;
-    els.graphViewport.scrollLeft = pinchZoom.worldX * graphZoom - centerX;
-    els.graphViewport.scrollTop = pinchZoom.worldY * graphZoom - centerY;
-    event.preventDefault();
-  }
-
-  function onGraphTouchPointerEnd(event) {
-    if (event.pointerType !== "touch") return;
-    const wasPinching = pinchZoom?.pointerIds.includes(event.pointerId);
-    graphTouchPointers.delete(event.pointerId);
-    if (!wasPinching) return;
-    pinchZoom = null;
-    els.graphViewport.classList.remove("pinching");
-    suppressClickUntil = performance.now() + 250;
-  }
-
   function isCanvasBackgroundTarget(target) {
     if (!(target instanceof Element)) return false;
     return !target.closest(".flow-node, .edge-group, .output-port");
@@ -1221,8 +1475,7 @@
 
   function onCanvasPointerDown(event) {
     if (event.button !== 0) return;
-    if (nodeDrag || connectionDrag || poseDrag || canvasPan || pinchZoom) return;
-    if (event.pointerType === "touch" && graphTouchPointers.size > 1) return;
+    if (nodeDrag || connectionDrag || poseDrag) return;
     if (!isCanvasBackgroundTarget(event.target)) return;
 
     canvasPan = {
@@ -1324,7 +1577,6 @@
     if (performance.now() < suppressClickUntil) return;
     selection = { kind: "node", id: event.currentTarget.dataset.nodeId };
     renderAll();
-    openMobileDrawer("inspector");
   }
 
   function onPortPointerDown(event) {
@@ -1597,13 +1849,13 @@
     return `
       <p class="spin-explainer"><strong>Spin:</strong> negative values mean underspin; positive values mean topspin. Rotations per second describe the ball directly.</p>
       <div class="field-grid two">
-        <label class="field"><span>Ball speed</span><span class="input-with-unit"><input id="shotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span></label>
-        <label class="field"><span>Spin</span><span class="input-with-unit"><input id="shotSpinField" type="number" min="-120" max="120" step="1" value="${p.spinRps}"><small>rps</small></span></label>
+        <label class="field"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.1" aria-label="Decrease ball speed by 0.1 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.1" aria-label="Increase ball speed by 0.1 metres per second">+</button></span></label>
+        <label class="field"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-1" aria-label="Decrease ball rotation by 1 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" type="number" min="-120" max="120" step="1" value="${p.spinRps}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="1" aria-label="Increase ball rotation by 1 rotation per second">+</button></span></label>
         <label class="field"><span>Elevation</span><span class="input-with-unit"><input id="shotElevationField" type="number" min="-20" max="45" step="0.5" value="${p.elevationDeg}"><small>°</small></span></label>
         <label class="field"><span>Aim left/right</span><span class="input-with-unit"><input id="shotAimField" type="number" min="-60" max="60" step="0.5" value="${p.aimDeg}"><small>°</small></span></label>
       </div>
       <div class="shot-view-stack">
-        <div><p class="helper">Predicted top view</p>${topTrajectorySvg(prediction, 600, 310)}</div>
+        <div><p class="helper">Predicted landing distance · yaw intentionally omitted</p>${distanceTrajectorySvg(prediction, 600, 150)}</div>
         <div><p class="helper">Predicted side view</p>${sideTrajectorySvg(prediction, 600, 300)}</div>
       </div>
       <div class="landing-card">${landingDescription(prediction)}</div>
@@ -1736,6 +1988,17 @@
     bindNumberField("shotSpinField", value => node.params.spinRps = clamp(value, -120, 120, 0));
     bindNumberField("shotElevationField", value => node.params.elevationDeg = clamp(value, -20, 45, 4));
     bindNumberField("shotAimField", value => node.params.aimDeg = clamp(value, -60, 60, 0));
+    els.inspectorContent.querySelectorAll("[data-step-target][data-step-delta]").forEach(button => button.addEventListener("click", () => {
+      const input = $(button.dataset.stepTarget);
+      if (!input) return;
+      const min = Number.isFinite(Number(input.min)) ? Number(input.min) : -Infinity;
+      const max = Number.isFinite(Number(input.max)) ? Number(input.max) : Infinity;
+      const delta = finite(button.dataset.stepDelta, 0);
+      const decimals = Math.max(0, (String(input.step).split(".")[1] || "").length);
+      const next = Math.min(max, Math.max(min, finite(input.value, 0) + delta));
+      input.value = next.toFixed(decimals);
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }));
     bindConnectionRows(drill);
   }
 
@@ -1969,22 +2232,43 @@
 
   function estimatedNovaSettings(params, calibration = library.calibration) {
     const nova = calibration.nova;
-    const speedLevel = clamp(novaSpeedLevelFromMps(params.speedMps, calibration), 0, 10, 0);
-    const maxSpinSetting = Math.max(0, interpolateNovaCurve(speedLevel, "maxSpinSetting", calibration));
-    const maxSpinRps = Math.max(0, interpolateNovaCurve(speedLevel, "maxSpinRps", calibration));
-    const requestedSpinRps = Math.abs(params.spinRps);
-    const rawSpinSetting = maxSpinRps > .001
-      ? requestedSpinRps / maxSpinRps * maxSpinSetting
-      : 0;
-    const limited = requestedSpinRps > maxSpinRps + .05;
-    const spinMagnitude = clamp(rawSpinSetting, 0, maxSpinSetting, 0);
-    const spinLevel = Math.sign(params.spinRps) * spinMagnitude;
+    const localSpeedMap = Array.isArray(nova.rawSpeedMap) && nova.rawSpeedMap.length >= 2 ? nova.rawSpeedMap : null;
+    const exitRange = LaunchModel ? LaunchModel.exitSpeedRange(localSpeedMap || undefined) : null;
+    const calibratedRaw = LaunchModel
+      ? LaunchModel.rawFromExitSpeed(params.speedMps, localSpeedMap || undefined)
+      : (GuidedCalibration && localSpeedMap ? GuidedCalibration.rawFromSpeed(params.speedMps, localSpeedMap) : null);
+    const base = Number.isFinite(calibratedRaw)
+      ? calibratedRaw
+      : nova.wheelBaseRpm + nova.wheelRpmPerSpeed * novaSpeedLevelFromMps(params.speedMps, calibration);
+    const speedLevel = LaunchModel
+      ? LaunchModel.levelFromRaw(base)
+      : clamp(novaSpeedLevelFromMps(params.speedMps, calibration), 0, 10, 0);
 
-    const base = nova.wheelBaseRpm + nova.wheelRpmPerSpeed * speedLevel;
+    const cap = LaunchModel
+      ? LaunchModel.spinCapacityAtLevel(speedLevel)
+      : {
+          maxSpinSetting: Math.max(0, interpolateNovaCurve(speedLevel, "maxSpinSetting", calibration)),
+          maxSpinRps: Math.max(0, interpolateNovaCurve(speedLevel, "maxSpinRps", calibration)),
+        };
+    const maxSpinSetting = cap.maxSpinSetting;
+    const maxSpinRps = cap.maxSpinRps;
+    const requestedSpinRps = Math.abs(params.spinRps);
+    const spinLevel = LaunchModel
+      ? LaunchModel.spinSettingFromRps(speedLevel, params.spinRps, { clampToMeasuredCapacity: true })
+      : Math.sign(params.spinRps) * clamp(maxSpinRps > .001 ? requestedSpinRps / maxSpinRps * maxSpinSetting : 0, 0, maxSpinSetting, 0);
+    const limited = requestedSpinRps > maxSpinRps + .05;
+    const speedLimited = exitRange
+      ? params.speedMps < exitRange.minMps - .01 || params.speedMps > exitRange.maxMps + .01
+      : false;
+
     const delta = nova.wheelRpmPerSpin * spinLevel;
     const swapped = calibration.rotationType >= 4;
     const wheelA = Math.floor(swapped ? base - delta : base + delta);
     const wheelB = Math.floor(swapped ? base + delta : base - delta);
+    const modeledExitSpeedMps = LaunchModel ? LaunchModel.exitSpeedFromRaw(base, localSpeedMap || undefined) : params.speedMps;
+    const modeledSpinRps = LaunchModel
+      ? LaunchModel.spinRpsFromRawWheels(swapped ? wheelB : wheelA, swapped ? wheelA : wheelB)
+      : params.spinRps;
     const upDown = Math.round(clamp(
       nova.upDownAtZeroDeg + nova.upDownPerDegree * params.elevationDeg,
       -50,
@@ -1993,34 +2277,28 @@
     ));
     const placement = clamp(params.aimDeg / nova.yawDegreesPerPlacement, -10, 10, 0);
 
-    return {
-      wheelA,
-      wheelB,
-      upDown,
-      placement,
-      speedLevel,
-      spinLevel,
-      maxSpinSetting,
-      maxSpinRps,
-      limited,
-    };
+    return { wheelA, wheelB, upDown, placement, speedLevel, spinLevel, maxSpinSetting, maxSpinRps,
+      limited, speedLimited, modeledExitSpeedMps, modeledSpinRps, exitRange };
   }
 
   function novaEstimateHtml(params) {
     const estimate = estimatedNovaSettings(params);
+    const warnings = [];
+    if (estimate.speedLimited && estimate.exitRange) warnings.push(`Requested speed is outside the supported linear exit-speed range (${fmt(estimate.exitRange.minMps,1)}–${fmt(estimate.exitRange.maxMps,1)} m/s); the motor estimate is clamped.`);
+    if (estimate.limited) warnings.push(`Requested spin exceeds the Spinsight-derived capability at this speed (${fmt(estimate.maxSpinRps,1)} rps maximum); the motor estimate is clamped.`);
     return `<div class="nova-estimate">
       <span>Estimated Nova settings</span>
       <dl>
-        <div><dt>Wheel A</dt><dd>${estimate.wheelA} rpm</dd></div>
-        <div><dt>Wheel B</dt><dd>${estimate.wheelB} rpm</dd></div>
+        <div><dt>Wheel A</dt><dd>${estimate.wheelA}</dd></div>
+        <div><dt>Wheel B</dt><dd>${estimate.wheelB}</dd></div>
+        <div><dt>Modeled exit speed</dt><dd>${fmt(estimate.modeledExitSpeedMps,2)} m/s</dd></div>
+        <div><dt>Modeled rotation</dt><dd>${signed(estimate.modeledSpinRps,1)} rps</dd></div>
         <div><dt>Speed setting</dt><dd>${fmt(estimate.speedLevel,2)}</dd></div>
         <div><dt>Spin setting</dt><dd>${signed(estimate.spinLevel,2)}</dd></div>
         <div><dt>Up/down</dt><dd>${signed(estimate.upDown,0)}</dd></div>
         <div><dt>Placement</dt><dd>${signed(estimate.placement,2)}</dd></div>
       </dl>
-      <p>${estimate.limited
-        ? `Requested spin exceeds the calibrated capability at this speed (${fmt(estimate.maxSpinRps,1)} rps maximum); the motor estimate is clamped.`
-        : `Converted through the editable Spinsight curve. Estimated spin capacity here is ${fmt(estimate.maxSpinRps,1)} rps.`}</p>
+      <p>${warnings.length ? warnings.join(" ") : `Exit speed uses one linear raw-wheel-input model fit to the local no-spin calibration plus the Spinsight-derived speed data; rotation uses the Spinsight speed-dependent spin table.`}</p>
     </div>`;
   }
 
@@ -2211,7 +2489,9 @@
     const ballRadius = c.physics.ballDiameterM / 2;
     const yaw = radians(c.pose.yawDeg + params.aimDeg);
     const elevation = radians(params.elevationDeg);
-    let position = { x: c.pose.x, y: c.pose.y, z: c.nozzleHeight };
+    const groundPlacement = c.placementMode === "ground";
+    const launchHeightAboveTable = groundPlacement ? c.nozzleHeight - c.tableHeight : c.nozzleHeight;
+    let position = { x: c.pose.x, y: c.pose.y, z: launchHeightAboveTable };
     let velocity = {
       x: params.speedMps * Math.cos(elevation) * Math.cos(yaw),
       y: params.speedMps * Math.cos(elevation) * Math.sin(yaw),
@@ -2230,6 +2510,7 @@
     let t = 0;
     let step = 0;
     const sampleEvery = Math.max(1, Math.round(.018 / c.timeStep));
+    let groundEdgeBlocked = false;
 
     while (t < c.maxFlightTime && !landing) {
       const previous = { ...position };
@@ -2253,14 +2534,31 @@
         };
       }
 
+      if (groundPlacement && !groundEdgeBlocked && previous.x < 0 && position.x >= 0) {
+        const ratio = (0 - previous.x) / (position.x - previous.x || 1);
+        const edgeZ = previous.z + ratio * (position.z - previous.z);
+        if (edgeZ < ballRadius) {
+          groundEdgeBlocked = true;
+          break;
+        }
+      }
+
+      if (groundPlacement && position.x < 0) {
+        const floorContactZ = -c.tableHeight + ballRadius;
+        if (previous.z > floorContactZ && position.z <= floorContactZ && position.z < previous.z) break;
+      }
+
       if (previous.z > ballRadius && position.z <= ballRadius) {
         const ratio = (previous.z - ballRadius) / (previous.z - position.z || 1);
-        landing = {
-          x: previous.x + ratio * (position.x - previous.x),
-          y: previous.y + ratio * (position.y - previous.y),
-          z: ballRadius,
-          t: t - c.timeStep + ratio * c.timeStep,
-        };
+        const landingX = previous.x + ratio * (position.x - previous.x);
+        if (!groundPlacement || landingX >= 0) {
+          landing = {
+            x: landingX,
+            y: previous.y + ratio * (position.y - previous.y),
+            z: ballRadius,
+            t: t - c.timeStep + ratio * c.timeStep,
+          };
+        }
       }
 
       if (step % sampleEvery === 0 || landing) points.push({ ...position, t });
@@ -2275,7 +2573,8 @@
       && Math.abs(landing.y) <= table.width / 2
     );
     let status = "unknown";
-    if (net.hit) status = "net";
+    if (groundEdgeBlocked) status = "edge";
+    else if (net.hit) status = "net";
     else if (onTable) status = "table";
     else if (landing) status = "miss";
     const finalAero = aerodynamicState(velocity, omega, c);
@@ -2310,6 +2609,7 @@
 
   function landingDescription(prediction) {
     const clearance = clearanceHtml(prediction);
+    if (prediction.status === "edge") return `<strong class="trajectory-miss">Predicted table-edge contact</strong>.`;
     if (prediction.status === "net") return `<strong class="trajectory-miss">Predicted net contact</strong> · ${clearance}.`;
     if (!prediction.landing) return `<strong class="trajectory-warning">No landing found</strong> · ${clearance}.`;
     const className = prediction.onTable ? "trajectory-safe" : "trajectory-miss";
@@ -2339,6 +2639,34 @@
     const xs = prediction.points.map(p => p.x).concat([0, table.length, calibration.pose.x]);
     const ys = prediction.points.map(p => p.y).concat([-table.width/2, table.width/2, calibration.pose.y]);
     return { minX: Math.min(...xs) - margin, maxX: Math.max(...xs) + margin, minY: Math.min(...ys) - margin, maxY: Math.max(...ys) + margin };
+  }
+
+  function distanceTrajectorySvg(prediction, width = 600, height = 150) {
+    const c = library.calibration;
+    const table = c.table;
+    const values = prediction.points.map(point => point.x).concat([c.pose.x, 0, table.length]);
+    if (prediction.landing) values.push(prediction.landing.x);
+    const minX = Math.min(...values) - .12;
+    const maxX = Math.max(...values) + .12;
+    const pad = 34;
+    const sx = value => pad + (value - minX) / Math.max(.001, maxX - minX) * (width - pad * 2);
+    const y = height / 2 + 8;
+    const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
+    const landingX = prediction.landing?.x ?? prediction.points.at(-1)?.x ?? c.pose.x;
+    const startX = c.pose.x;
+    return `<svg class="distance-trajectory" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted landing distance without yaw">
+      <line x1="${sx(minX)}" y1="${y}" x2="${sx(maxX)}" y2="${y}" stroke="#516071" stroke-width="3"/>
+      <line x1="${sx(0)}" y1="${y-18}" x2="${sx(0)}" y2="${y+18}" stroke="#7f91a4" stroke-width="2"/>
+      <line x1="${sx(table.length/2)}" y1="${y-22}" x2="${sx(table.length/2)}" y2="${y+22}" stroke="#d4dbe5" stroke-width="3"/>
+      <line x1="${sx(table.length)}" y1="${y-18}" x2="${sx(table.length)}" y2="${y+18}" stroke="#7f91a4" stroke-width="2"/>
+      <line x1="${sx(startX)}" y1="${y}" x2="${sx(landingX)}" y2="${y}" stroke="${color}" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="${sx(startX)}" cy="${y}" r="8" fill="#32bda2" stroke="#d5fff6" stroke-width="2"/>
+      ${prediction.landing ? `<circle cx="${sx(landingX)}" cy="${y}" r="9" fill="${color}"/>` : ""}
+      <text x="${sx(0)}" y="${y+42}" text-anchor="middle" fill="#9fb0c2" font-size="12">near edge</text>
+      <text x="${sx(table.length/2)}" y="${y+42}" text-anchor="middle" fill="#d7dee7" font-size="12">net</text>
+      <text x="${sx(table.length)}" y="${y+42}" text-anchor="middle" fill="#9fb0c2" font-size="12">far edge</text>
+      <text x="${Math.min(width-40, Math.max(40, sx(landingX)))}" y="${y-22}" text-anchor="middle" fill="${color}" font-size="13" font-weight="700">x ${fmt(landingX,2)} m</text>
+    </svg>`;
   }
 
   function topTrajectorySvg(prediction, width = 600, height = 310) {
@@ -2447,11 +2775,13 @@
   function degrees(rad) { return rad * 180 / Math.PI; }
 
   function setCalibrationTab(tab) {
-    const pose = tab !== "table";
-    els.calibrationPosePanel.hidden = !pose;
-    els.calibrationTablePanel.hidden = pose;
-    els.calibrationPoseTab.classList.toggle("active", pose);
-    els.calibrationTableTab.classList.toggle("active", !pose);
+    const active = ["guided", "pose", "table"].includes(tab) ? tab : "guided";
+    els.calibrationGuidedPanel.hidden = active !== "guided";
+    els.calibrationPosePanel.hidden = active !== "pose";
+    els.calibrationTablePanel.hidden = active !== "table";
+    els.calibrationGuidedTab.classList.toggle("active", active === "guided");
+    els.calibrationPoseTab.classList.toggle("active", active === "pose");
+    els.calibrationTableTab.classList.toggle("active", active === "table");
   }
 
   function renderCalibration() {
@@ -2490,6 +2820,7 @@
     els.tableWidthInput.value = c.table.width;
     els.netHeightInput.value = c.table.netHeight;
     els.ballDiameterInput.value = c.physics.ballDiameterM;
+    renderGuidedCalibration();
     renderNovaScaleTable();
     renderPhysicsReadouts();
     renderAerodynamicTables();
@@ -2656,6 +2987,407 @@
     poseDrag = null;
   }
 
+  function guidedState() {
+    if (!library.calibration.guided) library.calibration.guided = defaultGuidedCalibration();
+    const g = library.calibration.guided;
+    if (!Array.isArray(g.shots) || !g.shots.length) rebuildGuidedPlan(false);
+    g.currentIndex = Math.min(Math.max(0, Math.round(finite(g.currentIndex, 0))), Math.max(0, g.shots.length - 1));
+    return g;
+  }
+
+  function guidedCurrentShot() {
+    const g = guidedState();
+    return g.shots[g.currentIndex] || null;
+  }
+
+  function guidedNozzleXMetres(g = guidedState()) {
+    return finite(g.nozzleXcm, 26.5) / 100;
+  }
+
+  function guidedSpeedEstimate(raw) {
+    const map = library.calibration.nova.rawSpeedMap;
+    if (GuidedCalibration && Array.isArray(map) && map.length) return GuidedCalibration.speedFromMap(raw, map);
+    return GuidedCalibration ? GuidedCalibration.seedSpeedMps(raw) : 5;
+  }
+
+  function syncGuidedConfigFromInputs() {
+    const g = guidedState();
+    g.placement = els.guidedPlacementGround.checked ? "ground" : "table";
+    g.distanceReference = g.placement === "ground" ? "base_back" : els.guidedDistanceReference.value;
+    const shownX = finite(els.guidedNozzleXInput.value, 26.5);
+    g.nozzleXcm = Math.abs(shownX);
+    g.tableHeightCm = clamp(els.guidedTableHeightInput.value, 40, 120, 76);
+    g.repeatCount = Math.round(clamp(els.guidedRepeatCountInput.value, 1, 12, 3));
+    g.elevationMinDeg = clamp(els.guidedElevationMinInput.value, -20, 60, 10);
+    g.elevationMaxDeg = clamp(els.guidedElevationMaxInput.value, -20, 60, 30);
+    g.elevationCount = Math.round(clamp(els.guidedElevationCountInput.value, 2, 12, 5));
+    g.speedMinRaw = Math.round(clamp(els.guidedSpeedMinInput.value, 400, 7500, 2025));
+    g.speedMaxRaw = Math.round(clamp(els.guidedSpeedMaxInput.value, 400, 7500, 2388));
+    g.speedCount = Math.round(clamp(els.guidedSpeedCountInput.value, 2, 8, 3));
+    return g;
+  }
+
+  function rebuildGuidedPlan(preserve = true) {
+    if (!GuidedCalibration) return;
+    const g = library.calibration.guided || defaultGuidedCalibration();
+    const previous = preserve && Array.isArray(g.shots) ? g.shots : [];
+    const byKey = new Map(previous.map(shot => [`${shot.rawSpeed}|${shot.elevationDeg}`, shot]));
+    const plan = GuidedCalibration.buildPlan({
+      placement: g.placement,
+      elevationMinDeg: g.elevationMinDeg,
+      elevationMaxDeg: g.elevationMaxDeg,
+      elevationCount: g.elevationCount,
+      speedMinRaw: g.speedMinRaw,
+      speedMaxRaw: g.speedMaxRaw,
+      speedCount: g.speedCount,
+    });
+    g.shots = plan.shots.map((shot, index) => {
+      const old = byKey.get(`${shot.rawSpeed}|${shot.elevationDeg}`);
+      return old ? { ...shot, distanceCm: old.distanceCm, netClearanceCm: old.netClearanceCm, saved: old.saved } : shot;
+    });
+    g.currentIndex = Math.min(g.currentIndex || 0, Math.max(0, g.shots.length - 1));
+    g.lastResult = null;
+    library.calibration.guided = g;
+    saveLibrary();
+  }
+
+  function setGuidedPlacement(placement) {
+    const g = guidedState();
+    if (placement === g.placement) return;
+    g.placement = placement;
+    if (placement === "ground") {
+      g.distanceReference = "base_back";
+      g.nozzleXcm = 34;
+      g.elevationMinDeg = 5;
+      g.elevationMaxDeg = 45;
+      g.elevationCount = 5;
+      for (const shot of g.shots || []) shot.netClearanceCm = null;
+    } else {
+      g.distanceReference = "net";
+      g.nozzleXcm = 34;
+      g.elevationMinDeg = 10;
+      g.elevationMaxDeg = 30;
+      g.elevationCount = 5;
+    }
+    g.currentIndex = 0;
+    rebuildGuidedPlan(false);
+    renderGuidedCalibration();
+  }
+
+  function renderGuidedCalibration() {
+    if (!GuidedCalibration || !els.guidedPlacementTable) return;
+    const g = guidedState();
+    const ground = g.placement === "ground";
+    els.guidedPlacementTable.checked = !ground;
+    els.guidedPlacementGround.checked = ground;
+    if (ground) g.distanceReference = "base_back";
+    els.guidedDistanceReference.value = g.distanceReference;
+    els.guidedDistanceReference.disabled = ground;
+    els.guidedNozzleXInput.value = Math.abs(g.nozzleXcm);
+    els.guidedTableHeightInput.value = g.tableHeightCm;
+    els.guidedRepeatCountInput.value = g.repeatCount;
+    els.guidedElevationMinInput.value = g.elevationMinDeg;
+    els.guidedElevationMaxInput.value = g.elevationMaxDeg;
+    els.guidedElevationCountInput.value = g.elevationCount;
+    els.guidedSpeedMinInput.value = g.speedMinRaw;
+    els.guidedSpeedMaxInput.value = g.speedMaxRaw;
+    els.guidedSpeedCountInput.value = g.speedCount;
+    els.guidedTableHeightField.hidden = true;
+    els.calibrationGuidedPanel.classList.toggle("ground-mode", ground);
+    els.guidedNozzleXLabel.textContent = ground ? "Nozzle from back of base" : "Nozzle from near edge";
+    els.guidedNozzleXHint.textContent = ground ? "Horizontal distance from the back of the robot base to the launch point. Default 26.5 cm." : "Positive means the nozzle is over the tabletop. Default 26.5 cm.";
+    els.guidedPlacementHelp.innerHTML = ground
+      ? `<strong>Ground setup:</strong> place the robot on a flat floor with the back of the base as your zero point. Measure from the <strong>back of the base to the first landing point on the ground</strong>. No table or net is used in this calibration model, so longer shots are fine.`
+      : `<strong>Table setup:</strong> place the robot on the table, centred and pointing straight forward. Default assumes the nozzle is 26.5 cm from the near table edge. The fitted nozzle height is measured above the tabletop.`;
+    const refText = g.distanceReference === "base_back"
+      ? "0 cm at the back of the robot base; positive is forward along the shot."
+      : g.distanceReference === "net"
+        ? "0 cm at the net; positive is toward the opponent."
+        : g.distanceReference === "near_edge"
+          ? "0 cm at the near table edge; positive is toward the net."
+          : "0 cm directly below the nozzle; positive is forward.";
+    els.guidedReferenceHint.textContent = refText;
+    els.guidedDistanceLabel.textContent = ground ? "Distance from back of base" : "Landing distance";
+    els.guidedNetHeightInput.disabled = ground;
+    if (ground) els.guidedNetHeightInput.value = "";
+    els.guidedComputeHelp.textContent = ground
+      ? "Flat-ground fit: landing distances estimate nozzle height above the floor and a monotonic raw-input → m/s map. The nozzle offset from the back of the base stays fixed to your setup value."
+      : "Table fit: landing distances estimate nozzle height and a monotonic raw-input → m/s map. Optional net-clearance values add vertical constraints.";
+    els.guidedSpeedMinHint.textContent = `≈ ${fmt(guidedSpeedEstimate(g.speedMinRaw),2)} m/s from current calibration`;
+    els.guidedSpeedMaxHint.textContent = `≈ ${fmt(guidedSpeedEstimate(g.speedMaxRaw),2)} m/s from current calibration`;
+    els.guidedShotCountBadge.textContent = `${g.shots.length} shots`;
+
+    const shot = guidedCurrentShot();
+    if (shot) {
+      els.guidedProgressText.textContent = `${g.currentIndex + 1} / ${g.shots.length}`;
+      els.guidedCurrentElevation.textContent = `${fmt(shot.elevationDeg,1)}°`;
+      els.guidedCurrentSpeed.textContent = `${Math.round(shot.rawSpeed)}`;
+      els.guidedCurrentSpeedMps.textContent = `≈ ${fmt(guidedSpeedEstimate(shot.rawSpeed),2)} m/s`;
+      els.guidedDistanceInput.value = shot.distanceCm ?? "";
+      els.guidedNetHeightInput.value = ground ? "" : (shot.netClearanceCm ?? "");
+    }
+    els.guidedPreviousBtn.disabled = g.currentIndex <= 0;
+    els.guidedNextBtn.disabled = g.currentIndex >= g.shots.length - 1;
+    els.guidedFeedBtn.textContent = calibrationFeedRunning ? "Stop shooting" : "Start shooting";
+    els.guidedFeedBtn.classList.toggle("running", calibrationFeedRunning);
+    const snap = robot?.snapshot?.();
+    if (calibrationFeedRunning) els.guidedFeedStatus.textContent = `Feeding ${g.repeatCount} repeated balls at 0.5 Hz for the current setting. Stop at any time.`;
+    else if (!snap?.browserSupported && !snap?.connected) els.guidedFeedStatus.textContent = "Live shooting needs Web Bluetooth in a compatible Chromium browser. Data entry and fitting still work offline.";
+    else if (!snap?.connected) els.guidedFeedStatus.textContent = "Press Start shooting to connect Nova and begin a low-pace repeated feed.";
+    else els.guidedFeedStatus.textContent = "Nova connected. Start shooting uses equal wheel inputs and 0.5 Hz feed.";
+    renderGuidedMeasurementTable();
+    renderGuidedResult();
+  }
+
+  function renderGuidedMeasurementTable() {
+    const g = guidedState();
+    const distanceCount = g.shots.filter(s => s.distanceCm != null).length;
+    const heightCount = g.shots.filter(s => s.netClearanceCm != null).length;
+    const visited = g.shots.filter(s => s.saved).length;
+    const ground = g.placement === "ground";
+    els.guidedMeasurementSummary.innerHTML = ground
+      ? `<span>${visited}/${g.shots.length} visited</span><span>${distanceCount} ground distances</span>`
+      : `<span>${visited}/${g.shots.length} visited</span><span>${distanceCount} distances</span><span>${heightCount} net heights</span>`;
+    els.guidedMeasurementBody.innerHTML = g.shots.map((shot, index) => {
+      const active = index === g.currentIndex ? " active" : "";
+      const status = shot.saved ? (shot.distanceCm == null && shot.netClearanceCm == null ? "skipped" : "saved") : "pending";
+      return `<tr class="${active}" data-guided-row="${index}"><td>${index + 1}</td><td>${fmt(shot.elevationDeg,1)}°</td><td>${Math.round(shot.rawSpeed)}</td><td>${shot.distanceCm == null ? "—" : `${fmt(shot.distanceCm,1)} cm`}</td><td class="net-height-column">${shot.netClearanceCm == null ? "—" : `${fmt(shot.netClearanceCm,1)} cm`}</td><td><span class="measurement-state ${status}">${status}</span></td></tr>`;
+    }).join("");
+  }
+
+  function saveGuidedCurrentInputs() {
+    const shot = guidedCurrentShot();
+    if (!shot) return;
+    const distanceRaw = String(els.guidedDistanceInput.value).trim();
+    const heightRaw = String(els.guidedNetHeightInput.value).trim();
+    shot.distanceCm = distanceRaw === "" ? null : finite(distanceRaw, null);
+    shot.netClearanceCm = guidedState().placement === "ground" ? null : (heightRaw === "" ? null : finite(heightRaw, null));
+    shot.saved = true;
+    guidedState().lastResult = null;
+    saveLibrary();
+  }
+
+  function moveGuidedCurrent(delta) {
+    const g = guidedState();
+    g.currentIndex = Math.max(0, Math.min(g.shots.length - 1, g.currentIndex + delta));
+    saveLibrary();
+    renderGuidedCalibration();
+  }
+
+  async function saveGuidedAndNext() {
+    const restartFeed = calibrationFeedRunning;
+    if (restartFeed) await stopGuidedFeed();
+    saveGuidedCurrentInputs();
+    const g = guidedState();
+    if (g.currentIndex < g.shots.length - 1) g.currentIndex += 1;
+    saveLibrary();
+    renderGuidedCalibration();
+    if (restartFeed) await startGuidedFeed();
+  }
+
+  function guidedDirectPacket() {
+    if (!Protocol) throw new Error("Robot protocol module is unavailable.");
+    const g = guidedState();
+    const shot = guidedCurrentShot();
+    if (!shot) throw new Error("No calibration shot is selected.");
+    const record = Protocol.packBallRecord({
+      wheelA: Math.round(shot.rawSpeed),
+      wheelB: Math.round(shot.rawSpeed),
+      pitchDeg: shot.elevationDeg,
+      yawDeg: 0,
+      frequencyHz: 0.5,
+      count: g.repeatCount,
+    });
+    return {
+      packet: Protocol.buildStartPacket([record], { mode: 1, value: 1, sequence: 0 }),
+      expectedDurationMs: g.repeatCount * 2000,
+      shot,
+    };
+  }
+
+  async function startGuidedFeed() {
+    if (calibrationFeedRunning) return;
+    if (playbackRunning || calibrationTestRunning || robotIsActive()) {
+      toast("Stop the current robot activity before starting calibration feed.");
+      return;
+    }
+    if (!robot) {
+      toast("Robot controller module is unavailable.");
+      return;
+    }
+    calibrationFeedRunning = true;
+    calibrationFeedToken += 1;
+    const token = calibrationFeedToken;
+    renderGuidedCalibration();
+    try {
+      if (!robot.connected) await robot.connect();
+      while (calibrationFeedRunning && token === calibrationFeedToken) {
+        await robot.ensureReadyForStart();
+        if (!calibrationFeedRunning || token !== calibrationFeedToken) break;
+        const direct = guidedDirectPacket();
+        await robot.startBatch(direct.packet, {
+          timeoutMs: Math.max(20000, direct.expectedDurationMs + 12000),
+          expectedDurationMs: direct.expectedDurationMs,
+          description: `guided calibration raw ${direct.shot.rawSpeed}, ${fmt(direct.shot.elevationDeg,1)} deg, repeated ${guidedState().repeatCount}`,
+        });
+      }
+    } catch (error) {
+      if (calibrationFeedRunning && token === calibrationFeedToken) toast(`Calibration feed stopped: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      if (token === calibrationFeedToken) calibrationFeedRunning = false;
+      updateRobotUI();
+      renderGuidedCalibration();
+    }
+  }
+
+  async function stopGuidedFeed() {
+    if (!calibrationFeedRunning) return;
+    calibrationFeedRunning = false;
+    calibrationFeedToken += 1;
+    renderGuidedCalibration();
+    if (robot?.connected && robotIsActive()) {
+      try { await robot.stopAndWaitFree(); } catch (error) { toast(`Stop not confirmed: ${error.message}`); }
+    }
+    updateRobotUI();
+    renderGuidedCalibration();
+  }
+
+  async function toggleGuidedFeed() {
+    if (calibrationFeedRunning) await stopGuidedFeed();
+    else await startGuidedFeed();
+  }
+
+  function guidedFitSetup() {
+    const g = guidedState();
+    return {
+      placement: g.placement,
+      distanceReference: g.distanceReference,
+      nozzleXFromNearEdgeM: guidedNozzleXMetres(g),
+      tableHeightM: g.tableHeightCm / 100,
+      tableLengthM: library.calibration.table.length,
+      netXFromNearEdgeM: library.calibration.table.length / 2,
+      netHeightM: library.calibration.table.netHeight,
+      distanceSigmaM: 0.015,
+      netClearanceSigmaM: 0.01,
+      dt: 0.004,
+    };
+  }
+
+  function computeGuidedCalibration() {
+    if (!GuidedCalibration) {
+      toast("Guided calibration solver did not load.");
+      return;
+    }
+    syncGuidedConfigFromInputs();
+    saveGuidedCurrentInputs();
+    els.guidedComputeBtn.disabled = true;
+    els.guidedComputeStatus.textContent = "Computing trajectory fit…";
+    els.guidedFitBadge.textContent = "Computing";
+    try {
+      const g = guidedState();
+      const result = GuidedCalibration.calibrate(g.shots, guidedFitSetup());
+      g.lastResult = {
+        placement: result.placement,
+        nozzleHeightM: result.nozzleHeightM,
+        nozzleHeightReference: result.nozzleHeightReference,
+        nozzleXReference: result.nozzleXReference,
+        nozzleXFromNearEdgeM: result.nozzleXFromNearEdgeM,
+        speedMap: result.speedMap,
+        speedModel: result.speedModel,
+        speedModelRmseMps: result.speedModelRmseMps,
+        distanceRmseM: result.distanceRmseM,
+        distanceMaxAbsM: result.distanceMaxAbsM,
+        clearanceRmseM: result.clearanceRmseM,
+        clearanceMaxAbsM: result.clearanceMaxAbsM,
+        distanceCount: result.distanceCount,
+        clearanceCount: result.clearanceCount,
+      };
+      saveLibrary();
+      els.guidedComputeStatus.textContent = "Calibration computed. Review the fit before applying it.";
+      renderGuidedResult();
+    } catch (error) {
+      g.lastResult = null;
+      els.guidedFitBadge.textContent = "Needs data";
+      els.guidedFitBadge.className = "status-badge invalid";
+      els.guidedComputeStatus.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      els.guidedComputeBtn.disabled = false;
+    }
+  }
+
+  function renderGuidedResult() {
+    const g = guidedState();
+    const result = g.lastResult;
+    if (!result) {
+      els.guidedResults.hidden = true;
+      if (!els.guidedComputeStatus.textContent) els.guidedFitBadge.textContent = "Not computed";
+      if (!els.guidedComputeStatus.textContent) els.guidedFitBadge.className = "status-badge neutral";
+      return;
+    }
+    const good = result.distanceRmseM != null && result.distanceRmseM <= 0.025;
+    els.guidedFitBadge.textContent = good ? "Good fit" : "Review fit";
+    els.guidedFitBadge.className = `status-badge ${good ? "valid" : "neutral"}`;
+    const support = result.nozzleHeightReference === "ground" ? "above ground" : "above table";
+    const clearanceLine = result.placement === "ground"
+      ? "Not used in flat-ground mode"
+      : (result.clearanceRmseM == null ? "No net-height measurements used" : `Net-height RMSE ${fmt(result.clearanceRmseM * 100,2)} cm (${result.clearanceCount} values)`);
+    els.guidedResults.innerHTML = `
+      <div class="fit-summary-grid">
+        <div><span>Nozzle height</span><strong>${fmt(result.nozzleHeightM * 100,1)} cm</strong><small>${support}</small></div>
+        <div><span>Horizontal reference</span><strong>${fmt(Math.abs(result.nozzleXFromNearEdgeM) * 100,1)} cm</strong><small>${result.nozzleXReference === "base_back" ? "from back of base" : "from near edge"}</small></div>
+        <div><span>Landing RMSE</span><strong>${result.distanceRmseM == null ? "—" : `${fmt(result.distanceRmseM * 100,2)} cm`}</strong><small>${result.distanceCount} distances</small></div>
+        <div><span>Vertical check</span><strong>${result.clearanceRmseM == null ? "—" : `${fmt(result.clearanceRmseM * 100,2)} cm`}</strong><small>${clearanceLine}</small></div>
+      </div>
+      <div class="speed-map-result">
+        <h4>Linear raw wheel input → launch speed</h4>
+        ${result.speedModel ? `<p class="fit-equation">v = ${fmt(result.speedModel.interceptMps,4)} + ${fmt(result.speedModel.slopeMpsPerRaw,7)} × raw <span>m/s · profile RMSE ${fmt((result.speedModelRmseMps || 0) * 1000,1)} mm/s</span></p>` : ""}
+        ${result.speedMap.map(p => `<div><span>${Math.round(p.raw)}</span><strong>${fmt(p.speedMps,3)} m/s</strong><small>${fmt(p.speedMps * 3.6,2)} km/h</small></div>`).join("")}
+      </div>
+      <button id="guidedApplyResultBtn" class="button primary wide" type="button">Apply calibration to Robot Studio</button>`;
+    els.guidedResults.hidden = false;
+    $("guidedApplyResultBtn")?.addEventListener("click", applyGuidedCalibrationResult);
+  }
+
+  function applyGuidedCalibrationResult() {
+    const g = guidedState();
+    const result = g.lastResult;
+    if (!result) return;
+    const c = library.calibration;
+    // Guided placement describes the calibration experiment only. Applying
+    // the result must not move the robot in the drill model or switch its
+    // operational placement. Only intrinsic launch calibration is updated.
+    c.nozzleHeight = result.nozzleHeightM;
+    c.nova.rawSpeedMap = result.speedMap.map(point => ({ raw: point.raw, speedMps: point.speedMps }));
+    saveLibrary();
+    renderAll();
+    renderCalibration();
+    toast("Nozzle height and linear Nova speed calibration applied; robot pose was left unchanged");
+  }
+
+  function bindGuidedCalibrationInputs() {
+    els.calibrationGuidedTab.addEventListener("click", () => setCalibrationTab("guided"));
+    els.guidedPlacementTable.addEventListener("change", () => { if (els.guidedPlacementTable.checked) setGuidedPlacement("table"); });
+    els.guidedPlacementGround.addEventListener("change", () => { if (els.guidedPlacementGround.checked) setGuidedPlacement("ground"); });
+    els.guidedDistanceReference.addEventListener("change", () => { if (guidedState().placement !== "ground") guidedState().distanceReference = els.guidedDistanceReference.value; saveLibrary(); renderGuidedCalibration(); });
+    els.guidedBuildPlanBtn.addEventListener("click", () => {
+      try { syncGuidedConfigFromInputs(); rebuildGuidedPlan(true); renderGuidedCalibration(); toast("Calibration test plan updated"); }
+      catch (error) { toast(error instanceof Error ? error.message : String(error)); }
+    });
+    els.guidedResetPlanBtn.addEventListener("click", () => { library.calibration.guided = defaultGuidedCalibration(); saveLibrary(); renderGuidedCalibration(); toast("Calibration plan reset to recommended defaults"); });
+    els.guidedSaveNextBtn.addEventListener("click", () => { void saveGuidedAndNext(); });
+    els.guidedPreviousBtn.addEventListener("click", () => moveGuidedCurrent(-1));
+    els.guidedNextBtn.addEventListener("click", () => moveGuidedCurrent(1));
+    els.guidedFeedBtn.addEventListener("click", () => { void toggleGuidedFeed(); });
+    els.guidedComputeBtn.addEventListener("click", computeGuidedCalibration);
+    els.guidedMeasurementBody.addEventListener("click", event => {
+      const row = event.target.closest("tr[data-guided-row]");
+      if (!row) return;
+      guidedState().currentIndex = clamp(row.dataset.guidedRow, 0, guidedState().shots.length - 1, 0);
+      saveLibrary();
+      renderGuidedCalibration();
+    });
+  }
+
   function bindCalibrationInputs() {
     const bindings = [
       [els.poseXInput, value => library.calibration.pose.x = clamp(value, -1.5, 4.2, -.18)],
@@ -2700,6 +3432,7 @@
       renderGraph();
       renderInspector();
     });
+    bindGuidedCalibrationInputs();
     els.calibrationPoseTab.addEventListener("click", () => setCalibrationTab("pose"));
     els.calibrationTableTab.addEventListener("click", () => setCalibrationTab("table"));
     els.novaScaleTableBody.addEventListener("change", event => {
@@ -2836,9 +3569,9 @@
     const warnings = [];
     const upDown = c.nova.upDownAtZeroDeg + c.nova.upDownPerDegree * shot.params.elevationDeg;
     const placement = shot.params.aimDeg / c.nova.yawDegreesPerPlacement;
-    const curve = c.nova.spinsightCurve;
-    const minMps = curve[0].speedKmh / 3.6;
-    const maxMps = curve.at(-1).speedKmh / 3.6;
+    const exitRange = estimate.exitRange || (LaunchModel ? LaunchModel.exitSpeedRange(c.nova.rawSpeedMap) : null);
+    const minMps = exitRange ? exitRange.minMps : 1;
+    const maxMps = exitRange ? exitRange.maxMps : 20;
 
     if (upDown < -50 - 1e-6 || upDown > 100 + 1e-6) {
       errors.push(`“${shot.label}”: elevation ${fmt(shot.params.elevationDeg,1)}° maps to Nova Up/down ${fmt(upDown,1)}, outside -50…100.`);
@@ -2847,7 +3580,7 @@
       errors.push(`“${shot.label}”: aim ${fmt(shot.params.aimDeg,1)}° maps to placement ${fmt(placement,1)}, outside -10…10.`);
     }
     if (shot.params.speedMps < minMps - .01 || shot.params.speedMps > maxMps + .01) {
-      warnings.push(`“${shot.label}”: ${fmt(shot.params.speedMps,1)} m/s is outside the Spinsight speed curve (${fmt(minMps,1)}…${fmt(maxMps,1)} m/s); the nearest calibrated speed setting is used.`);
+      warnings.push(`“${shot.label}”: ${fmt(shot.params.speedMps,1)} m/s is outside the supported linear exit-speed range (${fmt(minMps,1)}…${fmt(maxMps,1)} m/s); the nearest supported wheel input is used.`);
     }
     if (estimate.limited) {
       warnings.push(`“${shot.label}”: requested ${fmt(Math.abs(shot.params.spinRps),1)} rps exceeds the calibrated ${fmt(estimate.maxSpinRps,1)} rps capacity at this speed; spin is clamped.`);
@@ -3324,7 +4057,7 @@
   }
 
   function updatePlayButton() {
-    const active = playbackRunning || calibrationTestRunning || robotIsActive();
+    const active = playbackRunning || calibrationTestRunning || calibrationFeedRunning || robotIsActive();
     const stopping = robot?.phase === "stopping";
     els.playBtn.classList.toggle("running", active || stopping);
     els.playIcon.textContent = active || stopping ? "■" : "▶";
@@ -3509,14 +4242,16 @@
 
   function restoreExampleLibrary() {
     askConfirm(
-      "Load example drills?",
-      "This replaces the locally saved drill library with the built-in examples. Export first if you need the current data.",
+      "Restore default training library?",
+      "This replaces the locally saved drill library with the built-in shot and drill presets. Your calibration is preserved. Export first if you need the current drills.",
       () => {
         stopPlayback();
+        const calibration = sanitizeCalibration(library.calibration);
         library = makeSampleLibrary();
+        library.calibration = calibration;
         selection = null;
-        startupNotice = "Example drills restored.";
-        commit({ message: "Example drills restored" });
+        startupNotice = "Default training library restored.";
+        commit({ message: "Default training library restored" });
         setTimeout(fitGraph, 40);
       }
     );
@@ -3648,6 +4383,7 @@
     }
     updatePlayButton();
     renderCalibrationTestShotPanel();
+    renderGuidedCalibration();
   }
 
   function appendRobotLog(detail) {
@@ -3668,7 +4404,8 @@
     }
     try {
       if (robot.connected) {
-        if (playbackRunning || robotIsActive()) await stopPlayback();
+        if (calibrationFeedRunning) await stopGuidedFeed();
+        if (playbackRunning || calibrationTestRunning || robotIsActive()) await stopPlayback();
         await robot.disconnect({ stopFirst: false });
         toast("Nova disconnected");
       } else {
@@ -3769,14 +4506,10 @@
       robot.addEventListener("disconnect", handleUnexpectedRobotDisconnect);
     }
 
-    const addNodeFromToolbox = type => {
-      addNode(type);
-      if (isMobileWorkspace()) closeMobileDrawers();
-    };
-    els.addShotBtn.addEventListener("click", () => addNodeFromToolbox("shot"));
-    els.addRandomBtn.addEventListener("click", () => addNodeFromToolbox("random"));
-    els.addDrillNodeBtn.addEventListener("click", () => addNodeFromToolbox("drill"));
-    els.addCounterBtn.addEventListener("click", () => addNodeFromToolbox("counter"));
+    els.addShotBtn.addEventListener("click", () => addNode("shot"));
+    els.addRandomBtn.addEventListener("click", () => addNode("random"));
+    els.addDrillNodeBtn.addEventListener("click", () => addNode("drill"));
+    els.addCounterBtn.addEventListener("click", () => addNode("counter"));
     els.deleteSelectionBtn.addEventListener("click", deleteSelection);
     els.fitBtn.addEventListener("click", fitGraph);
     els.newDrillBtn.addEventListener("click", createDrill);
@@ -3790,19 +4523,8 @@
     els.deleteDrillBtn.addEventListener("click", deleteActiveDrill);
     els.resetExamplesBtn.addEventListener("click", restoreExampleLibrary);
 
-    els.mobileToolsBtn.addEventListener("click", () => openMobileDrawer("tools"));
-    els.mobileInspectorBtn.addEventListener("click", () => openMobileDrawer("inspector"));
-    els.mobileFitBtn.addEventListener("click", fitGraph);
-    els.closeToolboxBtn.addEventListener("click", closeMobileDrawers);
-    els.closeInspectorBtn.addEventListener("click", closeMobileDrawers);
-    els.mobileDrawerBackdrop.addEventListener("click", closeMobileDrawers);
-
-    els.graphViewport.addEventListener("pointerdown", onGraphTouchPointerDown, { capture: true });
     els.graphViewport.addEventListener("pointerdown", onCanvasPointerDown);
     els.graphViewport.addEventListener("wheel", onGraphWheel, { passive: false });
-    window.addEventListener("pointermove", onGraphTouchPointerMove, { capture: true, passive: false });
-    window.addEventListener("pointerup", onGraphTouchPointerEnd, { capture: true });
-    window.addEventListener("pointercancel", onGraphTouchPointerEnd, { capture: true });
     els.graphSurface.addEventListener("click", () => {
       if (performance.now() < suppressClickUntil || connectionDrag) return;
       selection = null;
@@ -3853,16 +4575,20 @@
       saveLibrary();
     });
     els.playBtn.addEventListener("click", () => {
-      if (playbackRunning || calibrationTestRunning || robotIsActive()) void stopPlayback();
+      if (calibrationFeedRunning) void stopGuidedFeed();
+      else if (playbackRunning || calibrationTestRunning || robotIsActive()) void stopPlayback();
       else void startPlayback();
     });
 
     els.calibrationBtn.addEventListener("click", () => {
-      setCalibrationTab("pose");
+      setCalibrationTab("guided");
       renderCalibration();
       els.calibrationDialog.showModal();
     });
-    els.closeCalibrationBtn.addEventListener("click", () => els.calibrationDialog.close());
+    els.closeCalibrationBtn.addEventListener("click", () => {
+      if (calibrationFeedRunning) void stopGuidedFeed();
+      els.calibrationDialog.close();
+    });
     bindCalibrationInputs();
 
     els.previewBtn.addEventListener("click", () => {
@@ -3888,18 +4614,9 @@
       if (callback) callback();
     });
 
-    document.addEventListener("keydown", event => {
-      if (event.key === "Escape" && (els.toolboxPanel.classList.contains("mobile-drawer-open") || els.inspectorPanel.classList.contains("mobile-drawer-open"))) {
-        closeMobileDrawers();
-      }
-    });
-
-    window.addEventListener("resize", () => {
-      syncResponsiveWorkspace();
-      renderGraph();
-    });
+    window.addEventListener("resize", () => renderGraph());
     window.addEventListener("beforeunload", event => {
-      if (!playbackRunning && !calibrationTestRunning && !robotIsActive()) return;
+      if (!playbackRunning && !calibrationTestRunning && !calibrationFeedRunning && !robotIsActive()) return;
       event.preventDefault();
       event.returnValue = "";
     });
@@ -3907,11 +4624,10 @@
 
   try {
     assertRequiredElements();
-    if (!Protocol || !RobotController || !robot) throw new Error("Pongbot protocol/BLE modules did not load");
+    if (!Protocol || !RobotController || !robot || !GuidedCalibration) throw new Error("Pongbot protocol/BLE/guided calibration modules did not load");
     Protocol.selfTest();
     repairLibraryIfNeeded();
     bindEvents();
-    syncResponsiveWorkspace();
     els.graphWorld.style.transform = `scale(${graphZoom})`;
     els.graphSurface.style.width = `${SURFACE_WIDTH * graphZoom}px`;
     els.graphSurface.style.height = `${SURFACE_HEIGHT * graphZoom}px`;
@@ -3923,6 +4639,11 @@
     saveLibrary();
     if (startupNotice) setTimeout(() => toast(startupNotice), 100);
     setTimeout(fitGraph, 80);
+    if (new URLSearchParams(location.search).get("calibration") === "1") {
+      setCalibrationTab("guided");
+      renderCalibration();
+      setTimeout(() => els.calibrationDialog.showModal(), 20);
+    }
   } catch (error) {
     showFatalError(error);
   }

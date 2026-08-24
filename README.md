@@ -80,18 +80,23 @@ or pushed with normal Git tooling.
 **Preview trace** is simulation-only. **Calibration → Calibration test shot** sends
 one real ball using the current calibration and the same state gating as normal Play.
 
+## Guided calibration setups
+
+The guided calibration supports two experiment geometries. **On table** uses the tabletop as the support plane and can use net-referenced landing distance plus optional net clearance. **On ground** is a flat-floor calibration only: place the robot on the floor, use the back of the robot base as x=0, and measure from the back of the base to the first landing point on the ground. The table and net are not part of the ground calibration forward model. Switching calibration setup does not change the operational robot pose used by drills.
+
 ## Robot geometry and calibration
 
-The current default nozzle height is:
+The current working default geometry is:
 
 ```text
-0.205 m
+nozzle height above support surface: 0.225 m
+back of robot base -> nozzle:         0.265 m
 ```
 
-This is a working estimate for the center of the Nova S Pro ball exit above the table
-with the head nominally level. It is not presented as a manufacturer-specified
-measurement. Keep it configurable and calibrate against the physical robot when
-trajectory accuracy matters.
+These values are calibration estimates rather than manufacturer-specified dimensions.
+The 22.5 cm height is treated as the current geometry constraint; the 26.5 cm horizontal
+offset is the best-fit value from the local no-spin landing measurements under that
+constraint. Both remain editable/calibratable.
 
 The editor uses physical inputs:
 
@@ -100,8 +105,34 @@ The editor uses physical inputs:
 - elevation: degrees
 - aim: degrees
 
+The default motor conversion uses a single linear raw-wheel-input → nozzle-exit-speed
+model. It is fit to the local no-spin trajectory measurements at raw inputs 2025,
+2167 and 2388 (5.04, 5.39 and 5.79 m/s) together with the published Spinsight Nova
+speed data after an overlap correction from in-flight speed to nozzle-exit speed.
+For the current default data the fit is approximately:
+
+```text
+v_exit [m/s] = 2.43196 + 0.00133394 * raw_wheel_input
+RMSE over the combined source points = 0.1606 m/s
+```
+
+The low-order fit deliberately smooths the quantization/noise in the Spinsight table
+instead of interpolating through every reported speed. Spin conversion remains
+speed-dependent and uses the Spinsight max-spin table; at a fixed Nova speed the
+wheel-difference → rps relation is linear. Guided calibration fits its collected
+no-spin speed points to one straight line before applying them, and those local
+results are then combined with the external Spinsight prior.
+
 Real Play currently permits physical head orientation types `0` and `4`. Side/mixed
 orientations remain blocked until their physical spin axes are verified.
+
+## Default training library
+
+A fresh install now starts with a practical shot-and-drill library instead of the old graph-editor demonstration examples. It includes common topspin, backspin, no-spin and fast/deep feeds plus forehand/backhand alternating, 2-2, Falkenberg, three-point and semi-random/random footwork patterns. Built-in shot parameters were solved with the current default trajectory model from the centered robot position and use conservative table-edge and net-clearance margins.
+
+The **Restore defaults** action replaces the drill library but preserves the current robot calibration. The one-time migration from the previous three built-in examples also preserves calibration. User-created libraries are not automatically replaced.
+
+See `TRAINING_LIBRARY.md` for the preset list, modeled target assumptions and coaching references.
 
 ## Execution model
 
@@ -167,6 +198,7 @@ The current JSON format uses:
 ```json
 {
   "schemaVersion": 1,
+  "builtInLibraryVersion": 2,
   "activeDrillId": "...",
   "calibration": {},
   "drills": []
@@ -207,6 +239,7 @@ pongbot-ble.js             Web Bluetooth transport and Nova state machine
 selftest.js                Offline protocol/BLE integration test
 PROTOCOL.md                Packet-level protocol notes and provenance
 MODEL_SOURCES.md           Trajectory-model sources and assumptions
+TRAINING_LIBRARY.md         Default shot/drill presets and coaching references
 SECURITY.md                Safety/privacy guidance for contributors
 THIRD_PARTY_NOTICES.md     External references and provenance notes
 scripts/                   Local development and preflight helpers
