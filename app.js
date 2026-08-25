@@ -16,6 +16,8 @@
   const NODE_WIDTH = 226;
   const MIN_NODE_Y = 24;
   const MAX_TRANSITIONS = 1200;
+  const MOBILE_LAYOUT_CENTER_X = SURFACE_WIDTH / 2;
+  const nodeHeightCache = new Map();
 
   const $ = (id) => document.getElementById(id);
   const GuidedCalibration = globalThis.GuidedCalibration;
@@ -67,11 +69,6 @@
     addCounterBtn: $("addCounterBtn"),
     deleteSelectionBtn: $("deleteSelectionBtn"),
     fitBtn: $("fitBtn"),
-    mobileDrillsBtn: $("mobileDrillsBtn"),
-    closeMobileDrillsBtn: $("closeMobileDrillsBtn"),
-    mobileGraphNavBtn: $("mobileGraphNavBtn"),
-    mobileDrillsNavBtn: $("mobileDrillsNavBtn"),
-    mobileCalibrationNavBtn: $("mobileCalibrationNavBtn"),
     statusBadge: $("statusBadge"),
     validationList: $("validationList"),
     activeDrillTitle: $("activeDrillTitle"),
@@ -217,6 +214,58 @@
     confirmText: $("confirmText"),
     confirmActionBtn: $("confirmActionBtn"),
     toast: $("toast"),
+    topBackBtn: $("topBackBtn"),
+    topbarContext: $("topbarContext"),
+    libraryScreen: $("libraryScreen"),
+    runScreen: $("runScreen"),
+    editorScreen: $("editorScreen"),
+    robotScreen: $("robotScreen"),
+    desktopLibraryNavBtn: $("desktopLibraryNavBtn"),
+    desktopRunNavBtn: $("desktopRunNavBtn"),
+    desktopEditNavBtn: $("desktopEditNavBtn"),
+    desktopRobotNavBtn: $("desktopRobotNavBtn"),
+    mobileLibraryNavBtn: $("mobileLibraryNavBtn"),
+    mobileRunNavBtn: $("mobileRunNavBtn"),
+    mobileEditNavBtn: $("mobileEditNavBtn"),
+    mobileRobotNavBtn: $("mobileRobotNavBtn"),
+    runBackBtn: $("runBackBtn"),
+    editorBackBtn: $("editorBackBtn"),
+    robotBackBtn: $("robotBackBtn"),
+    runDrillTitle: $("runDrillTitle"),
+    runDrillDescription: $("runDrillDescription"),
+    runDrillMenuBtn: $("runDrillMenuBtn"),
+    runEditDrillBtn: $("runEditDrillBtn"),
+    runRobotBtn: $("runRobotBtn"),
+    runConnectionDot: $("runConnectionDot"),
+    runConnectionText: $("runConnectionText"),
+    runRobotSetup: $("runRobotSetup"),
+    editorRunBtn: $("editorRunBtn"),
+    drillDetailsBtn: $("drillDetailsBtn"),
+    editorAutosaveText: $("editorAutosaveText"),
+    inspectorBackBtn: $("inspectorBackBtn"),
+    inspectorCloseBtn: $("inspectorCloseBtn"),
+    addNodeMenuBtn: $("addNodeMenuBtn"),
+    addNodeDialog: $("addNodeDialog"),
+    closeAddNodeDialogBtn: $("closeAddNodeDialogBtn"),
+    addNodeChoicePanel: $("addNodeChoicePanel"),
+    addNodeConfigPanel: $("addNodeConfigPanel"),
+    addNodeDialogTitle: $("addNodeDialogTitle"),
+    addNodeDialogSubtitle: $("addNodeDialogSubtitle"),
+    drillDetailsDialog: $("drillDetailsDialog"),
+    closeDrillDetailsBtn: $("closeDrillDetailsBtn"),
+    drillDescriptionInput: $("drillDescriptionInput"),
+    drillTagsInput: $("drillTagsInput"),
+    drillRobotXInput: $("drillRobotXInput"),
+    drillRobotYInput: $("drillRobotYInput"),
+    drillRobotYawInput: $("drillRobotYawInput"),
+    drillDetailsReadonlyNote: $("drillDetailsReadonlyNote"),
+    libraryMoreBtn: $("libraryMoreBtn"),
+    libraryAdvancedActions: $("libraryAdvancedActions"),
+    robotPageDot: $("robotPageDot"),
+    robotPageConnection: $("robotPageConnection"),
+    robotPageDevice: $("robotPageDevice"),
+    robotDiagnosticsBtn: $("robotDiagnosticsBtn"),
+    robotSettingsShortcutBtn: $("robotSettingsShortcutBtn"),
   };
 
   let startupNotice = "";
@@ -233,6 +282,10 @@
   let suppressClickUntil = 0;
   let toastTimer = null;
   let confirmCallback = null;
+  let appView = "library";
+  let appHistory = [];
+  let inspectorOpen = false;
+  let addNodeDraftType = null;
   let playbackToken = 0;
   let playbackRunning = false;
   let calibrationTestRunning = false;
@@ -467,6 +520,12 @@
     return {
       id: makeId("drill"),
       name,
+      description: "",
+      tags: [],
+      // Expected physical placement for this drill. x/y refer to the nozzle position
+      // in table coordinates; the default corresponds to the back of the robot base
+      // aligned with the near table edge and the 26.5 cm base-to-nozzle estimate.
+      robotPose: { x: 0.265, y: 0, yawDeg: 0 },
       startNodeId: null,
       settings: { repetitions: 3, delayBetweenSets: 1.0 },
       nodes: [],
@@ -1047,6 +1106,13 @@
       drill.id = stableIds.get(drill.id);
       drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name] || "builtin-random";
       drill.builtIn = true;
+      const folderName = BUILT_IN_FOLDER_DEFS.find(folder => folder.id === drill.libraryFolderId)?.name || "Training";
+      drill.tags = [...new Set([folderName.toLowerCase(), drill.name.startsWith("Match:") ? "match-like" : "training"].filter(Boolean))];
+      drill.description = drill.description || (drill.name.startsWith("Match:")
+        ? "Match-like robot pattern with realistic placement and timing variation."
+        : folderName === "Shots"
+          ? "Repeatable single-shot feed for technique and calibration-aware practice."
+          : `${folderName} training pattern from the built-in library.`);
       for (const node of drill.nodes || []) {
         if (node.type === "drill" && stableIds.has(node.referencedDrillId)) node.referencedDrillId = stableIds.get(node.referencedDrillId);
       }
@@ -1331,6 +1397,17 @@
         delaySeconds: clamp(e.delaySeconds, 0, 3600, 0),
       }));
 
+    drill.description = String(raw?.description || "").trim().slice(0, 600);
+    drill.tags = Array.isArray(raw?.tags)
+      ? [...new Set(raw.tags.map(tag => String(tag).trim()).filter(Boolean))].slice(0, 20)
+      : String(raw?.tags || "").split(",").map(tag => tag.trim()).filter(Boolean).slice(0, 20);
+    const rawPose = raw?.robotPose || {};
+    drill.robotPose = {
+      x: clamp(rawPose.x, -1.5, 4.2, 0.265),
+      y: clamp(rawPose.y, -2, 2, 0),
+      yawDeg: clamp(rawPose.yawDeg, -180, 180, 0),
+    };
+
     const settings = raw?.settings || {};
     const repetitions = Math.round(finite(settings.repetitions, 1));
     drill.settings = {
@@ -1501,13 +1578,12 @@
   }
 
   function setRepetitions(value) {
-    if (!activeDrillEditable()) return;
     const drill = activeDrill();
     if (!drill) return;
     const normalized = Math.round(finite(value, 0));
     drill.settings.repetitions = normalized <= 0 ? 0 : Math.min(999999, normalized);
     els.repetitionsInput.value = repetitionsDisplay(drill.settings.repetitions);
-    saveLibrary();
+    if (activeDrillEditable()) saveLibrary();
   }
 
   function currentSettingsToHeader() {
@@ -1515,6 +1591,124 @@
     if (!drill) return;
     els.repetitionsInput.value = repetitionsDisplay(drill.settings.repetitions);
     els.setDelayInput.value = drill.settings.delayBetweenSets;
+  }
+
+  function appViewLabel(view) {
+    return view === "run" ? "Run drill" : view === "editor" ? "Drill editor" : view === "robot" ? "Robot" : "Drill library";
+  }
+
+  function navigateApp(view, { push = true } = {}) {
+    const normalized = ["library", "run", "editor", "robot"].includes(view) ? view : "library";
+    if (normalized === "run" && !activeDrill()) view = "library";
+    if (normalized === "editor" && !activeDrill()) view = "library";
+    const next = ["library", "run", "editor", "robot"].includes(view) ? view : "library";
+    if (push && next !== appView) appHistory.push(appView);
+    appView = next;
+    inspectorOpen = false;
+    selection = next === "editor" ? selection : selection;
+    document.body.dataset.appView = next;
+    const screens = { library: els.libraryScreen, run: els.runScreen, editor: els.editorScreen, robot: els.robotScreen };
+    Object.entries(screens).forEach(([key, screen]) => { if (screen) screen.hidden = key !== next; });
+    const navs = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn, els.mobileLibraryNavBtn, els.mobileRunNavBtn, els.mobileEditNavBtn, els.mobileRobotNavBtn];
+    navs.forEach(button => {
+      if (!button) return;
+      const active = button.dataset.appNav === next;
+      button.classList.toggle("active", active);
+      if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
+    });
+    if (els.topbarContext) els.topbarContext.textContent = appViewLabel(next);
+    if (els.topBackBtn) els.topBackBtn.hidden = appHistory.length === 0;
+    document.body.classList.remove("details-open");
+    if (next === "editor") setTimeout(() => { renderGraph(); fitGraph(); }, 20);
+    renderRunPage();
+    renderRobotSetupSummary();
+  }
+
+  function goBackApp() {
+    inspectorOpen = false;
+    document.body.classList.remove("details-open");
+    const previous = appHistory.pop();
+    if (previous) navigateApp(previous, { push: false });
+    else navigateApp("library", { push: false });
+  }
+
+  function openInspectorScreen() {
+    inspectorOpen = Boolean(selection);
+    document.body.classList.toggle("details-open", inspectorOpen);
+  }
+
+  function closeInspectorScreen() {
+    inspectorOpen = false;
+    selection = null;
+    document.body.classList.remove("details-open");
+    renderInspector();
+    renderGraph();
+  }
+
+  function activeDrillDescription(drill = activeDrill()) {
+    if (!drill) return "Select a drill from the library to start a session.";
+    if (drill.description) return drill.description;
+    const tags = Array.isArray(drill.tags) && drill.tags.length ? ` · ${drill.tags.join(" · ")}` : "";
+    return `${drill.nodes.filter(node => node.type === "shot").length} shot node${drill.nodes.filter(node => node.type === "shot").length === 1 ? "" : "s"}${tags}`;
+  }
+
+  function drillPose(drill = activeDrill()) {
+    const p = drill?.robotPose || library?.calibration?.pose || { x: 0.265, y: 0, yawDeg: 0 };
+    return { x: finite(p.x, 0.265), y: finite(p.y, 0), yawDeg: finite(p.yawDeg, 0) };
+  }
+
+  function poseWords(pose) {
+    const y = Math.abs(pose.y) < .025 ? "Centered" : `${Math.abs(pose.y * 100).toFixed(0)} cm ${pose.y > 0 ? "left" : "right"} of centre`;
+    const edge = Math.abs(pose.x - 0.265) < .035 ? "near edge" : `nozzle x ${pose.x.toFixed(2)} m`;
+    const yaw = Math.abs(pose.yawDeg) < 1 ? "straight ahead" : `${pose.yawDeg > 0 ? "left" : "right"} ${Math.abs(pose.yawDeg).toFixed(0)}°`;
+    return `${y} · ${edge} · ${yaw}`;
+  }
+
+  function robotSetupMiniSvg(pose) {
+    const table = library?.calibration?.table || regulationTable();
+    const w = 250, h = 118, pad = 12;
+    const sx = (w - pad * 2) / table.length;
+    const sy = (h - pad * 2) / table.width;
+    const x = pad + pose.x * sx;
+    const y = h / 2 - pose.y * sy;
+    const ray = 28;
+    const a = radians(pose.yawDeg);
+    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Robot setup top view"><rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}" rx="4" fill="#123047" stroke="#6f8196"/><line x1="${w/2}" x2="${w/2}" y1="${pad}" y2="${h-pad}" stroke="#d7e0e9"/><circle cx="${x}" cy="${y}" r="7" fill="#55c98c"/><line x1="${x}" y1="${y}" x2="${x+Math.cos(a)*ray}" y2="${y-Math.sin(a)*ray}" stroke="#8ce0b2" stroke-width="3" marker-end="url(#none)"/></svg>`;
+  }
+
+  function renderRobotSetupSummary() {
+    if (!els.runRobotSetup) return;
+    const drill = activeDrill();
+    if (!drill) { els.runRobotSetup.innerHTML = `<p class="helper">Choose a drill first.</p>`; return; }
+    const pose = drillPose(drill);
+    els.runRobotSetup.innerHTML = `<div class="robot-setup-mini">${robotSetupMiniSvg(pose)}</div><div><strong>${escapeHtml(poseWords(pose))}</strong><small>Expected physical position for this drill</small></div>`;
+  }
+
+  function renderRunPage() {
+    const drill = activeDrill();
+    if (els.runDrillTitle) els.runDrillTitle.textContent = drill ? (isActiveBuiltIn() ? builtInDisplayName(drill.name) : drill.name) : "Choose a drill";
+    if (els.runDrillDescription) els.runDrillDescription.textContent = activeDrillDescription(drill);
+    renderRobotSetupSummary();
+  }
+
+  function openDrillDetails() {
+    const drill = activeDrill();
+    if (!drill) return;
+    const readOnly = isActiveBuiltIn();
+    els.drillNameInput.value = readOnly ? builtInDisplayName(drill.name) : drill.name;
+    els.drillDescriptionInput.value = drill.description || "";
+    els.drillTagsInput.value = (drill.tags || []).join(", ");
+    const pose = drillPose(drill);
+    els.drillRobotXInput.value = pose.x;
+    els.drillRobotYInput.value = pose.y;
+    els.drillRobotYawInput.value = pose.yawDeg;
+    [els.drillNameInput, els.drillDescriptionInput, els.drillTagsInput, els.drillRobotXInput, els.drillRobotYInput, els.drillRobotYawInput].forEach(input => { if (input) input.disabled = readOnly; });
+    els.drillDetailsReadonlyNote.hidden = !readOnly;
+    els.drillDetailsReadonlyNote.innerHTML = readOnly ? `<div><strong>Built-in drill</strong><span>Built-ins update with the app. Copy it to My drills to change its metadata or graph.</span></div>` : "";
+    els.copyBuiltInBtn.hidden = !readOnly;
+    els.moveDrillBtn.hidden = readOnly;
+    els.deleteDrillBtn.hidden = readOnly;
+    els.drillDetailsDialog.showModal();
   }
 
   function renderAll() {
@@ -1531,6 +1725,7 @@
     els.drillNameInput.value = displayName === "No drill" ? "" : displayName;
     els.emptyHint.hidden = Boolean(drill?.nodes.length);
     renderLibraryEditState();
+    renderRunPage();
   }
 
   function libraryFolderDefs(root = libraryView.root) {
@@ -1615,15 +1810,13 @@
     renderLibraryEditState();
   }
 
-  function selectLibraryDrill(source, drill) {
+  function selectLibraryDrill(source, drill, destination = "run") {
     stopPlayback();
     setActiveDrill(source, drill.id, { save: false });
-    libraryView.root = source;
-    libraryView.folderId = source === "builtin" ? drill.libraryFolderId : (drill.folderId || null);
     selection = null;
     commit();
-    if (globalThis.matchMedia?.("(max-width: 760px)").matches) setMobileWorkspace("graph");
-    setTimeout(fitGraph, 30);
+    navigateApp(destination, { push: true });
+    if (destination === "editor") setTimeout(fitGraph, 30);
   }
 
   function renderDrillList() {
@@ -1638,17 +1831,7 @@
         const button = document.createElement("button");
         button.type = "button";
         button.className = "library-folder-item";
-        const icon = document.createElement("span");
-        icon.className = "library-folder-icon";
-        icon.textContent = "▸";
-        const text = document.createElement("span");
-        const strong = document.createElement("strong");
-        strong.textContent = folder.name;
-        const small = document.createElement("small");
-        const count = folderItemCount(libraryView.root, folder);
-        small.textContent = `${count} item${count === 1 ? "" : "s"}`;
-        text.append(strong, small);
-        button.append(icon, text);
+        button.innerHTML = `<span class="library-folder-icon">▣</span><span><strong>${escapeHtml(folder.name)}</strong><small>${folderItemCount(libraryView.root, folder)} items</small></span><span class="folder-chevron">›</span>`;
         button.addEventListener("click", () => {
           libraryView.folderId = folder.id;
           renderDrillList();
@@ -1658,33 +1841,39 @@
       }
     }
 
+    const allInRoot = libraryView.root === "builtin" ? builtInCatalog.drills : library.drills;
     const pool = query
-      ? (libraryView.root === "builtin" ? builtInCatalog.drills : library.drills).filter(drill => {
-          const haystack = `${drill.name} ${folderLabelForDrill(libraryView.root, drill)}`.toLowerCase();
+      ? allInRoot.filter(drill => {
+          const haystack = `${drill.name} ${drill.description || ""} ${(drill.tags || []).join(" ")} ${folderLabelForDrill(libraryView.root, drill)}`.toLowerCase();
           return haystack.includes(query);
         })
       : drillsInFolder(libraryView.root, libraryView.folderId);
 
     for (const drill of pool) {
       const source = libraryView.root;
-      const button = document.createElement("button");
-      button.type = "button";
-      const active = library.activeDrillSource === source && drill.id === library.activeDrillId;
-      button.className = `drill-list-item${active ? " active" : ""}`;
-      const text = document.createElement("span");
-      text.className = "drill-list-copy";
-      const strong = document.createElement("strong");
-      strong.textContent = source === "builtin" ? builtInDisplayName(drill.name) : drill.name;
-      const small = document.createElement("small");
-      const pathText = query ? `${folderLabelForDrill(source, drill)} · ` : "";
-      small.textContent = `${pathText}${drill.nodes.length} nodes${source === "builtin" ? " · read-only" : ""}`;
-      text.append(strong, small);
-      const badge = document.createElement("span");
-      badge.className = `library-source-badge ${source}`;
-      badge.textContent = source === "builtin" ? "Built-in" : "Mine";
-      button.append(text, badge);
-      button.addEventListener("click", () => selectLibraryDrill(source, drill));
-      els.drillList.appendChild(button);
+      const card = document.createElement("article");
+      card.className = "drill-library-card";
+      const run = document.createElement("button");
+      run.type = "button";
+      run.className = "drill-library-open";
+      const displayName = source === "builtin" ? builtInDisplayName(drill.name) : drill.name;
+      const folderText = query ? folderLabelForDrill(source, drill) : "";
+      const tagText = (drill.tags || []).slice(0, 3).join(" · ");
+      run.innerHTML = `<span class="drill-card-copy"><strong>${escapeHtml(displayName)}</strong><small>${escapeHtml(drill.description || tagText || `${drill.nodes.length} graph nodes`)}${folderText ? ` · ${escapeHtml(folderText)}` : ""}</small></span><span class="drill-card-action">Run ›</span>`;
+      run.addEventListener("click", () => selectLibraryDrill(source, drill, "run"));
+
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "drill-card-edit";
+      edit.setAttribute("aria-label", `Edit ${displayName}`);
+      edit.title = source === "builtin" ? "View built-in drill" : "Edit drill";
+      edit.textContent = "✎";
+      edit.addEventListener("click", event => {
+        event.stopPropagation();
+        selectLibraryDrill(source, drill, "editor");
+      });
+      card.append(run, edit);
+      els.drillList.appendChild(card);
     }
 
     if (!els.drillList.childElementCount) {
@@ -1702,7 +1891,7 @@
     if (!library || !builtInCatalog) return;
     const builtIn = isActiveBuiltIn();
     const currentFolder = libraryView.root === "user" ? folderById("user", libraryView.folderId) : null;
-    els.newDrillBtn.hidden = libraryView.root !== "user";
+    els.newDrillBtn.hidden = false;
     els.newFolderBtn.hidden = libraryView.root !== "user";
     els.renameFolderBtn.hidden = libraryView.root !== "user" || !currentFolder;
     els.deleteFolderBtn.hidden = libraryView.root !== "user" || !currentFolder;
@@ -1712,10 +1901,6 @@
     els.deleteDrillBtn.hidden = builtIn;
 
     els.drillNameInput.disabled = builtIn;
-    els.repetitionsInput.disabled = builtIn;
-    els.repetitionsDownBtn.disabled = builtIn;
-    els.repetitionsUpBtn.disabled = builtIn;
-    els.setDelayInput.disabled = builtIn;
     els.addShotBtn.disabled = builtIn;
     els.addRandomBtn.disabled = builtIn;
     els.addDrillNodeBtn.disabled = builtIn;
@@ -1745,49 +1930,279 @@
     els.libraryStatus.textContent = `${builtInCount} built-in · ${userCount} My drill${userCount === 1 ? "" : "s"}`;
   }
 
-  function nodeHeight(drill, node) {
-    if (node.type === "shot") return 270;
+  function nodeHeightKey(drill, node) {
+    return `${drill?.id || "drill"}:${node?.id || "node"}`;
+  }
+
+  function estimatedNodeHeight(drill, node) {
+    if (node.type === "shot") return 222;
     if (node.type === "random") return Math.max(112, 74 + (outgoing(drill, node.id).length + 1) * 27);
     if (node.type === "counter") return 116;
     return 112;
   }
 
+  function nodeMinimumHeight(drill, node) {
+    // Branch handles are positioned around the outside of Random/Repeater cards, so
+    // these two types need enough body height for their ports even when their text is short.
+    if (node.type === "random") return Math.max(108, 74 + (outgoing(drill, node.id).length + 1) * 27);
+    if (node.type === "counter") return 108;
+    return 0;
+  }
+
+  function nodeHeight(drill, node) {
+    return nodeHeightCache.get(nodeHeightKey(drill, node)) || estimatedNodeHeight(drill, node);
+  }
+
+  function measureRenderedNodeHeights(drill) {
+    let changed = false;
+    els.nodeLayer.querySelectorAll(".flow-node[data-node-id]").forEach(article => {
+      const node = getNode(drill, article.dataset.nodeId);
+      if (!node) return;
+      const measured = Math.max(1, Math.ceil(article.offsetHeight));
+      const key = nodeHeightKey(drill, node);
+      if (Math.abs((nodeHeightCache.get(key) || 0) - measured) > 1) {
+        nodeHeightCache.set(key, measured);
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
+  function mobileGraphLayoutEnabled() {
+    return Boolean(globalThis.matchMedia?.("(max-width: 760px)")?.matches);
+  }
+
+  function orderedGraphNodes(drill) {
+    if (!drill?.nodes?.length) return [];
+    const result = [];
+    const seen = new Set();
+    const queue = [];
+    const start = getNode(drill, drill.startNodeId);
+    if (start) queue.push(start);
+    while (queue.length) {
+      const node = queue.shift();
+      if (!node || seen.has(node.id)) continue;
+      seen.add(node.id); result.push(node);
+      outgoing(drill, node.id).forEach(edge => { const target = getNode(drill, edge.target); if (target && !seen.has(target.id)) queue.push(target); });
+    }
+    drill.nodes.forEach(node => { if (!seen.has(node.id)) result.push(node); });
+    return result;
+  }
+
+  function mobileLayoutMap(drill) {
+    const map = new Map();
+    if (!drill?.nodes?.length) return map;
+
+    // Layer the graph by distance from START. Nodes in the same branch depth share
+    // a row and are spread horizontally. This keeps the mobile reading direction
+    // vertical while preventing sibling branches from being drawn on top of each other.
+    const depth = new Map();
+    const start = getNode(drill, drill.startNodeId);
+    const queue = [];
+    if (start) { depth.set(start.id, 0); queue.push(start); }
+    while (queue.length) {
+      const node = queue.shift();
+      const d = depth.get(node.id) || 0;
+      for (const edge of outgoing(drill, node.id)) {
+        const target = getNode(drill, edge.target);
+        if (!target || depth.has(target.id)) continue;
+        depth.set(target.id, d + 1);
+        queue.push(target);
+      }
+    }
+
+    let orphanDepth = Math.max(0, ...depth.values()) + 1;
+    for (const node of drill.nodes) {
+      if (!depth.has(node.id)) depth.set(node.id, orphanDepth++);
+    }
+
+    const levels = new Map();
+    for (const node of drill.nodes) {
+      const d = depth.get(node.id) || 0;
+      if (!levels.has(d)) levels.set(d, []);
+      levels.get(d).push(node);
+    }
+
+    let y = 180;
+    const horizontalGap = 48;
+    const verticalGap = 92;
+    for (const d of [...levels.keys()].sort((a,b) => a-b)) {
+      const nodes = levels.get(d).slice().sort((a,b) => (a.y - b.y) || (a.x - b.x));
+      const totalWidth = nodes.length * NODE_WIDTH + Math.max(0, nodes.length - 1) * horizontalGap;
+      const startX = clamp(MOBILE_LAYOUT_CENTER_X - totalWidth / 2, 40, SURFACE_WIDTH - totalWidth - 40, 40);
+      let levelHeight = 0;
+      nodes.forEach((node, index) => {
+        map.set(node.id, { x: startX + index * (NODE_WIDTH + horizontalGap), y });
+        levelHeight = Math.max(levelHeight, nodeHeight(drill, node));
+      });
+      y += levelHeight + verticalGap;
+    }
+    return map;
+  }
+
+  function desktopBuiltInLayoutMap(drill) {
+    const map = new Map();
+    if (!drill?.nodes?.length) return map;
+
+    const depth = new Map();
+    const start = getNode(drill, drill.startNodeId);
+    const queue = [];
+    if (start) { depth.set(start.id, 0); queue.push(start); }
+    while (queue.length) {
+      const node = queue.shift();
+      const d = depth.get(node.id) || 0;
+      for (const edge of outgoing(drill, node.id)) {
+        const target = getNode(drill, edge.target);
+        if (!target || depth.has(target.id)) continue;
+        depth.set(target.id, d + 1);
+        queue.push(target);
+      }
+    }
+    let orphanDepth = Math.max(0, ...depth.values()) + 1;
+    for (const node of drill.nodes) if (!depth.has(node.id)) depth.set(node.id, orphanDepth++);
+
+    const levels = new Map();
+    for (const node of drill.nodes) {
+      const d = depth.get(node.id) || 0;
+      if (!levels.has(d)) levels.set(d, []);
+      levels.get(d).push(node);
+    }
+
+    const x0 = 300;
+    const horizontalGap = 130;
+    const verticalGap = 52;
+    const centerY = SURFACE_HEIGHT / 2;
+    for (const d of [...levels.keys()].sort((a,b) => a-b)) {
+      const nodes = levels.get(d).slice().sort((a,b) => (a.y - b.y) || (a.x - b.x));
+      const totalHeight = nodes.reduce((sum,node) => sum + nodeHeight(drill,node), 0) + Math.max(0,nodes.length-1) * verticalGap;
+      let y = clamp(centerY - totalHeight / 2, MIN_NODE_Y, SURFACE_HEIGHT - totalHeight - MIN_NODE_Y, MIN_NODE_Y);
+      for (const node of nodes) {
+        map.set(node.id, { x: x0 + d * (NODE_WIDTH + horizontalGap), y });
+        y += nodeHeight(drill,node) + verticalGap;
+      }
+    }
+    return map;
+  }
+
+  function visualNodePosition(drill, node) {
+    if (mobileGraphLayoutEnabled()) return mobileLayoutMap(drill).get(node.id) || { x: MOBILE_LAYOUT_CENTER_X - NODE_WIDTH / 2, y: node.y };
+    // Built-in presets are read-only, so a deterministic layered layout is safer
+    // than preserving old hand-authored coordinates that may no longer fit compact cards.
+    if (isActiveBuiltIn()) return desktopBuiltInLayoutMap(drill).get(node.id) || { x: node.x, y: node.y };
+    return { x: node.x, y: node.y };
+  }
+
+  function syntheticEndpointPositions(drill) {
+    const positions = drill.nodes.map(node => ({ node, ...visualNodePosition(drill, node) }));
+    if (!positions.length) return mobileGraphLayoutEnabled()
+      ? { start: { x: MOBILE_LAYOUT_CENTER_X, y: 120 }, end: { x: MOBILE_LAYOUT_CENTER_X, y: 330 } }
+      : { start: { x: 90, y: 300 }, end: { x: 500, y: 300 } };
+    if (mobileGraphLayoutEnabled()) {
+      const minY = Math.min(...positions.map(p => p.y));
+      const maxY = Math.max(...positions.map(p => p.y + nodeHeight(drill, p.node)));
+      return { start: { x: MOBILE_LAYOUT_CENTER_X, y: Math.max(40, minY - 95) }, end: { x: MOBILE_LAYOUT_CENTER_X, y: maxY + 75 } };
+    }
+    const minX = Math.min(...positions.map(p => p.x));
+    const maxX = Math.max(...positions.map(p => p.x + NODE_WIDTH));
+    const startNode = getNode(drill, drill.startNodeId);
+    const sp = startNode ? visualNodePosition(drill, startNode) : positions[0];
+    return { start: { x: Math.max(30, minX - 120), y: sp.y + nodeHeight(drill, startNode || positions[0].node)/2 - 22 }, end: { x: maxX + 90, y: sp.y + 20 } };
+  }
+
   function outputPosition(drill, node, edge = null, slot = null, add = false) {
     const h = nodeHeight(drill, node);
-    if (node.type === "shot" || node.type === "drill") return { x: node.x + NODE_WIDTH, y: node.y + h / 2 };
+    const pos = visualNodePosition(drill, node);
+    if (mobileGraphLayoutEnabled()) {
+      if (node.type === "counter") {
+        const actualSlot = slot || edge?.sourceSlot || "A";
+        return { x: pos.x + (actualSlot === "A" ? NODE_WIDTH * .36 : NODE_WIDTH * .64), y: pos.y + h };
+      }
+      if (node.type === "random") {
+        const edges = outgoing(drill, node.id);
+        const index = add ? edges.length : Math.max(0, edges.findIndex(e => e.id === edge?.id));
+        const count = Math.max(1, edges.length + (add ? 1 : 0));
+        return { x: pos.x + NODE_WIDTH * ((index + 1) / (count + 1)), y: pos.y + h };
+      }
+      return { x: pos.x + NODE_WIDTH / 2, y: pos.y + h };
+    }
+    if (node.type === "shot" || node.type === "drill") return { x: pos.x + NODE_WIDTH, y: pos.y + h / 2 };
     if (node.type === "counter") {
       const actualSlot = slot || edge?.sourceSlot || "A";
-      return { x: node.x + NODE_WIDTH, y: node.y + (actualSlot === "A" ? 51 : 86) };
+      return { x: pos.x + NODE_WIDTH, y: pos.y + (actualSlot === "A" ? 51 : 86) };
     }
     const edges = outgoing(drill, node.id);
     const index = add ? edges.length : Math.max(0, edges.findIndex(e => e.id === edge?.id));
-    return { x: node.x + NODE_WIDTH, y: node.y + 61 + index * 27 };
+    return { x: pos.x + NODE_WIDTH, y: pos.y + 61 + index * 27 };
   }
 
-  function renderGraph() {
+  function renderSyntheticEndpoints(drill) {
+    const points = syntheticEndpointPositions(drill);
+    const makeTerminal = (kind, label, point) => {
+      const el = document.createElement("div");
+      el.className = `flow-terminal ${kind}`;
+      el.textContent = label;
+      el.style.left = `${point.x - 55}px`;
+      el.style.top = `${point.y - 22}px`;
+      els.nodeLayer.appendChild(el);
+      return el;
+    };
+    makeTerminal("start", "START", points.start);
+    makeTerminal("end", "END", points.end);
+
+    const drawSynthetic = (from, to) => {
+      const mobile = mobileGraphLayoutEnabled();
+      const d = mobile
+        ? `M ${from.x} ${from.y} C ${from.x} ${from.y + 38}, ${to.x} ${to.y - 38}, ${to.x} ${to.y}`
+        : `M ${from.x} ${from.y} C ${from.x + 45} ${from.y}, ${to.x - 45} ${to.y}, ${to.x} ${to.y}`;
+      els.edgeLayer.appendChild(svg("path", { d, class: "synthetic-edge", "marker-end": "url(#arrow)" }));
+    };
+
+    const startNode = getNode(drill, drill.startNodeId);
+    if (startNode) {
+      const pos = visualNodePosition(drill, startNode);
+      const target = mobileGraphLayoutEnabled()
+        ? { x: pos.x + NODE_WIDTH / 2, y: pos.y }
+        : { x: pos.x, y: pos.y + nodeHeight(drill, startNode) / 2 };
+      const from = mobileGraphLayoutEnabled()
+        ? { x: points.start.x, y: points.start.y + 22 }
+        : { x: points.start.x + 55, y: points.start.y };
+      drawSynthetic(from, target);
+    } else {
+      const from = mobileGraphLayoutEnabled() ? { x: points.start.x, y: points.start.y + 22 } : { x: points.start.x + 55, y: points.start.y };
+      const to = mobileGraphLayoutEnabled() ? { x: points.end.x, y: points.end.y - 22 } : { x: points.end.x - 55, y: points.end.y };
+      drawSynthetic(from, to);
+    }
+
+    const terminals = drill.nodes.filter(node => outgoing(drill, node.id).length === 0);
+    terminals.forEach((node, index) => {
+      const pos = visualNodePosition(drill, node);
+      const from = mobileGraphLayoutEnabled()
+        ? { x: pos.x + NODE_WIDTH / 2, y: pos.y + nodeHeight(drill, node) }
+        : { x: pos.x + NODE_WIDTH, y: pos.y + nodeHeight(drill, node) / 2 };
+      const to = mobileGraphLayoutEnabled()
+        ? { x: points.end.x + (index - (terminals.length - 1)/2) * 12, y: points.end.y - 22 }
+        : { x: points.end.x - 55, y: points.end.y + (index - (terminals.length - 1)/2) * 10 };
+      drawSynthetic(from, to);
+    });
+  }
+
+  function renderGraph(heightReflowPass = false) {
     const drill = activeDrill();
     els.nodeLayer.replaceChildren();
     els.edgeLayer.replaceChildren();
     if (!drill) return;
 
-    renderEdges(drill);
-
     for (const node of drill.nodes) {
       const article = document.createElement("article");
       article.className = `flow-node ${node.type}`;
       article.dataset.nodeId = node.id;
-      article.style.left = `${node.x}px`;
-      article.style.top = `${node.y}px`;
-      article.style.height = `${nodeHeight(drill, node)}px`;
+      const displayPos = visualNodePosition(drill, node);
+      article.style.left = `${displayPos.x}px`;
+      article.style.top = `${displayPos.y}px`;
+      const minHeight = nodeMinimumHeight(drill, node);
+      if (minHeight) article.style.minHeight = `${minHeight}px`;
       if (selection?.kind === "node" && selection.id === node.id) article.classList.add("selected");
       if (activeNodeRef?.drillId === drill.id && activeNodeRef?.nodeId === node.id) article.classList.add("playing");
-
-      if (drill.startNodeId === node.id) {
-        const start = document.createElement("span");
-        start.className = "start-badge";
-        start.textContent = "Start";
-        article.appendChild(start);
-      }
 
       const band = document.createElement("div");
       band.className = "node-band";
@@ -1813,8 +2228,8 @@
         const prediction = predictTrajectory(p);
         summary.innerHTML = `
           <div class="shot-metrics">
-            <span class="shot-metric speed-metric"><span class="shot-metric-value">${fmt(p.speedMps,1)}</span><span class="shot-metric-unit">m/s</span></span>
-            <span class="shot-metric spin-metric"><span class="shot-metric-value">${fmt(Math.abs(p.spinRps),1)}</span><span class="shot-metric-unit">rps</span><span class="shot-metric-note">${p.spinRps < 0 ? "underspin" : p.spinRps > 0 ? "topspin" : "no spin"}</span></span>
+            <span class="shot-metric speed-metric" title="Ball speed"><span class="metric-icon speed-icon" aria-hidden="true"><span class="speed-ball"></span></span><span class="shot-metric-value">${fmt(p.speedMps,1)}</span><span class="shot-metric-unit">m/s</span></span>
+            <span class="shot-metric spin-metric" title="${p.spinRps < 0 ? "Underspin" : p.spinRps > 0 ? "Topspin" : "No spin"}"><span class="metric-icon spin-ball-icon ${p.spinRps < 0 ? "underspin" : p.spinRps > 0 ? "topspin" : "no-spin"}" aria-hidden="true"><span class="spin-ball-core"></span></span><span class="spin-direction-symbol ${p.spinRps < 0 ? "underspin" : p.spinRps > 0 ? "topspin" : "no-spin"}" aria-hidden="true">${p.spinRps < 0 ? "↓" : p.spinRps > 0 ? "↑" : "•"}</span><span class="shot-metric-value">${fmt(Math.abs(p.spinRps),1)}</span><span class="shot-metric-unit">rps</span></span>
           </div>
           <span class="clearance-chip">${clearanceHtml(prediction)}</span>`;
         body.appendChild(summary);
@@ -1851,6 +2266,17 @@
       article.addEventListener("click", onNodeClick);
       els.nodeLayer.appendChild(article);
     }
+
+    // Cards size themselves to their actual contents. Re-run once if a browser
+    // measurement differs from the cached routing height so ports/edges/layout use
+    // the same geometry as the visible card.
+    if (measureRenderedNodeHeights(drill) && !heightReflowPass) {
+      renderGraph(true);
+      return;
+    }
+
+    renderEdges(drill);
+    renderSyntheticEndpoints(drill);
   }
 
   function renderOutputPorts(drill, node, article) {
@@ -1882,7 +2308,13 @@
     const port = document.createElement("button");
     port.type = "button";
     port.className = `port output-port${add ? " add-port" : ""}${slot === "A" ? " slot-a" : ""}${slot === "B" ? " slot-b" : ""}`;
-    port.style.top = `${pos.y - node.y}px`;
+    const displayPos = visualNodePosition(drill, node);
+    port.style.top = `${pos.y - displayPos.y}px`;
+    if (mobileGraphLayoutEnabled()) {
+      port.classList.add("vertical-port");
+      port.style.left = `${pos.x - displayPos.x - 8}px`;
+      port.style.right = "auto";
+    }
     port.dataset.nodeId = node.id;
     port.dataset.edgeId = edge?.id || "";
     port.dataset.slot = slot;
@@ -1919,8 +2351,17 @@
       const target = getNode(drill, edge.target);
       if (!source || !target) return;
       const from = outputPosition(drill, source, edge, edge.sourceSlot, false);
-      const to = { x: target.x, y: target.y + nodeHeight(drill, target) / 2 };
-      const route = routeEdge(drill, edge, from, to, previousRoutes, index);
+      const targetPos = visualNodePosition(drill, target);
+      const to = mobileGraphLayoutEnabled()
+        ? { x: targetPos.x + NODE_WIDTH / 2, y: targetPos.y }
+        : { x: targetPos.x, y: targetPos.y + nodeHeight(drill, target) / 2 };
+      const route = mobileGraphLayoutEnabled()
+        ? {
+            points: [from, to],
+            path: `M ${from.x} ${from.y} C ${from.x} ${from.y + 52}, ${to.x} ${to.y - 52}, ${to.x} ${to.y}`,
+            label: { x: (from.x + to.x) / 2 + 34, y: (from.y + to.y) / 2 },
+          }
+        : routeEdge(drill, edge, from, to, previousRoutes, index);
       previousRoutes.push(route.points);
       routed.push({ edge, source, route });
     });
@@ -1960,6 +2401,7 @@
         event.stopPropagation();
         selection = { kind: "edge", id: edge.id };
         renderAll();
+        openInspectorScreen();
       });
       els.edgeLayer.appendChild(group);
     }
@@ -2214,9 +2656,10 @@
     const drill = activeDrill();
     const node = getNode(drill, article.dataset.nodeId);
     if (!node) return;
-    if (!activeDrillEditable()) {
+    if (!activeDrillEditable() || mobileGraphLayoutEnabled()) {
       selection = { kind: "node", id: node.id };
       renderAll();
+      openInspectorScreen();
       return;
     }
     event.preventDefault();
@@ -2268,6 +2711,7 @@
     if (performance.now() < suppressClickUntil) return;
     selection = { kind: "node", id: event.currentTarget.dataset.nodeId };
     renderAll();
+    openInspectorScreen();
   }
 
   function onPortPointerDown(event) {
@@ -2431,11 +2875,11 @@
     return { x: baseX, y: baseY };
   }
 
-  function addNode(type) {
-    if (!activeDrillEditable()) { toast("Copy this built-in preset to My drills before editing it."); return; }
+  function addNode(type, draft = {}) {
+    if (!activeDrillEditable()) { toast("Copy this built-in preset to My drills before editing it."); return null; }
     let drill = activeDrill();
     if (!drill) {
-      const created = defaultDrill("Custom drill");
+      const created = defaultDrill("New drill");
       created.folderId = libraryView.root === "user" ? (libraryView.folderId || null) : null;
       library.drills.push(created);
       library.activeDrillSource = "user";
@@ -2443,18 +2887,112 @@
       drill = created;
     }
     let node;
-    if (type === "shot") node = makeShot(drill, "Shot");
-    else if (type === "random") node = makeRandom();
-    else if (type === "drill") node = makeDrillNode("Sub-drill", allDrills().find(d => d.id !== drill.id)?.id ?? null);
-    else node = makeCounter();
+    if (type === "shot") {
+      node = makeShot(drill, String(draft.label || "Shot"));
+      node.params = {
+        speedMps: clamp(draft.speedMps, 1, 20, node.params.speedMps),
+        spinRps: clamp(draft.spinRps, -120, 120, node.params.spinRps),
+        elevationDeg: clamp(draft.elevationDeg, -20, 45, node.params.elevationDeg),
+        aimDeg: clamp(draft.aimDeg, -60, 60, node.params.aimDeg),
+      };
+    } else if (type === "random") {
+      node = makeRandom(String(draft.label || "Weighted random"));
+    } else if (type === "drill") {
+      node = makeDrillNode(String(draft.label || "Sub-drill"), draft.referencedDrillId || allDrills().find(d => d.id !== drill.id)?.id || null);
+    } else {
+      node = makeCounter(String(draft.label || "Repeater"));
+      node.startCount = Math.max(0, Math.round(finite(draft.startCount, 2)));
+    }
 
+    const selectedEdge = selection?.kind === "edge" ? getEdge(drill, selection.id) : null;
+    const selectedNode = selection?.kind === "node" ? getNode(drill, selection.id) : null;
     const placement = findFreeNodePosition(drill, node);
     node.x = placement.x;
     node.y = placement.y;
     drill.nodes.push(node);
-    if (!drill.startNodeId) drill.startNodeId = node.id;
+
+    if (!drill.startNodeId) {
+      drill.startNodeId = node.id;
+    } else if (selectedEdge) {
+      const oldTarget = selectedEdge.target;
+      selectedEdge.target = node.id;
+      drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: node.type === "counter" ? "B" : node.type === "random" ? "branch" : "next", target: oldTarget, weight: 1, delaySeconds: 0 });
+    } else if (selectedNode) {
+      if (selectedNode.type === "random") {
+        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: "branch", target: node.id, weight: 1, delaySeconds: 0 });
+      } else if (!outgoing(drill, selectedNode.id).length) {
+        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: selectedNode.type === "counter" ? "B" : "next", target: node.id, weight: 1, delaySeconds: 0 });
+      }
+    }
+
     selection = { kind: "node", id: node.id };
     commit({ message: `${node.label} added` });
+    openInspectorScreen();
+    return node;
+  }
+
+  function openAddNodeMenu() {
+    if (!activeDrillEditable()) { toast("Copy this built-in preset to My drills before editing it."); return; }
+    addNodeDraftType = null;
+    els.addNodeDialogTitle.textContent = "Add to drill";
+    els.addNodeDialogSubtitle.textContent = selection?.kind === "edge" ? "The new step will be inserted into the selected path." : selection?.kind === "node" ? "The new step will be connected after the selected node when possible." : "Choose what to add.";
+    els.addNodeChoicePanel.hidden = false;
+    els.addNodeConfigPanel.hidden = true;
+    els.addNodeConfigPanel.replaceChildren();
+    els.addNodeDialog.showModal();
+  }
+
+  function newShotPreviewHtml(params) {
+    const prediction = predictTrajectory(params);
+    return `<div class="new-shot-preview"><div><small>Top view</small>${topTrajectorySvg(prediction, 600, 250)}</div><div><small>Side view</small>${sideTrajectorySvg(prediction, 600, 230)}</div></div>`;
+  }
+
+  function openAddNodeConfig(type) {
+    addNodeDraftType = type;
+    els.addNodeChoicePanel.hidden = true;
+    els.addNodeConfigPanel.hidden = false;
+    const titles = { shot: "Add shot", random: "Add random choice", counter: "Add repeat / loop", drill: "Add sub-drill" };
+    els.addNodeDialogTitle.textContent = titles[type] || "Add node";
+    els.addNodeDialogSubtitle.textContent = "Configure it first. Nothing is added until you press Add.";
+    if (type === "shot") {
+      const p = { speedMps: 5.97, spinRps: 0, elevationDeg: 12.5, aimDeg: 0 };
+      els.addNodeConfigPanel.innerHTML = `
+        <label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Shot"></label>
+        <div class="shot-parameter-stack">
+          <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="-0.1">−</button><span class="input-with-unit"><input id="newShotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="0.1">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="-1">−</button><span class="input-with-unit"><input id="newShotSpinField" type="number" min="-120" max="120" step="1" value="0"><small>rps</small></span><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="1">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Elevation</span><span class="input-with-unit"><input id="newShotElevationField" type="number" min="-20" max="45" step="0.5" value="12.5"><small>°</small></span></label>
+          <label class="field shot-parameter-row"><span>Aim left/right</span><span class="input-with-unit"><input id="newShotAimField" type="number" min="-60" max="60" step="0.5" value="0"><small>°</small></span></label>
+        </div>
+        <div id="newShotPreview">${newShotPreviewHtml(p)}</div>
+        <div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add shot</button></div>`;
+      const refresh = () => {
+        const params = { speedMps: finite($("newShotSpeedField")?.value, p.speedMps), spinRps: finite($("newShotSpinField")?.value, 0), elevationDeg: finite($("newShotElevationField")?.value, 12.5), aimDeg: finite($("newShotAimField")?.value, 0) };
+        $("newShotPreview").innerHTML = newShotPreviewHtml(params);
+      };
+      ["newShotSpeedField","newShotSpinField","newShotElevationField","newShotAimField"].forEach(id => $(id)?.addEventListener("input", refresh));
+      els.addNodeConfigPanel.querySelectorAll("[data-create-step]").forEach(button => button.addEventListener("click", () => {
+        const input = $(button.dataset.createStep); if (!input) return;
+        const next = finite(input.value, 0) + finite(button.dataset.delta, 0);
+        input.value = String(Math.min(finite(input.max, Infinity), Math.max(finite(input.min, -Infinity), next)));
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }));
+    } else if (type === "random") {
+      els.addNodeConfigPanel.innerHTML = `<label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Weighted random"></label><p class="helper">After creating it, add branches from the node or use + with the random node selected.</p><div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add random choice</button></div>`;
+    } else if (type === "counter") {
+      els.addNodeConfigPanel.innerHTML = `<label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Repeater"></label><label class="field"><span>Starting repetitions</span><input id="newCounterStartField" type="number" min="0" max="100000" step="1" value="2"></label><div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add repeater</button></div>`;
+    } else {
+      els.addNodeConfigPanel.innerHTML = `<label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Sub-drill"></label><label class="field"><span>Reusable drill</span><select id="newReferencedDrillField">${drillOptions(null, activeDrill()?.id)}</select></label><div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add sub-drill</button></div>`;
+    }
+    $("cancelCreateNodeBtn")?.addEventListener("click", () => { els.addNodeDialog.close(); });
+    $("confirmCreateNodeBtn")?.addEventListener("click", () => {
+      const draft = { label: $("newNodeNameField")?.value?.trim() || titles[type] };
+      if (type === "shot") Object.assign(draft, { speedMps: finite($("newShotSpeedField")?.value, 5.97), spinRps: finite($("newShotSpinField")?.value, 0), elevationDeg: finite($("newShotElevationField")?.value, 12.5), aimDeg: finite($("newShotAimField")?.value, 0) });
+      if (type === "counter") draft.startCount = finite($("newCounterStartField")?.value, 2);
+      if (type === "drill") draft.referencedDrillId = $("newReferencedDrillField")?.value || null;
+      addNode(type, draft);
+      els.addNodeDialog.close();
+    });
   }
 
   function deleteSelection() {
@@ -2464,6 +3002,8 @@
     if (selection.kind === "edge") {
       drill.edges = drill.edges.filter(e => e.id !== selection.id);
       selection = null;
+      inspectorOpen = false;
+      document.body.classList.remove("details-open");
       commit({ message: "Path removed" });
       return;
     }
@@ -2477,6 +3017,8 @@
     }
     if (drill.startNodeId === node.id) drill.startNodeId = drill.nodes[0]?.id ?? null;
     selection = null;
+    inspectorOpen = false;
+    document.body.classList.remove("details-open");
     commit({ message: `Deleted “${node.label}”` });
   }
 
@@ -2520,7 +3062,7 @@
     let html = `
       <div class="inspector-heading">
         <div><h2>${escapeHtml(node.label)}</h2><p class="inspector-subtitle">${typeName}</p></div>
-        <button id="setStartInspectorBtn" class="button compact ghost" type="button"${drill.startNodeId === node.id ? " disabled" : ""}>${drill.startNodeId === node.id ? "Start node" : "Set as start"}</button>
+        <button id="setStartInspectorBtn" class="button compact ghost" type="button"${drill.startNodeId === node.id ? " disabled" : ""}>${drill.startNodeId === node.id ? "First step" : "Make first step"}</button>
       </div>
       <label class="field"><span>Name</span><input id="nodeNameField" type="text" maxlength="90" value="${attr(node.label)}"></label>
     `;
@@ -2848,6 +3390,13 @@
       outgoing(drill, id).forEach(edge => stack.push(edge.target));
     }
     drill.nodes.filter(node => !reachable.has(node.id)).forEach(node => warnings.push(`“${node.label}” is unreachable.`));
+
+    // START and END are structural editor concepts. START maps to startNodeId; END is
+    // represented by at least one reachable node with no outgoing connection. Keeping
+    // END implicit preserves the compact execution format while preventing drills that
+    // can only cycle forever.
+    const reachableTerminal = drill.nodes.some(node => reachable.has(node.id) && outgoing(drill, node.id).length === 0);
+    if (drill.nodes.length && !reachableTerminal) errors.push("At least one reachable path must finish at END.");
 
     return { valid: errors.length === 0, errors, warnings, messages: [...errors, ...warnings] };
   }
@@ -3179,8 +3728,9 @@
     return { position: nextPosition, velocity: nextVelocity };
   }
 
-  function predictTrajectory(params, calibration = library.calibration) {
-    const c = calibration;
+  function predictTrajectory(params, calibration = null) {
+    const baseCalibration = calibration || library.calibration;
+    const c = calibration ? baseCalibration : { ...baseCalibration, pose: { ...drillPose(activeDrill()) } };
     const table = c.table;
     const netX = table.length / 2;
     const ballRadius = c.physics.ballDiameterM / 2;
@@ -4240,12 +4790,18 @@
       [els.tuningSpeedValue, "speedPct"],
     ];
     for (const [output, key] of values) {
-      output.textContent = formatTuningPercent(liveTuning[key]);
-      output.closest(".tuning-control")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
+      if (output) {
+        output.textContent = formatTuningPercent(liveTuning[key]);
+        output.closest(".tuning-control")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
+      }
+      document.querySelectorAll(`[data-tuning-output="${key}"]`).forEach(runOutput => {
+        runOutput.textContent = formatTuningPercent(liveTuning[key]);
+        runOutput.closest(".session-adjustment")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
+      });
     }
     const activeEntries = Object.entries(liveTuning).filter(([, value]) => Math.abs(value) > 1e-9);
-    els.liveTuningBtn.classList.toggle("active", activeEntries.length > 0);
-    els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "No adjustments";
+    els.liveTuningBtn?.classList.toggle("active", activeEntries.length > 0);
+    if (els.liveTuningSummary) els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "No adjustments";
 
     const shot = liveTuningShotForPreview();
     if (!shot) {
@@ -5116,13 +5672,31 @@
 
   function fitGraph() {
     const drill = activeDrill();
-    if (!drill?.nodes.length) return;
-    const minX = Math.min(...drill.nodes.map(n => n.x));
-    const maxX = Math.max(...drill.nodes.map(n => n.x + NODE_WIDTH));
-    const minY = Math.min(...drill.nodes.map(n => n.y));
-    const maxY = Math.max(...drill.nodes.map(n => n.y + nodeHeight(drill, n)));
+    const endpoints = syntheticEndpointPositions(drill || { nodes: [] });
+    if (!drill?.nodes.length) {
+      applyGraphZoom(1);
+      els.graphViewport.scrollTo({ left: 0, top: 0, behavior: "auto" });
+      return;
+    }
 
-    const padding = 100;
+    // On phones the graph is deliberately a readable vertical document rather than a
+    // miniature overview. Keep cards near native size and let the canvas scroll/pan.
+    // The Fit button still gives users an explicit overview when they want one.
+    if (mobileGraphLayoutEnabled()) {
+      applyGraphZoom(.86);
+      const startX = Math.max(0, endpoints.start.x * graphZoom - els.graphViewport.clientWidth / 2 + 55 * graphZoom);
+      const startY = Math.max(0, (endpoints.start.y - 24) * graphZoom);
+      els.graphViewport.scrollTo({ left: startX, top: startY, behavior: "smooth" });
+      return;
+    }
+
+    const positions = drill.nodes.map(n => ({ node: n, ...visualNodePosition(drill, n) }));
+    const minX = Math.min(endpoints.start.x - 60, ...positions.map(p => p.x));
+    const maxX = Math.max(endpoints.end.x + 60, ...positions.map(p => p.x + NODE_WIDTH));
+    const minY = Math.min(endpoints.start.y - 30, ...positions.map(p => p.y));
+    const maxY = Math.max(endpoints.end.y + 30, ...positions.map(p => p.y + nodeHeight(drill, p.node)));
+
+    const padding = mobileGraphLayoutEnabled() ? 48 : 100;
     const contentWidth = Math.max(1, maxX - minX + padding * 2);
     const contentHeight = Math.max(1, maxY - minY + padding * 2);
     const fitZoom = Math.min(
@@ -5169,13 +5743,15 @@
 
   function createDrill() {
     if (libraryView.root !== "user") selectLibraryRoot("user");
-    const drill = defaultDrill(uniqueDrillName("Custom drill"));
+    const drill = defaultDrill(uniqueDrillName("New drill"));
     drill.folderId = libraryView.folderId || null;
     library.drills.push(drill);
     library.activeDrillSource = "user";
     library.activeDrillId = drill.id;
     selection = null;
     commit({ message: "New drill created" });
+    navigateApp("editor", { push: true });
+    setTimeout(fitGraph, 30);
   }
 
   function copyActiveBuiltInToMyDrills() {
@@ -5417,16 +5993,21 @@
     const label = robotPhaseLabel(snapshot);
     const connecting = ["choosing-device", "connecting", "authenticating"].includes(snapshot.phase);
 
-    els.robotConnectBtn.textContent = snapshot.connected ? "Disconnect" : connecting ? "Connecting…" : "Connect Nova";
+    els.robotConnectBtn.textContent = snapshot.connected ? "Disconnect Nova" : connecting ? "Connecting…" : "Connect Nova";
     els.robotConnectBtn.disabled = connecting;
-    els.robotStatusText.textContent = label;
-    els.robotStatusBtn.className = "robot-status-button";
-    if (!snapshot.connected) els.robotStatusBtn.classList.add(snapshot.browserSupported ? "disconnected" : "unsupported");
-    else if (snapshot.ready) els.robotStatusBtn.classList.add("ready");
-    else if ([4, 6].includes(snapshot.wireState)) els.robotStatusBtn.classList.add("running");
-    else if ([2, 5, 7].includes(snapshot.wireState)) els.robotStatusBtn.classList.add("busy");
-    else if (snapshot.wireState === 202) els.robotStatusBtn.classList.add("error");
-    else els.robotStatusBtn.classList.add("connected");
+    els.robotStatusText.textContent = "Nova";
+    els.robotStatusBtn.title = label;
+    els.robotStatusBtn.className = "global-robot-status";
+    const statusClass = !snapshot.connected ? (snapshot.browserSupported ? "disconnected" : "unsupported")
+      : snapshot.ready ? "ready"
+      : [4, 6].includes(snapshot.wireState) ? "running"
+      : [2, 5, 7].includes(snapshot.wireState) ? "busy"
+      : snapshot.wireState === 202 ? "error" : "connected";
+    els.robotStatusBtn.classList.add(statusClass);
+    [els.runConnectionDot, els.robotPageDot].filter(Boolean).forEach(dot => { dot.className = `status-dot ${snapshot.connected ? "connected" : "disconnected"}`; });
+    if (els.runConnectionText) els.runConnectionText.textContent = snapshot.connected ? `Nova ${label}` : "Nova disconnected";
+    if (els.robotPageConnection) els.robotPageConnection.textContent = snapshot.connected ? `Nova ${label}` : "Nova disconnected";
+    if (els.robotPageDevice) els.robotPageDevice.textContent = snapshot.connected ? (snapshot.deviceName || snapshot.serial || "Connected") : (snapshot.browserSupported ? "Web Bluetooth available" : "Web Bluetooth unavailable");
 
     els.robotDialogConnection.textContent = snapshot.connected
       ? `${snapshot.authenticated ? "Authenticated" : "Connected"} · ${label}`
@@ -5579,16 +6160,16 @@
     }
   }
 
-  function openCalibrationWorkspace() {
-    setMobileWorkspace("calibrate");
-    setCalibrationTab("guided");
+  function openCalibrationWorkspace(tab = "guided") {
+    setCalibrationTab(tab);
     renderCalibration();
     els.calibrationDialog.showModal();
   }
 
   function bindEvents() {
     els.robotConnectBtn.addEventListener("click", () => { void connectOrDisconnectRobot(); });
-    els.robotStatusBtn.addEventListener("click", () => { updateRobotUI(); els.robotDialog.showModal(); });
+    els.robotStatusBtn.addEventListener("click", () => navigateApp("robot", { push: true }));
+    els.robotDiagnosticsBtn?.addEventListener("click", () => { updateRobotUI(); els.robotDialog.showModal(); });
     els.closeRobotDialogBtn.addEventListener("click", () => els.robotDialog.close());
     els.robotRefreshStatusBtn.addEventListener("click", () => { void refreshRobotStatus(); });
     els.robotDisconnectBtn.addEventListener("click", () => { void disconnectRobotFromDialog(); });
@@ -5599,37 +6180,57 @@
       robot.addEventListener("disconnect", handleUnexpectedRobotDisconnect);
     }
 
-    els.addShotBtn.addEventListener("click", () => addNode("shot"));
-    els.addRandomBtn.addEventListener("click", () => addNode("random"));
-    els.addDrillNodeBtn.addEventListener("click", () => addNode("drill"));
-    els.addCounterBtn.addEventListener("click", () => addNode("counter"));
+    const primaryNavButtons = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn, els.mobileLibraryNavBtn, els.mobileRunNavBtn, els.mobileEditNavBtn, els.mobileRobotNavBtn].filter(Boolean);
+    primaryNavButtons.forEach(button => button.addEventListener("click", () => navigateApp(button.dataset.appNav, { push: true })));
+    [els.topBackBtn, els.runBackBtn, els.editorBackBtn, els.robotBackBtn].filter(Boolean).forEach(button => button.addEventListener("click", goBackApp));
+    els.runRobotBtn?.addEventListener("click", () => navigateApp("robot", { push: true }));
+    els.runEditDrillBtn?.addEventListener("click", () => navigateApp("editor", { push: true }));
+    els.editorRunBtn?.addEventListener("click", () => navigateApp("run", { push: true }));
+    els.runDrillMenuBtn?.addEventListener("click", openDrillDetails);
+    els.drillDetailsBtn?.addEventListener("click", openDrillDetails);
+    els.inspectorBackBtn?.addEventListener("click", closeInspectorScreen);
+    els.inspectorCloseBtn?.addEventListener("click", closeInspectorScreen);
+
+    els.addNodeMenuBtn?.addEventListener("click", openAddNodeMenu);
+    els.closeAddNodeDialogBtn?.addEventListener("click", () => els.addNodeDialog.close());
+    els.addShotBtn.addEventListener("click", () => openAddNodeConfig("shot"));
+    els.addRandomBtn.addEventListener("click", () => openAddNodeConfig("random"));
+    els.addDrillNodeBtn.addEventListener("click", () => openAddNodeConfig("drill"));
+    els.addCounterBtn.addEventListener("click", () => openAddNodeConfig("counter"));
     els.deleteSelectionBtn.addEventListener("click", deleteSelection);
     els.fitBtn.addEventListener("click", fitGraph);
-    els.mobileDrillsBtn.addEventListener("click", () => setMobileWorkspace("drills"));
-    els.closeMobileDrillsBtn.addEventListener("click", () => setMobileWorkspace("graph"));
-    els.mobileGraphNavBtn.addEventListener("click", () => setMobileWorkspace("graph"));
-    els.mobileDrillsNavBtn.addEventListener("click", () => setMobileWorkspace("drills"));
-    els.mobileCalibrationNavBtn.addEventListener("click", openCalibrationWorkspace);
+
     els.builtInLibraryTab.addEventListener("click", () => selectLibraryRoot("builtin"));
     els.myDrillsLibraryTab.addEventListener("click", () => selectLibraryRoot("user"));
     els.librarySearchInput.addEventListener("input", () => { libraryView.query = els.librarySearchInput.value; renderDrillList(); });
     els.newDrillBtn.addEventListener("click", createDrill);
+    els.libraryMoreBtn?.addEventListener("click", () => { els.libraryAdvancedActions.open = !els.libraryAdvancedActions.open; });
     els.newFolderBtn.addEventListener("click", () => openFolderDialog("new"));
     els.renameFolderBtn.addEventListener("click", () => openFolderDialog("rename"));
     els.deleteFolderBtn.addEventListener("click", deleteCurrentFolder);
     els.folderSaveBtn.addEventListener("click", saveFolderDialog);
     els.folderNameInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveFolderDialog(); } });
-    els.copyBuiltInBtn.addEventListener("click", copyActiveBuiltInToMyDrills);
+    els.copyBuiltInBtn.addEventListener("click", () => { copyActiveBuiltInToMyDrills(); els.drillDetailsDialog.close(); navigateApp("editor", { push: true }); });
     els.moveDrillBtn.addEventListener("click", openMoveDrillDialog);
     els.moveDrillSaveBtn.addEventListener("click", moveActiveDrill);
-    els.drillNameInput.addEventListener("change", () => {
+    els.closeDrillDetailsBtn?.addEventListener("click", () => els.drillDetailsDialog.close());
+
+    const saveDrillDetails = () => {
       if (!activeDrillEditable()) return;
-      const drill = activeDrill();
-      if (!drill) return;
+      const drill = activeDrill(); if (!drill) return;
       drill.name = uniqueDrillName(els.drillNameInput.value, drill.id);
-      commit({ message: `Drill renamed to “${drill.name}”` });
-    });
-    els.duplicateDrillBtn.addEventListener("click", duplicateActiveDrill);
+      drill.description = String(els.drillDescriptionInput.value || "").trim().slice(0, 600);
+      drill.tags = [...new Set(String(els.drillTagsInput.value || "").split(",").map(tag => tag.trim()).filter(Boolean))].slice(0, 20);
+      drill.robotPose = {
+        x: clamp(els.drillRobotXInput.value, -1.5, 4.2, 0.265),
+        y: clamp(els.drillRobotYInput.value, -2, 2, 0),
+        yawDeg: clamp(els.drillRobotYawInput.value, -180, 180, 0),
+      };
+      commit();
+      renderRunPage();
+    };
+    [els.drillNameInput, els.drillDescriptionInput, els.drillTagsInput, els.drillRobotXInput, els.drillRobotYInput, els.drillRobotYawInput].filter(Boolean).forEach(input => input.addEventListener("change", saveDrillDetails));
+    els.duplicateDrillBtn.addEventListener("click", () => { duplicateActiveDrill(); els.drillDetailsDialog.close(); navigateApp("editor", { push: true }); });
     els.deleteDrillBtn.addEventListener("click", deleteActiveDrill);
 
     els.liveTuningBtn.addEventListener("click", () => {
@@ -5639,7 +6240,7 @@
     els.closeLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
     els.doneLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
     els.resetLiveTuningBtn.addEventListener("click", resetLiveTuning);
-    els.liveTuningDialog.querySelectorAll("[data-tuning-key][data-tuning-delta]").forEach(button => {
+    document.querySelectorAll("[data-tuning-key][data-tuning-delta]").forEach(button => {
       button.addEventListener("click", () => stepLiveTuning(button.dataset.tuningKey, finite(button.dataset.tuningDelta, 0)));
     });
 
@@ -5648,6 +6249,8 @@
     els.graphSurface.addEventListener("click", () => {
       if (performance.now() < suppressClickUntil || connectionDrag) return;
       selection = null;
+      inspectorOpen = false;
+      document.body.classList.remove("details-open");
       renderAll();
     });
     els.graphViewport.addEventListener("keydown", event => {
@@ -5688,12 +6291,11 @@
       setRepetitions(current <= 0 ? 1 : current + 1);
     });
     els.setDelayInput.addEventListener("change", () => {
-      if (!activeDrillEditable()) return;
       const drill = activeDrill();
       if (!drill) return;
       drill.settings.delayBetweenSets = clamp(els.setDelayInput.value, 0, 3600, 0);
       els.setDelayInput.value = drill.settings.delayBetweenSets;
-      saveLibrary();
+      if (activeDrillEditable()) saveLibrary();
     });
     els.playBtn.addEventListener("click", () => {
       if (calibrationFeedRunning) void stopGuidedFeed();
@@ -5701,13 +6303,12 @@
       else void startPlayback();
     });
 
-    els.calibrationBtn.addEventListener("click", openCalibrationWorkspace);
+    els.calibrationBtn.addEventListener("click", () => openCalibrationWorkspace("guided"));
+    els.robotSettingsShortcutBtn?.addEventListener("click", () => openCalibrationWorkspace("pose"));
     els.closeCalibrationBtn.addEventListener("click", () => {
       if (calibrationFeedRunning) void stopGuidedFeed();
       els.calibrationDialog.close();
-      setMobileWorkspace("graph");
     });
-    els.calibrationDialog.addEventListener("close", () => setMobileWorkspace("graph"));
     bindCalibrationInputs();
 
     els.previewBtn.addEventListener("click", () => {
@@ -5761,12 +6362,12 @@
     els.graphSurface.style.height = `${SURFACE_HEIGHT * graphZoom}px`;
     els.zoomIndicator.textContent = `${Math.round(graphZoom * 100)}%`;
     renderAll();
+    navigateApp("library", { push: false });
     updateRobotUI();
     updatePlayButton();
     appendRobotLog({ time: new Date(), direction: "info", message: "Protocol self-test passed; controller ready" });
     saveLibrary();
     if (startupNotice) setTimeout(() => toast(startupNotice), 100);
-    setTimeout(fitGraph, 80);
     if (new URLSearchParams(location.search).get("calibration") === "1") {
       setCalibrationTab("guided");
       renderCalibration();

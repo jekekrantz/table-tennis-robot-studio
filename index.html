@@ -6,183 +6,188 @@
   <title>Table Tennis Robot Studio</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-  <header class="app-header">
-    <div class="brand-block">
+<body data-app-view="library">
+  <header class="app-topbar">
+    <button id="topBackBtn" class="topbar-icon app-back-button" type="button" aria-label="Go back" hidden>←</button>
+    <div class="brand-block compact-brand">
       <div class="brand-title-row"><h1>Table Tennis Robot Studio</h1></div>
-      <p>Visual drill designer + Nova controller</p>
+      <p id="topbarContext">Drill library</p>
     </div>
-
-    <section class="run-controls" aria-label="Drill playback controls">
-      <label class="header-field">
-        <span>Sets</span>
-        <span class="set-stepper">
-          <button id="repetitionsDownBtn" type="button" aria-label="Decrease sets">−</button>
-          <input id="repetitionsInput" type="text" inputmode="numeric" value="3" aria-label="Number of sets; infinity means repeat indefinitely">
-          <button id="repetitionsUpBtn" type="button" aria-label="Increase sets">＋</button>
-        </span>
-      </label>
-
-      <button id="playBtn" class="play-button" type="button">
-        <span id="playIcon" aria-hidden="true">▶</span>
-        <span id="playText">Play</span>
-      </button>
-
-      <label class="header-field delay-field">
-        <span>Delay between sets</span>
-        <span class="input-with-unit">
-          <input id="setDelayInput" type="number" min="0" max="3600" step="0.1" value="1">
-          <small>s</small>
-        </span>
-      </label>
-
-      <div class="run-progress-block">
-        <span id="runStatus" class="run-status" aria-live="polite">Ready</span>
-        <div class="progress-track" aria-hidden="true">
-          <div id="runProgressBar" class="progress-bar"></div>
-        </div>
-      </div>
-    </section>
-
-    <div class="header-actions">
-      <div class="robot-connection-control">
-        <button id="robotConnectBtn" class="button robot-connect-button" type="button">Connect Nova</button>
-        <button id="robotStatusBtn" class="robot-status-button disconnected" type="button" title="Open robot diagnostics">
-          <span class="robot-status-dot" aria-hidden="true"></span>
-          <span id="robotStatusText">Disconnected</span>
-        </button>
-      </div>
-      <button id="calibrationBtn" class="button calibration-button" type="button">Calibration</button>
-      <button id="importBtn" class="button ghost" type="button">Import</button>
-      <button id="exportBtn" class="button ghost" type="button">Export</button>
-      <button id="previewBtn" class="button primary" type="button">Preview trace</button>
-      <input id="importInput" type="file" accept=".json,application/json" hidden>
-    </div>
+    <button id="robotStatusBtn" class="global-robot-status disconnected" type="button" aria-label="Open robot controls">
+      <span class="robot-status-dot" aria-hidden="true"></span>
+      <span id="robotStatusText">Nova</span>
+    </button>
   </header>
 
-  <main class="workspace">
-    <aside class="toolbox panel">
-      <section class="drill-library-section">
-        <div class="section-heading-row">
-          <h2>Drill library</h2>
-          <div class="library-heading-actions"><button id="closeMobileDrillsBtn" class="button compact ghost mobile-library-close" type="button">Graph</button><button id="newDrillBtn" class="tiny-button" type="button" title="Create drill in this folder">＋</button></div>
-        </div>
-        <div class="library-root-tabs" role="tablist" aria-label="Drill library source">
-          <button id="builtInLibraryTab" class="library-root-tab active" type="button">Built-in</button>
-          <button id="myDrillsLibraryTab" class="library-root-tab" type="button">My drills</button>
-        </div>
-        <label class="library-search">
-          <span class="sr-only">Search drills</span>
-          <input id="librarySearchInput" type="search" placeholder="Search drills…" autocomplete="off">
-        </label>
-        <nav id="libraryBreadcrumb" class="library-breadcrumb" aria-label="Current drill folder"></nav>
-        <div id="drillList" class="drill-list library-browser"></div>
-        <div class="library-folder-actions">
-          <button id="newFolderBtn" class="button compact ghost" type="button">New folder</button>
-          <button id="renameFolderBtn" class="button compact ghost" type="button">Rename folder</button>
-          <button id="deleteFolderBtn" class="button compact ghost" type="button">Remove folder</button>
-        </div>
-        <label class="field drill-name-field">
-          <span>Selected drill name</span>
-          <input id="drillNameInput" type="text" maxlength="90">
-        </label>
-        <div class="library-actions">
-          <button id="copyBuiltInBtn" class="button compact primary" type="button">Copy to My drills</button>
-          <button id="duplicateDrillBtn" class="button compact ghost" type="button">Duplicate</button>
-          <button id="moveDrillBtn" class="button compact ghost" type="button">Move</button>
-          <button id="deleteDrillBtn" class="button compact danger" type="button">Delete</button>
-        </div>
-        <p id="libraryStatus" class="library-status" aria-live="polite"></p>
-      </section>
+  <div class="app-layout">
+    <nav class="desktop-primary-nav" aria-label="Primary navigation">
+      <button id="desktopLibraryNavBtn" class="primary-nav-item active" type="button" data-app-nav="library"><span aria-hidden="true">▤</span><span>Library</span></button>
+      <button id="desktopRunNavBtn" class="primary-nav-item" type="button" data-app-nav="run"><span aria-hidden="true">▶</span><span>Run</span></button>
+      <button id="desktopEditNavBtn" class="primary-nav-item" type="button" data-app-nav="editor"><span aria-hidden="true">⌘</span><span>Edit</span></button>
+      <button id="desktopRobotNavBtn" class="primary-nav-item" type="button" data-app-nav="robot"><span aria-hidden="true">◎</span><span>Robot</span></button>
+    </nav>
 
-      <section>
-        <h2>Add node</h2>
-        <button id="addShotBtn" class="tool-button shot-tool" type="button">
-          <span class="tool-icon">●</span>
-          <span><strong>Single shot</strong><small>One physical ball</small></span>
-        </button>
-        <button id="addRandomBtn" class="tool-button random-tool" type="button">
-          <span class="tool-icon">◆</span>
-          <span><strong>Weighted random</strong><small>Choose one branch</small></span>
-        </button>
-        <button id="addDrillNodeBtn" class="tool-button drill-tool" type="button">
-          <span class="tool-icon">▣</span>
-          <span><strong>Sub-drill</strong><small>Run a reusable drill</small></span>
-        </button>
-        <button id="addCounterBtn" class="tool-button counter-tool" type="button">
-          <span class="tool-icon">↻</span>
-          <span><strong>Repeater</strong><small>Repeat until done, then Finish</small></span>
-        </button>
-      </section>
+    <main class="app-main">
+      <section id="libraryScreen" class="app-screen library-screen" data-screen="library">
+        <header class="screen-header">
+          <div><p class="eyebrow">Start here</p><h2>Drill library</h2><p>Choose a drill to run, or create your own.</p></div>
+          <button id="newDrillBtn" class="button primary screen-primary-action" type="button">＋ New drill</button>
+        </header>
 
-      <section>
-        <h2>Editing</h2>
-        <button id="deleteSelectionBtn" class="button wide danger" type="button">Delete selection</button>
-        <button id="fitBtn" class="button wide ghost" type="button">Fit graph</button>
-      </section>
-
-      <section>
-        <h2>Drill status</h2>
-        <div id="statusBadge" class="status-badge neutral">Not validated</div>
-        <ul id="validationList" class="validation-list"></ul>
-      </section>
-
-      <section class="path-help">
-        <h2>How paths work</h2>
-        <p>Drag a node’s output handle onto another node. Edge delay means “wait this long before the next node.” A missing path ends the current set.</p>
-      </section>
-    </aside>
-
-    <section class="canvas-shell">
-      <div class="canvas-toolbar">
-        <span id="activeDrillTitle">Drill</span>
-        <button id="mobileDrillsBtn" class="mobile-drills-button" type="button">Drills</button>
-        <span id="modeText">Drag background to pan · wheel to zoom</span>
-        <button id="liveTuningBtn" class="live-tuning-chip" type="button" title="Temporary non-destructive drill adjustments">
-          <span>Live tuning</span>
-          <strong id="liveTuningSummary">No adjustments</strong>
-        </button>
-        <span class="autosave-indicator"><span id="zoomIndicator">100%</span> · Autosaved locally</span>
-      </div>
-      <div id="graphViewport" class="graph-viewport" tabindex="0" aria-label="Drill flow graph editor">
-        <div id="graphSurface" class="graph-surface">
-          <div id="graphWorld" class="graph-world">
-            <svg id="edgeLayer" class="edge-layer" width="2600" height="1800" aria-hidden="true"></svg>
-            <div id="nodeLayer" class="node-layer"></div>
+        <section class="library-panel panel-card">
+          <div class="library-root-tabs" role="tablist" aria-label="Drill library source">
+            <button id="builtInLibraryTab" class="library-root-tab active" type="button">Built-in</button>
+            <button id="myDrillsLibraryTab" class="library-root-tab" type="button">My drills</button>
           </div>
-        </div>
-        <div id="emptyHint" class="empty-hint">
-          <strong>This drill is empty</strong>
-          <span>Add a shot, random choice, sub-drill, or Repeater.</span>
-        </div>
-      </div>
-    </section>
+          <div class="library-search-row">
+            <label class="library-search"><span class="sr-only">Search drills</span><input id="librarySearchInput" type="search" placeholder="Search drills…" autocomplete="off"></label>
+            <button id="libraryMoreBtn" class="icon-button" type="button" title="Library actions" aria-label="Library actions">⋯</button>
+          </div>
+          <nav id="libraryBreadcrumb" class="library-breadcrumb" aria-label="Current drill folder"></nav>
+          <div id="drillList" class="drill-list library-browser"></div>
+          <div class="library-folder-actions">
+            <button id="newFolderBtn" class="button compact ghost" type="button">New folder</button>
+            <button id="renameFolderBtn" class="button compact ghost" type="button">Rename folder</button>
+            <button id="deleteFolderBtn" class="button compact ghost" type="button">Remove folder</button>
+          </div>
+          <p id="libraryStatus" class="library-status" aria-live="polite"></p>
+          <details id="libraryAdvancedActions" class="library-advanced-actions">
+            <summary>Import / export</summary>
+            <div class="library-actions-row">
+              <button id="importBtn" class="button ghost" type="button">Import My drills</button>
+              <button id="exportBtn" class="button ghost" type="button">Export My drills</button>
+              <input id="importInput" type="file" accept=".json,application/json" hidden>
+            </div>
+          </details>
+        </section>
+      </section>
 
-    <aside class="inspector panel">
-      <div id="inspectorContent" class="inspector-content">
-        <div class="empty-inspector">
-          <h2>Inspector</h2>
-          <p>Select a node or connection.</p>
-        </div>
-      </div>
-    </aside>
-  </main>
+      <section id="runScreen" class="app-screen run-screen" data-screen="run" hidden>
+        <header class="screen-header compact-screen-header">
+          <button id="runBackBtn" class="screen-back-button" type="button" aria-label="Back">←</button>
+          <div class="screen-title-grow"><p class="eyebrow">Run drill</p><h2 id="runDrillTitle">Choose a drill</h2><p id="runDrillDescription">Select a drill from the library to start a session.</p></div>
+          <button id="runDrillMenuBtn" class="icon-button" type="button" aria-label="Drill options">⋯</button>
+        </header>
 
-  <nav class="mobile-workspace-nav" aria-label="Mobile workspace">
-    <button id="mobileGraphNavBtn" class="mobile-workspace-tab active" type="button" aria-current="page">
-      <span class="mobile-workspace-icon" aria-hidden="true">⌁</span>
-      <span>Graph</span>
-    </button>
-    <button id="mobileDrillsNavBtn" class="mobile-workspace-tab" type="button">
-      <span class="mobile-workspace-icon" aria-hidden="true">▣</span>
-      <span>Drills</span>
-    </button>
-    <button id="mobileCalibrationNavBtn" class="mobile-workspace-tab" type="button">
-      <span class="mobile-workspace-icon" aria-hidden="true">◎</span>
-      <span>Calibrate</span>
-    </button>
+        <div class="run-page-grid">
+          <section class="run-player-card panel-card">
+            <div class="run-connection-strip">
+              <span class="connection-label"><span id="runConnectionDot" class="status-dot disconnected"></span><strong id="runConnectionText">Nova disconnected</strong></span>
+              <button id="runRobotBtn" class="button compact ghost" type="button">Robot</button>
+            </div>
+            <section class="run-controls" aria-label="Drill playback controls">
+              <button id="playBtn" class="play-button run-play-button" type="button"><span id="playIcon" aria-hidden="true">▶</span><span id="playText">Play</span></button>
+              <label class="header-field"><span>Repetitions</span><span class="set-stepper"><button id="repetitionsDownBtn" type="button" aria-label="Decrease repetitions">−</button><input id="repetitionsInput" type="text" inputmode="numeric" value="3" aria-label="Number of repetitions; infinity means repeat indefinitely"><button id="repetitionsUpBtn" type="button" aria-label="Increase repetitions">＋</button></span></label>
+              <label class="header-field delay-field"><span>Delay between repetitions</span><span class="input-with-unit"><input id="setDelayInput" type="number" min="0" max="3600" step="0.1" value="1"><small>s</small></span></label>
+              <div class="run-progress-block"><span id="runStatus" class="run-status" aria-live="polite">Ready</span><div class="progress-track" aria-hidden="true"><div id="runProgressBar" class="progress-bar"></div></div></div>
+            </section>
+          </section>
+
+          <section class="session-adjustments-card panel-card">
+            <div class="section-title-row"><div><h3>Player tuning</h3><p>Your preferred session feel. Applies to every ball, persists between sessions, and is never stored in the drill.</p></div><button id="liveTuningBtn" class="button compact ghost" type="button">Details</button></div>
+            <div class="session-adjustment-list">
+              <div class="session-adjustment" data-run-tuning="pacePct"><div><strong>Pace</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="pacePct" data-tuning-delta="-5">−</button><output data-tuning-output="pacePct">0%</output><button type="button" data-tuning-key="pacePct" data-tuning-delta="5">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="clearancePct"><div><strong>Net clearance</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="clearancePct" data-tuning-delta="-5">−</button><output data-tuning-output="clearancePct">0%</output><button type="button" data-tuning-key="clearancePct" data-tuning-delta="5">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="speedPct"><div><strong>Speed</strong><small>2% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="speedPct" data-tuning-delta="-2">−</button><output data-tuning-output="speedPct">0%</output><button type="button" data-tuning-key="speedPct" data-tuning-delta="2">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="spinPct"><div><strong>Spin</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="spinPct" data-tuning-delta="-5">−</button><output data-tuning-output="spinPct">0%</output><button type="button" data-tuning-key="spinPct" data-tuning-delta="5">+</button></div></div>
+            </div>
+            <p id="liveTuningSummary" class="session-adjustment-summary">No adjustments</p>
+          </section>
+
+          <section class="run-setup-card panel-card">
+            <div class="section-title-row"><div><h3>Robot setup</h3><p>Place the robot as expected by this drill before playing.</p></div></div>
+            <div id="runRobotSetup" class="robot-setup-summary"></div>
+            <div class="run-secondary-actions">
+              <button id="previewBtn" class="button ghost" type="button">Preview sequence</button>
+              <button id="runEditDrillBtn" class="button primary" type="button">✎ Edit drill</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="editorScreen" class="app-screen editor-screen" data-screen="editor" hidden>
+        <header class="screen-header editor-screen-header">
+          <button id="editorBackBtn" class="screen-back-button" type="button" aria-label="Back">←</button>
+          <div class="screen-title-grow"><p class="eyebrow">Drill editor</p><h2 id="activeDrillTitle">Drill</h2><p id="editorAutosaveText">Autosaved locally</p></div>
+          <button id="drillDetailsBtn" class="button compact ghost" type="button">Drill details</button>
+          <button id="editorRunBtn" class="button compact primary" type="button">▶ Run drill</button>
+        </header>
+
+        <div class="editor-workspace">
+          <section class="canvas-shell">
+            <div class="canvas-toolbar">
+              <button id="addNodeMenuBtn" class="floating-add-button" type="button" aria-label="Add node">＋</button>
+              <span id="modeText">Drag background to pan · wheel to zoom</span>
+              <div class="editor-toolbar-actions">
+                <button id="fitBtn" class="toolbar-button" type="button">Fit</button>
+                <button id="deleteSelectionBtn" class="toolbar-button danger" type="button">Delete</button>
+              </div>
+              <span class="autosave-indicator"><span id="zoomIndicator">100%</span></span>
+            </div>
+            <div id="graphViewport" class="graph-viewport" tabindex="0" aria-label="Drill flow graph editor">
+              <div id="graphSurface" class="graph-surface"><div id="graphWorld" class="graph-world"><svg id="edgeLayer" class="edge-layer" width="2600" height="1800" aria-hidden="true"></svg><div id="nodeLayer" class="node-layer"></div></div></div>
+              <div id="emptyHint" class="empty-hint"><strong>Start → End</strong><span>Tap + to add the first step to this drill.</span></div>
+            </div>
+          </section>
+
+          <aside class="inspector panel editor-inspector" aria-label="Details">
+            <header class="inspector-screen-header"><button id="inspectorBackBtn" class="screen-back-button" type="button" aria-label="Back to graph">←</button><strong>Details</strong><button id="inspectorCloseBtn" class="icon-button" type="button" aria-label="Close details">×</button></header>
+            <div id="inspectorContent" class="inspector-content"><div class="empty-inspector"><h2>Nothing selected</h2><p>Tap a node or connection to inspect it.</p></div></div>
+          </aside>
+        </div>
+
+        <details class="editor-status-panel"><summary>Validation and advanced graph tools</summary><div class="editor-status-content"><div id="statusBadge" class="status-badge neutral">Not validated</div><ul id="validationList" class="validation-list"></ul></div></details>
+      </section>
+
+      <section id="robotScreen" class="app-screen robot-screen" data-screen="robot" hidden>
+        <header class="screen-header compact-screen-header"><button id="robotBackBtn" class="screen-back-button" type="button" aria-label="Back">←</button><div class="screen-title-grow"><p class="eyebrow">Robot</p><h2>Nova setup</h2><p>Connection, calibration, model status and physical test tools.</p></div></header>
+        <div class="robot-page-grid">
+          <section class="robot-page-card panel-card">
+            <div class="robot-page-status"><span id="robotPageDot" class="status-dot disconnected"></span><div><strong id="robotPageConnection">Nova disconnected</strong><small id="robotPageDevice">Connect over Web Bluetooth</small></div></div>
+            <button id="robotConnectBtn" class="button primary wide" type="button">Connect Nova</button>
+            <button id="robotDiagnosticsBtn" class="button ghost wide" type="button">Connection details</button>
+          </section>
+          <section class="robot-menu-card panel-card">
+            <button id="calibrationBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">◎</span><span><strong>Calibration</strong><small>Guided calibration and trajectory model</small></span><span>›</span></button>
+            <button id="robotSettingsShortcutBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">⚙</span><span><strong>Robot / model settings</strong><small>Geometry, air model and Nova scaling</small></span><span>›</span></button>
+          </section>
+          <section class="model-default-card panel-card"><h3>Current defaults</h3><dl><div><dt>Nozzle height</dt><dd>22.5 cm</dd></div><div><dt>Base to nozzle</dt><dd>26.5 cm</dd></div><div><dt>Exit speed model</dt><dd>Linear</dd></div></dl></section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-primary-nav" aria-label="Primary navigation">
+    <button id="mobileLibraryNavBtn" class="mobile-primary-tab active" type="button" data-app-nav="library"><span aria-hidden="true">▤</span><span>Library</span></button>
+    <button id="mobileRunNavBtn" class="mobile-primary-tab" type="button" data-app-nav="run"><span aria-hidden="true">▶</span><span>Run</span></button>
+    <button id="mobileEditNavBtn" class="mobile-primary-tab" type="button" data-app-nav="editor"><span aria-hidden="true">⌘</span><span>Edit</span></button>
+    <button id="mobileRobotNavBtn" class="mobile-primary-tab" type="button" data-app-nav="robot"><span aria-hidden="true">◎</span><span>Robot</span></button>
   </nav>
 
+  <dialog id="addNodeDialog" class="app-dialog add-node-dialog">
+    <div class="dialog-frame add-node-frame">
+      <header><div><h2 id="addNodeDialogTitle">Add to drill</h2><p id="addNodeDialogSubtitle">Choose what to add.</p></div><button id="closeAddNodeDialogBtn" class="icon-button" type="button" aria-label="Close">×</button></header>
+      <div id="addNodeChoicePanel" class="add-node-choice-grid">
+        <button id="addShotBtn" class="add-type-card shot-tool" type="button"><span class="add-type-icon">●</span><span><strong>Shot</strong><small>One physical ball</small></span></button>
+        <button id="addRandomBtn" class="add-type-card random-tool" type="button"><span class="add-type-icon">◆</span><span><strong>Random choice</strong><small>Weighted branches</small></span></button>
+        <button id="addCounterBtn" class="add-type-card counter-tool" type="button"><span class="add-type-icon">↻</span><span><strong>Repeat / loop</strong><small>Repeat until finished</small></span></button>
+        <button id="addDrillNodeBtn" class="add-type-card drill-tool" type="button"><span class="add-type-icon">▣</span><span><strong>Sub-drill</strong><small>Reuse another drill</small></span></button>
+      </div>
+      <div id="addNodeConfigPanel" class="add-node-config-panel" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog id="drillDetailsDialog" class="app-dialog drill-details-dialog">
+    <div class="dialog-frame drill-details-frame">
+      <header><div><h2>Drill details</h2><p>Name, description, tags and expected robot position.</p></div><button id="closeDrillDetailsBtn" class="icon-button" type="button" aria-label="Close">×</button></header>
+      <label class="field"><span>Name</span><input id="drillNameInput" type="text" maxlength="90"></label>
+      <label class="field"><span>Description</span><textarea id="drillDescriptionInput" rows="4" maxlength="600" placeholder="What is this drill for?"></textarea></label>
+      <label class="field"><span>Tags</span><input id="drillTagsInput" type="text" maxlength="240" placeholder="footwork, match-like, underspin"><small>Comma-separated. Used for search.</small></label>
+      <fieldset class="details-fieldset"><legend>Robot setup</legend><p class="helper">Coordinates describe where the robot is physically placed for this drill. Defaults are centered at the near edge and straight ahead.</p><div class="field-grid three"><label class="field"><span>X from near edge</span><span class="input-with-unit"><input id="drillRobotXInput" type="number" step="0.01"><small>m</small></span></label><label class="field"><span>Y from centre</span><span class="input-with-unit"><input id="drillRobotYInput" type="number" step="0.01"><small>m</small></span></label><label class="field"><span>Yaw</span><span class="input-with-unit"><input id="drillRobotYawInput" type="number" step="0.5"><small>°</small></span></label></div></fieldset>
+      <div id="drillDetailsReadonlyNote" class="builtin-readonly-note" hidden></div>
+      <div class="dialog-action-row"><button id="copyBuiltInBtn" class="button primary" type="button">Copy to My drills</button><button id="duplicateDrillBtn" class="button ghost" type="button">Duplicate</button><button id="moveDrillBtn" class="button ghost" type="button">Move</button><button id="deleteDrillBtn" class="button danger" type="button">Delete</button></div>
+    </div>
+  </dialog>
   <dialog id="calibrationDialog" class="calibration-dialog">
     <div class="dialog-frame calibration-frame">
       <header class="calibration-header">

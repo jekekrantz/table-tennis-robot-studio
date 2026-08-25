@@ -5,7 +5,7 @@ root = Path(__file__).resolve().parent.parent
 html = (root / "index.html").read_text(encoding="utf-8")
 app = (root / "app.js").read_text(encoding="utf-8")
 ids = set(re.findall(r'\bid="([^"]+)"', html))
-for expected in ["calibrationGuidedPanel","guidedPlacementTable","guidedPlacementGround","guidedDistanceInput","guidedNetHeightInput","guidedSaveNextBtn","guidedComputeBtn","guidedSpeedMinInput","guidedSpeedMaxInput","guidedFeedBtn","guidedRepeatCountInput","guidedNozzleXInput","liveTuningBtn","liveTuningDialog","tuningPaceValue","tuningClearanceValue","tuningSpinValue","tuningSpeedValue","resetLiveTuningBtn","builtInLibraryTab","myDrillsLibraryTab","libraryBreadcrumb","librarySearchInput","newFolderBtn","copyBuiltInBtn","moveDrillBtn","folderDialog","moveDrillDialog","mobileDrillsBtn","closeMobileDrillsBtn","mobileGraphNavBtn","mobileDrillsNavBtn","mobileCalibrationNavBtn"]:
+for expected in ["calibrationGuidedPanel","guidedPlacementTable","guidedPlacementGround","guidedDistanceInput","guidedNetHeightInput","guidedSaveNextBtn","guidedComputeBtn","guidedSpeedMinInput","guidedSpeedMaxInput","guidedFeedBtn","guidedRepeatCountInput","guidedNozzleXInput","liveTuningBtn","liveTuningDialog","tuningPaceValue","tuningClearanceValue","tuningSpinValue","tuningSpeedValue","resetLiveTuningBtn","builtInLibraryTab","myDrillsLibraryTab","libraryBreadcrumb","librarySearchInput","newFolderBtn","copyBuiltInBtn","moveDrillBtn","folderDialog","moveDrillDialog","libraryScreen","runScreen","editorScreen","robotScreen","mobileLibraryNavBtn","mobileRunNavBtn","mobileEditNavBtn","mobileRobotNavBtn","addNodeDialog","drillDetailsDialog","addNodeMenuBtn","runEditDrillBtn","editorRunBtn","robotDiagnosticsBtn"]:
     if expected not in ids: raise SystemExit(f"Missing guided calibration control: {expected}")
 for script in ("guided-calibration.js", "launch-model.js", "drill-adjustments.js", "app.js"):
     if f'<script src="{script}"></script>' not in html: raise SystemExit(f"{script} is not loaded")
@@ -77,12 +77,25 @@ for token in ("LIBRARY_STRUCTURE_VERSION = 2", "makeBuiltInCatalog", "migrateLeg
 print("UI structure self-test: PASS")
 
 css = (root / "styles.css").read_text(encoding="utf-8")
-if "mobile-drills-open .toolbox" not in css:
-    raise SystemExit("Mobile Drills library must be accessible as a full-screen browser")
-if ".mobile-workspace-nav" not in css or "--mobile-nav-height" not in css:
-    raise SystemExit("Persistent mobile Graph / Drills / Calibrate navigation is missing")
-if 'setMobileWorkspace("drills")' not in app or 'setMobileWorkspace("graph")' not in app:
-    raise SystemExit("Mobile workspace navigation handlers are missing")
-
-if "...builtInCatalog.drills.map(drill => drill.id)" not in app:
+for token in (".mobile-primary-nav", ".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell", ".drill-library-card", ".flow-terminal", ".add-node-choice-grid"):
+    if token not in css: raise SystemExit(f"Missing intent-first responsive UI structure: {token}")
+for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"', 'openAddNodeMenu', 'openAddNodeConfig', 'openDrillDetails'):
+    if token not in app: raise SystemExit(f"Missing app navigation/create flow: {token}")
+if 'navigateApp("library", { push: false })' not in app:
+    raise SystemExit("App must start on the drill library")
+for token in ('description: ""', 'tags: []', 'robotPose: { x: 0.265, y: 0, yawDeg: 0 }'):
+    if token not in app: raise SystemExit(f"Missing drill metadata model: {token}")
+if 'configure it first' not in app.lower():
+    raise SystemExit("Add-node flow must configure before creating")
+if 'renderSyntheticEndpoints' not in app or 'START' not in app or 'END' not in app:
+    raise SystemExit("Editor must always render synthetic Start and End nodes")
+if 'mobileGraphLayoutEnabled' not in app or 'mobileLayoutMap' not in app:
+    raise SystemExit("Mobile editor must use vertical graph layout")
+for token in ('measureRenderedNodeHeights', 'nodeHeightCache', 'MOBILE_LAYOUT_CENTER_X', 'horizontalGap = 48'):
+    if token not in app: raise SystemExit(f"Missing collision-free content-sized graph layout: {token}")
+for token in ('.spin-ball-icon', '.spin-direction-symbol', '.shot-metrics { display:flex; gap:5px; flex-wrap:nowrap'):
+    if token not in css: raise SystemExit(f"Missing compact speed/spin node presentation: {token}")
+if '...builtInCatalog.drills.map(drill => drill.id)' not in app:
     raise SystemExit("Saved My drills must preserve sub-drill references to Built-in presets")
+
+print("UI structure self-test: PASS")
