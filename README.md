@@ -6,6 +6,15 @@ ball trajectories, and controlling a Pongbot Nova S Pro over Web Bluetooth.
 This repository is intended to be usable directly from GitHub Pages and for local
 development without a build step or package manager.
 
+## Drill library organization
+
+The drill browser deliberately separates two roots:
+
+- **Built-in** is read-only and ships with the app. It is organized into virtual folders (Shots, Footwork, Placement, Spin, and Random / match-like) and updates automatically with new app releases. Use **Copy to My drills** before changing a built-in graph.
+- **My drills** contains only user-created/copied drills. It is saved locally, exported/imported with calibration, and supports nested virtual folders, move, duplicate, rename, and delete operations. Removing a folder moves its contents up one level instead of deleting drills.
+
+Built-in drills are not written to browser storage. This prevents app upgrades from overwriting custom work and prevents stale stored defaults from hiding newer built-in presets. Live tuning is stored separately as a player preference and never edits either source.
+
 ## Current capabilities
 
 - Visual drill graph with shots, weighted-random branches, sub-drills and repeaters.
@@ -130,7 +139,7 @@ orientations remain blocked until their physical spin axes are verified.
 
 A fresh install now starts with a practical shot-and-drill library instead of the old graph-editor demonstration examples. It includes common topspin, backspin, no-spin and fast/deep feeds plus forehand/backhand alternating, 2-2, Falkenberg, three-point and semi-random/random footwork patterns. Built-in shot parameters were solved with the current default trajectory model from the centered robot position and use conservative table-edge and net-clearance margins.
 
-The **Restore defaults** action replaces the drill library but preserves the current robot calibration. The one-time migration from the previous three built-in examples also preserves calibration. User-created libraries are not automatically replaced.
+Built-in drills are read-only and update with the app. **My drills** are stored independently, so updating built-ins never overwrites custom work. Older saved default presets are migrated out of browser storage while modified/custom drills are kept under My drills. Calibration is preserved during migration.
 
 See `TRAINING_LIBRARY.md` for the preset list, modeled target assumptions and coaching references.
 
@@ -256,3 +265,14 @@ hardware work and public community references; see `THIRD_PARTY_NOTICES.md` and
 Pongbot/PONGBOT and other product names may be trademarks of their respective owners.
 This is an independent community project and is not affiliated with or endorsed by
 Pongbot.
+
+## Live tuning
+
+The graph toolbar includes **Live tuning**, a non-destructive player-preference layer for quick drill fine-tuning. The tuning profile is saved separately in browser storage so an advanced player can keep a faster/lower style across sessions while a beginner can keep a gentler profile. It is intentionally **not** written into drills and is not exported with the drill library.
+
+- **Pace** uses 5% steps from -50% to +100%. Pace is treated as a rate: +100% is twice the pace (half the delays), and -50% is half the pace. The between-set delay is scaled too because it is also the inter-ball interval for single-shot drills.
+- **Net clearance** uses 5% steps from -100% to +200%. The -100% endpoint targets about 0.2 cm of modeled clearance rather than forcing an exact numerical net contact. The runtime solver adjusts elevation and exit speed together to preserve the stored landing point; spin/exit-speed ratio is kept constant where the modeled/hardware range permits it.
+- **Spin** uses 5% steps from -100% to +300%. It scales spin magnitude while keeping exit speed fixed, then solves elevation to minimize landing shift. A no-spin shot remains no-spin.
+- **Speed** uses smaller 2% steps from -50% to +50%. It changes exit speed while keeping spin fixed, then solves elevation to minimize landing shift. Hardware/model speed limits still apply.
+
+The stored shot parameters stay unchanged. Preview uses the effective tuned shots, and Play applies the same modifiers independently to every ball in the compiled traversal, including balls reached through sub-drills. Because a Start packet is buffered by the Nova, changing a modifier during playback interrupts that packet, rebuilds the remaining already-sampled traversal with the new values, and switches the rest of the run to one-ball packets so subsequent edits affect the next ball.

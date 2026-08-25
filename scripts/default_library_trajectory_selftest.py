@@ -195,8 +195,14 @@ def parse_presets():
 
 
 def main():
+    # The blank/custom Shot node must itself start as a safe, useful ball.
+    default_landing, default_net = simulate(5.97, 0.0, 12.5, 0.0)
+    assert default_landing is not None and default_net is not None, "default new shot has no complete trajectory"
+    assert TABLE_L / 2 < default_landing[0] < TABLE_L, f"default new shot misses opponent half: {default_landing}"
+    assert default_net[0] >= 0.075, f"default new shot has insufficient net clearance: {default_net[0]*100:.2f} cm"
+
     presets = parse_presets()
-    assert len(presets) >= 12, f"expected a substantial preset library, found {len(presets)}"
+    assert len(presets) >= 18, f"expected an expanded preset library, found {len(presets)}"
     for preset in presets:
         landing, net = simulate(preset["speed"], preset["spin"], preset["elev"], preset["aim"])
         assert landing is not None and net is not None, f"{preset['key']}: no complete table trajectory"

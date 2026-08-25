@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-echo "[1/8] JavaScript syntax"
+echo "[1/9] JavaScript syntax"
 node --check app.js
 node --check pongbot-protocol.js
 node --check pongbot-ble.js
@@ -10,20 +10,24 @@ node --check guided-calibration.js
 node --check guided-calibration-selftest.js
 node --check launch-model.js
 node --check launch-model-selftest.js
-echo "[2/8] Protocol/BLE mock self-test"
+node --check drill-adjustments.js
+node --check drill-adjustments-selftest.js
+echo "[2/9] Protocol/BLE mock self-test"
 node selftest.js
-echo "[3/8] Guided calibration solver self-test"
+echo "[3/9] Guided calibration solver self-test"
 node guided-calibration-selftest.js
-echo "[4/8] Linear launch-model self-test"
+echo "[4/9] Linear launch-model self-test"
 node launch-model-selftest.js
-echo "[5/8] Python/shell/UI syntax"
+echo "[5/9] Live drill-adjustment solver self-test"
+node drill-adjustments-selftest.js
+echo "[6/9] Python/shell/UI syntax"
 python3 -m py_compile scripts/serve.py scripts/ui_structure_selftest.py
 python3 scripts/ui_structure_selftest.py
 rm -rf scripts/__pycache__
 bash -n scripts/serve_android_via_adb.sh
-echo "[6/8] Default training-library trajectory self-test"
+echo "[7/9] Default training-library trajectory self-test"
 python3 scripts/default_library_trajectory_selftest.py
-echo "[7/8] Public-tree hygiene"
+echo "[8/9] Public-tree hygiene"
 if find . -type f \( -name '.env' -o -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.pcap' -o -name '*.pcapng' -o -name '*.har' \) -print -quit | grep -q .; then
   echo "Potentially sensitive local file found:" >&2
   find . -type f \( -name '.env' -o -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' -o -name '*.pcap' -o -name '*.pcapng' -o -name '*.har' \) -print >&2
@@ -33,7 +37,7 @@ if grep -RInE --exclude-dir=.git --exclude='preflight.sh' '(-----BEGIN (RSA |EC 
   echo "Potential credential pattern found; inspect before publishing." >&2
   exit 1
 fi
-echo "[8/8] Device-specific data check"
+echo "[9/9] Device-specific data check"
 if grep -RInE --exclude-dir=.git --exclude='preflight.sh' '\b[A-Z][0-9]{11}\b' .; then
   echo "Possible device-specific serial found; redact it before publishing." >&2
   exit 1

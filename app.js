@@ -2,7 +2,9 @@
   "use strict";
 
   const STORAGE_KEY = "table-tennis-robot-studio";
+  const LIVE_TUNING_STORAGE_KEY = "table-tennis-robot-studio-live-tuning";
   const SCHEMA_VERSION = 1;
+  const LIBRARY_STRUCTURE_VERSION = 2;
   // Working geometric estimate: center of the Nova S Pro ball exit above the table
   // with the head nominally level. This is not a manufacturer-specified dimension;
   // calibrate against the physical robot for precision trajectory work.
@@ -18,6 +20,7 @@
   const $ = (id) => document.getElementById(id);
   const GuidedCalibration = globalThis.GuidedCalibration;
   const LaunchModel = globalThis.NovaLaunchModel;
+  const DrillAdjustments = globalThis.DrillAdjustments;
   const els = {
     repetitionsInput: $("repetitionsInput"),
     repetitionsDownBtn: $("repetitionsDownBtn"),
@@ -39,9 +42,24 @@
     newDrillBtn: $("newDrillBtn"),
     duplicateDrillBtn: $("duplicateDrillBtn"),
     deleteDrillBtn: $("deleteDrillBtn"),
-    resetExamplesBtn: $("resetExamplesBtn"),
     libraryStatus: $("libraryStatus"),
     drillList: $("drillList"),
+    builtInLibraryTab: $("builtInLibraryTab"),
+    myDrillsLibraryTab: $("myDrillsLibraryTab"),
+    libraryBreadcrumb: $("libraryBreadcrumb"),
+    librarySearchInput: $("librarySearchInput"),
+    newFolderBtn: $("newFolderBtn"),
+    renameFolderBtn: $("renameFolderBtn"),
+    deleteFolderBtn: $("deleteFolderBtn"),
+    copyBuiltInBtn: $("copyBuiltInBtn"),
+    moveDrillBtn: $("moveDrillBtn"),
+    folderDialog: $("folderDialog"),
+    folderDialogTitle: $("folderDialogTitle"),
+    folderNameInput: $("folderNameInput"),
+    folderSaveBtn: $("folderSaveBtn"),
+    moveDrillDialog: $("moveDrillDialog"),
+    moveDrillFolderSelect: $("moveDrillFolderSelect"),
+    moveDrillSaveBtn: $("moveDrillSaveBtn"),
     drillNameInput: $("drillNameInput"),
     addShotBtn: $("addShotBtn"),
     addRandomBtn: $("addRandomBtn"),
@@ -49,10 +67,17 @@
     addCounterBtn: $("addCounterBtn"),
     deleteSelectionBtn: $("deleteSelectionBtn"),
     fitBtn: $("fitBtn"),
+    mobileDrillsBtn: $("mobileDrillsBtn"),
+    closeMobileDrillsBtn: $("closeMobileDrillsBtn"),
+    mobileGraphNavBtn: $("mobileGraphNavBtn"),
+    mobileDrillsNavBtn: $("mobileDrillsNavBtn"),
+    mobileCalibrationNavBtn: $("mobileCalibrationNavBtn"),
     statusBadge: $("statusBadge"),
     validationList: $("validationList"),
     activeDrillTitle: $("activeDrillTitle"),
     modeText: $("modeText"),
+    liveTuningBtn: $("liveTuningBtn"),
+    liveTuningSummary: $("liveTuningSummary"),
     graphViewport: $("graphViewport"),
     graphSurface: $("graphSurface"),
     graphWorld: $("graphWorld"),
@@ -170,6 +195,16 @@
     robotDisconnectBtn: $("robotDisconnectBtn"),
     robotCopyLogBtn: $("robotCopyLogBtn"),
     robotLog: $("robotLog"),
+    liveTuningDialog: $("liveTuningDialog"),
+    closeLiveTuningBtn: $("closeLiveTuningBtn"),
+    doneLiveTuningBtn: $("doneLiveTuningBtn"),
+    resetLiveTuningBtn: $("resetLiveTuningBtn"),
+    tuningPaceValue: $("tuningPaceValue"),
+    tuningClearanceValue: $("tuningClearanceValue"),
+    tuningSpinValue: $("tuningSpinValue"),
+    tuningSpeedValue: $("tuningSpeedValue"),
+    liveTuningImpactLabel: $("liveTuningImpactLabel"),
+    liveTuningImpact: $("liveTuningImpact"),
     previewDialog: $("previewDialog"),
     closePreviewBtn: $("closePreviewBtn"),
     previewLimitInput: $("previewLimitInput"),
@@ -185,7 +220,10 @@
   };
 
   let startupNotice = "";
-  let library = initializeLibrary();
+  let builtInCatalog = null;
+  let library = null;
+  let libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
+  let folderDialogMode = null;
   let selection = null;
   let nodeDrag = null;
   let connectionDrag = null;
@@ -207,6 +245,12 @@
   let calibrationViewTransform = null;
   let robotLogLines = [];
   let stopPromise = null;
+  let liveTuning = DrillAdjustments ? { ...DrillAdjustments.DEFAULT_TUNING } : { pacePct: 0, clearancePct: 0, spinPct: 0, speedPct: 0 };
+  const liveTuningCache = new Map();
+  let liveTuningRevision = 0;
+  let playbackRetuneRequested = false;
+  let playbackResponsiveTuning = false;
+  let liveRetuneStopPromise = null;
 
   const Protocol = globalThis.PongbotProtocol;
   const RobotController = globalThis.NovaBleController;
@@ -223,23 +267,63 @@
 
   function initializeLibrary() {
     const loaded = loadLibrary();
-    if (loaded && Array.isArray(loaded.drills) && loaded.drills.length > 0) return loaded;
-    startupNotice = "No usable saved drill library was found, so the default training library was restored.";
-    return makeSampleLibrary();
+    if (loaded) return loaded;
+    startupNotice = "Built-in training drills are ready. Your own drills are stored separately under My drills.";
+    return makeUserLibrary();
+  }
+
+  function makeUserLibrary(calibration = defaultCalibration()) {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      libraryStructureVersion: LIBRARY_STRUCTURE_VERSION,
+      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
+      activeDrillSource: "builtin",
+      activeDrillId: builtInCatalog?.defaultDrillId ?? null,
+      calibration: sanitizeCalibration(calibration),
+      folders: [],
+      drills: [],
+    };
   }
 
   function repairLibraryIfNeeded() {
-    if (!library || typeof library !== "object") library = makeSampleLibrary();
+    if (!library || typeof library !== "object") library = makeUserLibrary();
     if (!Array.isArray(library.drills)) library.drills = [];
-    if (library.drills.length === 0) {
-      const replacement = defaultDrill("Custom drill");
-      library.drills.push(replacement);
-      library.activeDrillId = replacement.id;
-      startupNotice = "The saved library contained no drills. A new blank drill was created.";
-    }
-    const activeExists = library.drills.some(drill => drill.id === library.activeDrillId);
-    if (!activeExists) library.activeDrillId = library.drills[0].id;
+    if (!Array.isArray(library.folders)) library.folders = [];
+    library.schemaVersion = SCHEMA_VERSION;
+    library.libraryStructureVersion = LIBRARY_STRUCTURE_VERSION;
+    library.builtInLibraryVersion = DEFAULT_LIBRARY_VERSION;
     if (!library.calibration) library.calibration = defaultCalibration();
+
+    const folderIds = new Set(library.folders.map(folder => folder.id));
+    library.folders = library.folders
+      .filter(folder => folder && typeof folder.id === "string" && typeof folder.name === "string")
+      .map(folder => ({
+        id: folder.id,
+        name: String(folder.name || "Folder").trim() || "Folder",
+        parentId: folderIds.has(folder.parentId) && folder.parentId !== folder.id ? folder.parentId : null,
+      }));
+    const validFolderIds = new Set(library.folders.map(folder => folder.id));
+    library.drills.forEach(drill => {
+      if (!validFolderIds.has(drill.folderId)) drill.folderId = null;
+    });
+
+    const source = library.activeDrillSource === "user" ? "user" : "builtin";
+    const activeExists = source === "user"
+      ? library.drills.some(drill => drill.id === library.activeDrillId)
+      : builtInCatalog?.drills.some(drill => drill.id === library.activeDrillId);
+    if (!activeExists) {
+      const firstUser = library.drills[0];
+      if (builtInCatalog?.defaultDrillId) {
+        library.activeDrillSource = "builtin";
+        library.activeDrillId = builtInCatalog.defaultDrillId;
+      } else if (firstUser) {
+        library.activeDrillSource = "user";
+        library.activeDrillId = firstUser.id;
+      } else {
+        library.activeDrillSource = "user";
+        library.activeDrillId = null;
+      }
+    }
     return library;
   }
 
@@ -420,7 +504,7 @@
       label: uniqueShotName(drill, label),
       x: 300,
       y: 260,
-      params: { speedMps: 8.0, spinRps: 20, elevationDeg: 4, aimDeg: 0 },
+      params: { speedMps: 5.97, spinRps: 0, elevationDeg: 12.5, aimDeg: 0 },
     };
   }
 
@@ -436,7 +520,7 @@
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  const DEFAULT_LIBRARY_VERSION = 2;
+  const DEFAULT_LIBRARY_VERSION = 4;
   const LEGACY_BUILT_IN_DRILL_NAMES = [
     "Match-play mix",
     "Serve + third ball",
@@ -459,6 +543,16 @@
       params: { speedMps: 5.01, spinRps: 0, elevationDeg: 17.1, aimDeg: 0 },
       target: { xM: 1.950, yM: 0, netClearanceCm: 10.0 },
     },
+    shortBackspinForehand: {
+      label: "Short underspin to forehand",
+      params: { speedMps: 5.00, spinRps: -18, elevationDeg: 13.9, aimDeg: 14.0 },
+      target: { xM: 1.951, yM: 0.420, netClearanceCm: 8.0 },
+    },
+    shortBackspinBackhand: {
+      label: "Short underspin to backhand",
+      params: { speedMps: 5.00, spinRps: -18, elevationDeg: 13.9, aimDeg: -14.0 },
+      target: { xM: 1.951, yM: -0.420, netClearanceCm: 8.0 },
+    },
     topspinForehand: {
       label: "Topspin to forehand",
       params: { speedMps: 7.63, spinRps: 22, elevationDeg: 11.0, aimDeg: 13.6 },
@@ -468,6 +562,16 @@
       label: "Topspin to backhand",
       params: { speedMps: 7.63, spinRps: 22, elevationDeg: 11.0, aimDeg: -13.6 },
       target: { xM: 2.253, yM: -0.481, netClearanceCm: 10.1 },
+    },
+    deepTopspinForehand: {
+      label: "Long wide topspin to forehand",
+      params: { speedMps: 9.02, spinRps: 22, elevationDeg: 8.9, aimDeg: 12.9 },
+      target: { xM: 2.449, yM: 0.500, netClearanceCm: 10.0 },
+    },
+    deepTopspinBackhand: {
+      label: "Long wide topspin to backhand",
+      params: { speedMps: 9.02, spinRps: 22, elevationDeg: 8.9, aimDeg: -12.9 },
+      target: { xM: 2.449, yM: -0.500, netClearanceCm: 10.0 },
     },
     topspinElbow: {
       label: "Topspin to elbow",
@@ -632,6 +736,129 @@
     return drill;
   }
 
+  function openingToRandomRecoveryDrill(name, openingPresetKey, choices, {
+    intervalSeconds = .88,
+    repetitions = 14,
+    randomLabel = "Recover to the next ball",
+  } = {}) {
+    const drill = defaultDrill(name);
+    drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
+    const opening = presetShot(drill, openingPresetKey, "Short underspin");
+    opening.x = 150; opening.y = 330;
+    const random = makeRandom(randomLabel);
+    random.x = 500; random.y = 330;
+    drill.nodes.push(opening, random);
+    drill.startNodeId = opening.id;
+    drill.edges.push({ id: makeId("edge"), source: opening.id, sourceSlot: "next", target: random.id, weight: 1, delaySeconds: intervalSeconds });
+    choices.forEach((choice, index) => {
+      const shot = presetShot(drill, choice.key, choice.label || null);
+      shot.x = 860; shot.y = 120 + index * 250;
+      drill.nodes.push(shot);
+      drill.edges.push({
+        id: makeId("edge"), source: random.id, sourceSlot: "branch", target: shot.id,
+        weight: choice.weight ?? 1, delaySeconds: 0,
+      });
+    });
+    return drill;
+  }
+
+  function shortReceiveRandomAttackDrill() {
+    const drill = defaultDrill("Match: Short receive → random long attack");
+    drill.settings = { repetitions: 14, delayBetweenSets: .88 };
+    const side = makeRandom("Short receive side");
+    side.x = 120; side.y = 330;
+    const shortBh = presetShot(drill, "shortBackspinBackhand", "Short underspin · backhand");
+    const shortFh = presetShot(drill, "shortBackspinForehand", "Short underspin · forehand");
+    shortBh.x = 430; shortBh.y = 190;
+    shortFh.x = 430; shortFh.y = 470;
+    const longRandom = makeRandom("Next attack");
+    longRandom.x = 760; longRandom.y = 330;
+    const longBh = presetShot(drill, "deepTopspinBackhand", "Long topspin · backhand");
+    const longElbow = presetShot(drill, "topspinElbow", "Long topspin · elbow");
+    const longFh = presetShot(drill, "deepTopspinForehand", "Long topspin · forehand");
+    [longBh, longElbow, longFh].forEach((shot, index) => { shot.x = 1100; shot.y = 90 + index * 240; });
+    drill.nodes.push(side, shortBh, shortFh, longRandom, longBh, longElbow, longFh);
+    drill.startNodeId = side.id;
+    drill.edges.push(
+      { id: makeId("edge"), source: side.id, sourceSlot: "branch", target: shortBh.id, weight: 1, delaySeconds: 0 },
+      { id: makeId("edge"), source: side.id, sourceSlot: "branch", target: shortFh.id, weight: 1, delaySeconds: 0 },
+      { id: makeId("edge"), source: shortBh.id, sourceSlot: "next", target: longRandom.id, weight: 1, delaySeconds: .88 },
+      { id: makeId("edge"), source: shortFh.id, sourceSlot: "next", target: longRandom.id, weight: 1, delaySeconds: .88 },
+      { id: makeId("edge"), source: longRandom.id, sourceSlot: "branch", target: longBh.id, weight: 3, delaySeconds: 0 },
+      { id: makeId("edge"), source: longRandom.id, sourceSlot: "branch", target: longElbow.id, weight: 2, delaySeconds: 0 },
+      { id: makeId("edge"), source: longRandom.id, sourceSlot: "branch", target: longFh.id, weight: 3, delaySeconds: 0 },
+    );
+    return drill;
+  }
+
+  function backhandExchangeSwitchDrill() {
+    const drill = defaultDrill("Match: Backhand exchange → switch");
+    drill.settings = { repetitions: 14, delayBetweenSets: .74 };
+    const bh1 = presetShot(drill, "topspinBackhand", "Backhand exchange 1");
+    const bh2 = presetShot(drill, "topspinBackhand", "Backhand exchange 2");
+    const random = makeRandom("Stay or switch");
+    bh1.x = 120; bh1.y = 330; bh2.x = 430; bh2.y = 330; random.x = 740; random.y = 330;
+    const stay = presetShot(drill, "topspinBackhand", "Stay backhand");
+    const elbow = presetShot(drill, "topspinElbow", "Switch to elbow");
+    const wideFh = presetShot(drill, "deepTopspinForehand", "Switch wide forehand");
+    [stay, elbow, wideFh].forEach((shot, index) => { shot.x = 1080; shot.y = 90 + index * 240; });
+    drill.nodes.push(bh1, bh2, random, stay, elbow, wideFh);
+    drill.startNodeId = bh1.id;
+    drill.edges.push(
+      { id: makeId("edge"), source: bh1.id, sourceSlot: "next", target: bh2.id, weight: 1, delaySeconds: .74 },
+      { id: makeId("edge"), source: bh2.id, sourceSlot: "next", target: random.id, weight: 1, delaySeconds: .74 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: stay.id, weight: 4, delaySeconds: 0 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: elbow.id, weight: 2, delaySeconds: 0 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: wideFh.id, weight: 3, delaySeconds: 0 },
+    );
+    return drill;
+  }
+
+  function weightedMatchRallyDrill() {
+    const drill = defaultDrill("Match: Weighted rally");
+    drill.settings = { repetitions: 8, delayBetweenSets: .78 };
+    const repeater = makeCounter("Seven-ball rally");
+    repeater.startCount = 7;
+    repeater.x = 120; repeater.y = 330;
+    const random = makeRandom("Match placement");
+    random.x = 430; random.y = 330;
+    const bh = presetShot(drill, "topspinBackhand", "Backhand pressure");
+    const elbow = presetShot(drill, "topspinElbow", "Elbow pressure");
+    const fh = presetShot(drill, "topspinForehand", "Forehand pressure");
+    [bh, elbow, fh].forEach((shot, index) => { shot.x = 780; shot.y = 90 + index * 240; });
+    drill.nodes.push(repeater, random, bh, elbow, fh);
+    drill.startNodeId = repeater.id;
+    drill.edges.push(
+      { id: makeId("edge"), source: repeater.id, sourceSlot: "A", target: random.id, weight: 1, delaySeconds: 0 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: bh.id, weight: 45, delaySeconds: 0 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: elbow.id, weight: 20, delaySeconds: 0 },
+      { id: makeId("edge"), source: random.id, sourceSlot: "branch", target: fh.id, weight: 35, delaySeconds: 0 },
+      { id: makeId("edge"), source: bh.id, sourceSlot: "next", target: repeater.id, weight: 1, delaySeconds: .74 },
+      { id: makeId("edge"), source: elbow.id, sourceSlot: "next", target: repeater.id, weight: 1, delaySeconds: .74 },
+      { id: makeId("edge"), source: fh.id, sourceSlot: "next", target: repeater.id, weight: 1, delaySeconds: .74 },
+    );
+    return drill;
+  }
+
+  function matchPlayMixDrill(patterns) {
+    const drill = defaultDrill("Match: Random pattern mix");
+    drill.settings = { repetitions: 12, delayBetweenSets: 1.05 };
+    const random = makeRandom("Choose a match pattern");
+    random.x = 150; random.y = 330;
+    drill.nodes.push(random);
+    drill.startNodeId = random.id;
+    patterns.forEach((entry, index) => {
+      const node = makeDrillNode(entry.label, entry.drill.id);
+      node.x = 540; node.y = 80 + index * 185;
+      drill.nodes.push(node);
+      drill.edges.push({
+        id: makeId("edge"), source: random.id, sourceSlot: "branch", target: node.id,
+        weight: entry.weight ?? 1, delaySeconds: 0,
+      });
+    });
+    return drill;
+  }
+
   function makeSampleLibrary() {
     // Common coaching patterns: alternating FH/BH, 2-2, Falkenberg/two-one,
     // systematic side-to-side footwork, semi-random placement, and three-spot
@@ -689,11 +916,40 @@
       { key: "fastDeepForehand", label: "Deep forehand" },
     ], { repetitions: 30, intervalSeconds: .72, randomLabel: "Fast deep · three spots" });
 
+    const forehandFlickRecovery = openingToRandomRecoveryDrill(
+      "Match: Short forehand underspin → wide recovery",
+      "shortBackspinForehand",
+      [
+        { key: "deepTopspinBackhand", label: "Long wide topspin · backhand", weight: 1 },
+        { key: "deepTopspinForehand", label: "Long wide topspin · forehand", weight: 1 },
+      ],
+      { randomLabel: "Recover to either wide corner" }
+    );
+    const backhandFlickForehandRecovery = sequenceDrill(
+      "Match: Short backhand underspin → forehand recovery",
+      ["shortBackspinBackhand", "deepTopspinForehand", "deepTopspinForehand"],
+      { repetitions: 12, intervalSeconds: .86, labels: ["Short backhand underspin", "Wide forehand recovery 1", "Wide forehand recovery 2"] }
+    );
+    const shortReceiveRandom = shortReceiveRandomAttackDrill();
+    const backhandSwitch = backhandExchangeSwitchDrill();
+    const weightedRally = weightedMatchRallyDrill();
+    const matchMix = matchPlayMixDrill([
+      { drill: forehandFlickRecovery, label: "FH flick + recovery", weight: 2 },
+      { drill: backhandFlickForehandRecovery, label: "BH flick + FH recovery", weight: 2 },
+      { drill: shortReceiveRandom, label: "Short receive + random attack", weight: 3 },
+      { drill: backhandSwitch, label: "Backhand exchange + switch", weight: 3 },
+      { drill: weightedRally, label: "Weighted rally", weight: 4 },
+    ]);
+
     const shotDrills = [
       singleShotDrill("Shot: No-spin center", "noSpinCenter"),
       singleShotDrill("Shot: Short no-spin", "shortNoSpin", { intervalSeconds: .9 }),
+      singleShotDrill("Shot: Short underspin to forehand", "shortBackspinForehand", { intervalSeconds: .95 }),
+      singleShotDrill("Shot: Short underspin to backhand", "shortBackspinBackhand", { intervalSeconds: .95 }),
       singleShotDrill("Shot: Topspin to forehand", "topspinForehand"),
       singleShotDrill("Shot: Topspin to backhand", "topspinBackhand"),
+      singleShotDrill("Shot: Long wide topspin to forehand", "deepTopspinForehand", { intervalSeconds: .76 }),
+      singleShotDrill("Shot: Long wide topspin to backhand", "deepTopspinBackhand", { intervalSeconds: .76 }),
       singleShotDrill("Shot: Topspin to elbow", "topspinElbow"),
       singleShotDrill("Shot: Heavy topspin center", "heavyTopspin", { intervalSeconds: .85 }),
       singleShotDrill("Shot: Backspin center", "backspinCenter", { intervalSeconds: .95 }),
@@ -718,9 +974,152 @@
         spinSwitch,
         backspinCorners,
         fastDeepRandom,
+        forehandFlickRecovery,
+        backhandFlickForehandRecovery,
+        shortReceiveRandom,
+        backhandSwitch,
+        weightedRally,
+        matchMix,
         ...shotDrills,
       ],
     };
+  }
+
+
+  const BUILT_IN_FOLDER_DEFS = Object.freeze([
+    { id: "builtin-shots", name: "Shots", parentId: "builtin-root" },
+    { id: "builtin-footwork", name: "Footwork", parentId: "builtin-root" },
+    { id: "builtin-placement", name: "Placement", parentId: "builtin-root" },
+    { id: "builtin-spin", name: "Spin", parentId: "builtin-root" },
+    { id: "builtin-random", name: "Random / match-like", parentId: "builtin-root" },
+  ]);
+
+  const BUILT_IN_FOLDER_BY_NAME = Object.freeze({
+    "Drill: Forehand / backhand alternating": "builtin-footwork",
+    "Drill: 2-2 forehand / backhand": "builtin-footwork",
+    "Drill: Falkenberg": "builtin-footwork",
+    "Drill: Three-point footwork": "builtin-footwork",
+    "Drill: Forehand half-table footwork": "builtin-footwork",
+    "Drill: Backhand half-table footwork": "builtin-footwork",
+    "Drill: Backhand + random forehand": "builtin-placement",
+    "Drill: Forehand, backhand, random": "builtin-placement",
+    "Drill: Three spots random": "builtin-random",
+    "Drill: Topspin / backspin switching": "builtin-spin",
+    "Drill: Backspin corners": "builtin-spin",
+    "Drill: Fast deep random": "builtin-random",
+    "Match: Short forehand underspin → wide recovery": "builtin-random",
+    "Match: Short backhand underspin → forehand recovery": "builtin-random",
+    "Match: Short receive → random long attack": "builtin-random",
+    "Match: Backhand exchange → switch": "builtin-random",
+    "Match: Weighted rally": "builtin-random",
+    "Match: Random pattern mix": "builtin-random",
+    "Shot: No-spin center": "builtin-shots",
+    "Shot: Short no-spin": "builtin-shots",
+    "Shot: Short underspin to forehand": "builtin-shots",
+    "Shot: Short underspin to backhand": "builtin-shots",
+    "Shot: Topspin to forehand": "builtin-shots",
+    "Shot: Topspin to backhand": "builtin-shots",
+    "Shot: Long wide topspin to forehand": "builtin-shots",
+    "Shot: Long wide topspin to backhand": "builtin-shots",
+    "Shot: Topspin to elbow": "builtin-shots",
+    "Shot: Heavy topspin center": "builtin-shots",
+    "Shot: Backspin center": "builtin-shots",
+    "Shot: Fast deep center": "builtin-shots",
+  });
+
+  function builtInDisplayName(name) {
+    return String(name || "").replace(/^(?:Drill|Shot|Match):\s*/, "");
+  }
+
+  function stableBuiltInId(name) {
+    const slug = builtInDisplayName(name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 72) || "drill";
+    return `builtin-${slug}`;
+  }
+
+  function makeBuiltInCatalog() {
+    const sample = makeSampleLibrary();
+    const stableIds = new Map(sample.drills.map(drill => [drill.id, stableBuiltInId(drill.name)]));
+    const drills = sample.drills.map(drill => {
+      drill.id = stableIds.get(drill.id);
+      drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name] || "builtin-random";
+      drill.builtIn = true;
+      for (const node of drill.nodes || []) {
+        if (node.type === "drill" && stableIds.has(node.referencedDrillId)) node.referencedDrillId = stableIds.get(node.referencedDrillId);
+      }
+      return drill;
+    });
+    const alternating = drills.find(drill => drill.name === "Drill: Forehand / backhand alternating");
+    return {
+      version: DEFAULT_LIBRARY_VERSION,
+      folders: BUILT_IN_FOLDER_DEFS.map(folder => ({ ...folder })),
+      drills,
+      defaultDrillId: alternating?.id ?? drills[0]?.id ?? null,
+    };
+  }
+
+  function allDrills() {
+    return [...(builtInCatalog?.drills || []), ...(library?.drills || [])];
+  }
+
+  function isActiveBuiltIn() {
+    return library?.activeDrillSource === "builtin";
+  }
+
+  function activeDrillEditable() {
+    return !isActiveBuiltIn();
+  }
+
+  function setActiveDrill(source, id, { save = true } = {}) {
+    const normalizedSource = source === "user" ? "user" : "builtin";
+    const drill = normalizedSource === "user"
+      ? library.drills.find(item => item.id === id)
+      : builtInCatalog.drills.find(item => item.id === id);
+    if (!drill) return false;
+    library.activeDrillSource = normalizedSource;
+    library.activeDrillId = drill.id;
+    if (save) saveLibrary();
+    return true;
+  }
+
+  function builtInDrillByName(name) {
+    return builtInCatalog?.drills.find(drill => drill.name === name) ?? null;
+  }
+
+  function normalizedDrillSignature(drill) {
+    const nodeIndex = new Map((drill.nodes || []).map((node, index) => [node.id, index]));
+    const nodes = (drill.nodes || []).map(node => ({
+      type: node.type,
+      label: node.label,
+      params: node.params ? {
+        speedMps: finite(node.params.speedMps, 0),
+        spinRps: finite(node.params.spinRps, 0),
+        elevationDeg: finite(node.params.elevationDeg, 0),
+        aimDeg: finite(node.params.aimDeg, 0),
+      } : null,
+      referencedDrillId: node.type === "drill" ? String(node.referencedDrillId || "") : undefined,
+      startCount: node.type === "counter" ? finite(node.startCount, 0) : undefined,
+      clearOnNodeIndexes: node.type === "counter"
+        ? (node.clearOnNodeIds || []).map(id => nodeIndex.get(id)).filter(Number.isInteger)
+        : undefined,
+    }));
+    const edges = (drill.edges || []).map(edge => ({
+      source: nodeIndex.get(edge.source),
+      sourceSlot: edge.sourceSlot,
+      target: nodeIndex.get(edge.target),
+      weight: finite(edge.weight, 1),
+      delaySeconds: finite(edge.delaySeconds, 0),
+    }));
+    return JSON.stringify({
+      name: drill.name,
+      settings: drill.settings,
+      startNodeIndex: nodeIndex.get(drill.startNodeId),
+      nodes,
+      edges,
+    });
   }
 
   function isLegacyBuiltInLibrary(raw) {
@@ -731,10 +1130,11 @@
 
   function activeDrill() {
     repairLibraryIfNeeded();
-    return library.drills.find(d => d.id === library.activeDrillId) ?? library.drills[0] ?? null;
+    if (library.activeDrillSource === "user") return library.drills.find(d => d.id === library.activeDrillId) ?? null;
+    return builtInCatalog?.drills.find(d => d.id === library.activeDrillId) ?? builtInCatalog?.drills[0] ?? library.drills[0] ?? null;
   }
 
-  function getDrill(id) { return library.drills.find(d => d.id === id) ?? null; }
+  function getDrill(id) { return allDrills().find(d => d.id === id) ?? null; }
   function getNode(drill, id) { return drill?.nodes.find(n => n.id === id) ?? null; }
   function getEdge(drill, id) { return drill?.edges.find(e => e.id === id) ?? null; }
   function outgoing(drill, nodeId) { return drill.edges.filter(e => e.source === nodeId); }
@@ -941,35 +1341,120 @@
     return drill;
   }
 
-  function sanitizeLibrary(raw) {
+  function sanitizeFolder(rawFolder, knownIds) {
+    const id = String(rawFolder?.id || makeId("folder"));
+    return {
+      id,
+      name: String(rawFolder?.name || "Folder").trim().slice(0, 90) || "Folder",
+      parentId: knownIds.has(String(rawFolder?.parentId)) && String(rawFolder?.parentId) !== id
+        ? String(rawFolder.parentId)
+        : null,
+    };
+  }
+
+  function sanitizeNewLibrary(raw) {
     if (raw?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(raw.drills)) {
       throw new Error(`Unsupported drill file. Expected schemaVersion ${SCHEMA_VERSION}.`);
     }
-
-    const preliminaryIds = new Set(raw.drills.map(d => String(d.id || makeId("drill"))));
-    let drills = raw.drills.map(d => sanitizeDrill(d, preliminaryIds));
-    if (drills.length === 0) {
-      const fallback = defaultDrill("Custom drill");
-      drills = [fallback];
-    }
-    const ids = new Set(drills.map(d => d.id));
+    const rawFolders = Array.isArray(raw.folders) ? raw.folders : [];
+    const folderIds = new Set(rawFolders.map(folder => String(folder?.id || "")).filter(Boolean));
+    const folders = rawFolders.map(folder => sanitizeFolder(folder, folderIds));
+    const validFolderIds = new Set(folders.map(folder => folder.id));
+    const preliminaryIds = new Set([
+      ...builtInCatalog.drills.map(drill => drill.id),
+      ...raw.drills.map(d => String(d.id || makeId("drill"))),
+    ]);
+    const drills = raw.drills.map(d => {
+      const drill = sanitizeDrill(d, preliminaryIds);
+      drill.folderId = validFolderIds.has(String(d?.folderId)) ? String(d.folderId) : null;
+      return drill;
+    });
+    const desiredSource = raw.activeDrillSource === "user" ? "user" : "builtin";
+    const desiredId = String(raw.activeDrillId || "");
+    const userExists = drills.some(drill => drill.id === desiredId);
+    const builtInExists = builtInCatalog.drills.some(drill => drill.id === desiredId);
+    const source = desiredSource === "user" && userExists ? "user" : builtInExists ? "builtin" : drills.length ? "user" : "builtin";
+    const activeId = source === "user" ? (userExists ? desiredId : drills[0]?.id ?? null) : (builtInExists ? desiredId : builtInCatalog.defaultDrillId);
     return {
       schemaVersion: SCHEMA_VERSION,
-      builtInLibraryVersion: Math.max(0, Math.round(finite(raw.builtInLibraryVersion, 0))),
-      activeDrillId: ids.has(String(raw.activeDrillId)) ? String(raw.activeDrillId) : drills[0].id,
+      libraryStructureVersion: LIBRARY_STRUCTURE_VERSION,
+      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
+      activeDrillSource: source,
+      activeDrillId: activeId,
       calibration: sanitizeCalibration(raw.calibration),
+      folders,
       drills,
     };
+  }
+
+  function migrateLegacyLibrary(raw) {
+    if (raw?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(raw.drills)) {
+      throw new Error(`Unsupported drill file. Expected schemaVersion ${SCHEMA_VERSION}.`);
+    }
+    if (isLegacyBuiltInLibrary(raw)) {
+      startupNotice = "The old built-in examples were replaced by the read-only Built-in library; calibration settings were preserved.";
+      return makeUserLibrary(sanitizeCalibration(raw.calibration));
+    }
+
+    const preliminaryIds = new Set(raw.drills.map(d => String(d.id || makeId("drill"))));
+    const legacyDrills = raw.drills.map(d => sanitizeDrill(d, preliminaryIds));
+    const matchedBuiltInIds = new Map();
+    const userDrills = [];
+    for (const drill of legacyDrills) {
+      const candidate = builtInDrillByName(drill.name);
+      if (candidate && normalizedDrillSignature(drill) === normalizedDrillSignature(candidate)) {
+        matchedBuiltInIds.set(drill.id, candidate.id);
+      } else {
+        drill.folderId = null;
+        userDrills.push(drill);
+      }
+    }
+    for (const drill of userDrills) {
+      for (const node of drill.nodes) {
+        if (node.type === "drill" && matchedBuiltInIds.has(node.referencedDrillId)) {
+          node.referencedDrillId = matchedBuiltInIds.get(node.referencedDrillId);
+        }
+      }
+    }
+
+    const oldActive = String(raw.activeDrillId || "");
+    const mappedActive = matchedBuiltInIds.get(oldActive);
+    const activeUser = userDrills.find(drill => drill.id === oldActive);
+    const result = {
+      schemaVersion: SCHEMA_VERSION,
+      libraryStructureVersion: LIBRARY_STRUCTURE_VERSION,
+      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
+      activeDrillSource: mappedActive ? "builtin" : activeUser ? "user" : "builtin",
+      activeDrillId: mappedActive || activeUser?.id || builtInCatalog.defaultDrillId,
+      calibration: sanitizeCalibration(raw.calibration),
+      folders: [],
+      drills: userDrills,
+    };
+    const removed = matchedBuiltInIds.size;
+    startupNotice = removed
+      ? `${removed} old built-in preset${removed === 1 ? " was" : "s were"} moved to the automatically updated Built-in library. Custom drills were kept under My drills.`
+      : "Existing drills were moved under My drills; the new Built-in library is maintained separately.";
+    return result;
+  }
+
+  function sanitizeLibrary(raw) {
+    return Number(raw?.libraryStructureVersion) >= LIBRARY_STRUCTURE_VERSION
+      ? sanitizeNewLibrary(raw)
+      : migrateLegacyLibrary(raw);
   }
 
   function saveLibrary() {
     try {
       repairLibraryIfNeeded();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
-      if (els.libraryStatus) els.libraryStatus.textContent = `${library.drills.length} drill${library.drills.length === 1 ? "" : "s"} saved locally`;
+      if (els.libraryStatus) {
+        const builtInCount = builtInCatalog?.drills.length || 0;
+        const userCount = library.drills.length;
+        els.libraryStatus.textContent = `${builtInCount} built-in · ${userCount} My drill${userCount === 1 ? "" : "s"}`;
+      }
     } catch (error) {
       console.warn("Could not save drill library", error);
-      if (els.libraryStatus) els.libraryStatus.textContent = "Browser storage is unavailable; changes will last only until this page closes.";
+      if (els.libraryStatus) els.libraryStatus.textContent = "Browser storage is unavailable; My drills will last only until this page closes.";
     }
   }
 
@@ -977,21 +1462,31 @@
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed?.drills) && parsed.drills.length === 0) {
-        startupNotice = "An empty saved library was ignored and the default training library was restored.";
-        return null;
-      }
-      if (isLegacyBuiltInLibrary(parsed)) {
-        const replacement = makeSampleLibrary();
-        replacement.calibration = sanitizeCalibration(parsed.calibration);
-        startupNotice = "The old built-in examples were replaced by the new default training library; calibration settings were preserved.";
-        return replacement;
-      }
-      return sanitizeLibrary(parsed);
+      return sanitizeLibrary(JSON.parse(raw));
     } catch (error) {
       console.warn(`Could not load ${STORAGE_KEY}`, error);
       return null;
+    }
+  }
+
+  function saveLiveTuningPreference() {
+    if (!DrillAdjustments) return;
+    try {
+      localStorage.setItem(LIVE_TUNING_STORAGE_KEY, JSON.stringify(DrillAdjustments.normalizeTuning(liveTuning)));
+    } catch (error) {
+      console.warn("Could not save Live tuning preference", error);
+    }
+  }
+
+  function loadLiveTuningPreference() {
+    if (!DrillAdjustments) return { pacePct: 0, clearancePct: 0, spinPct: 0, speedPct: 0 };
+    try {
+      const raw = localStorage.getItem(LIVE_TUNING_STORAGE_KEY);
+      if (!raw) return { ...DrillAdjustments.DEFAULT_TUNING };
+      return DrillAdjustments.normalizeTuning(JSON.parse(raw));
+    } catch (error) {
+      console.warn("Could not load Live tuning preference", error);
+      return { ...DrillAdjustments.DEFAULT_TUNING };
     }
   }
 
@@ -1006,6 +1501,7 @@
   }
 
   function setRepetitions(value) {
+    if (!activeDrillEditable()) return;
     const drill = activeDrill();
     if (!drill) return;
     const normalized = Math.round(finite(value, 0));
@@ -1028,35 +1524,225 @@
     renderInspector();
     renderValidation();
     currentSettingsToHeader();
+    renderLiveTuning();
     const drill = activeDrill();
-    els.activeDrillTitle.textContent = drill?.name ?? "No drill";
-    els.drillNameInput.value = drill?.name ?? "";
+    const displayName = drill ? (isActiveBuiltIn() ? builtInDisplayName(drill.name) : drill.name) : "No drill";
+    els.activeDrillTitle.textContent = displayName;
+    els.drillNameInput.value = displayName === "No drill" ? "" : displayName;
     els.emptyHint.hidden = Boolean(drill?.nodes.length);
-    if (els.libraryStatus && !els.libraryStatus.textContent) {
-      els.libraryStatus.textContent = `${library.drills.length} drill${library.drills.length === 1 ? "" : "s"} available`;
+    renderLibraryEditState();
+  }
+
+  function libraryFolderDefs(root = libraryView.root) {
+    return root === "builtin" ? builtInCatalog.folders : library.folders;
+  }
+
+  function libraryRootFolderId(root = libraryView.root) {
+    return root === "builtin" ? "builtin-root" : null;
+  }
+
+  function folderById(root, id) {
+    if (root === "builtin") return builtInCatalog.folders.find(folder => folder.id === id) ?? null;
+    return library.folders.find(folder => folder.id === id) ?? null;
+  }
+
+  function folderPath(root, folderId) {
+    const rootCrumb = { id: libraryRootFolderId(root), name: root === "builtin" ? "Built-in" : "My drills" };
+    if (folderId === rootCrumb.id || (root === "user" && folderId == null)) return [rootCrumb];
+    const path = [];
+    let cursor = folderById(root, folderId);
+    const seen = new Set();
+    while (cursor && !seen.has(cursor.id)) {
+      seen.add(cursor.id);
+      path.unshift(cursor);
+      cursor = folderById(root, cursor.parentId);
     }
+    return [rootCrumb, ...path];
+  }
+
+  function folderLabelForDrill(root, drill) {
+    const folderId = root === "builtin" ? drill.libraryFolderId : drill.folderId;
+    return folderPath(root, folderId).map(item => item.name).slice(1).join(" / ") || (root === "builtin" ? "Built-in" : "My drills");
+  }
+
+  function childFolders(root, folderId) {
+    const normalized = root === "builtin" ? folderId : (folderId || null);
+    return libraryFolderDefs(root)
+      .filter(folder => (folder.parentId || null) === (normalized || null))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function drillsInFolder(root, folderId) {
+    if (root === "builtin") return builtInCatalog.drills.filter(drill => drill.libraryFolderId === folderId);
+    return library.drills.filter(drill => (drill.folderId || null) === (folderId || null));
+  }
+
+  function folderItemCount(root, folder) {
+    return drillsInFolder(root, folder.id).length + childFolders(root, folder.id).length;
+  }
+
+  function renderLibraryBreadcrumb() {
+    els.libraryBreadcrumb.replaceChildren();
+    const path = folderPath(libraryView.root, libraryView.folderId);
+    path.forEach((item, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "library-crumb";
+      button.textContent = item.name;
+      button.disabled = index === path.length - 1;
+      button.addEventListener("click", () => {
+        libraryView.folderId = item.id;
+        libraryView.query = "";
+        els.librarySearchInput.value = "";
+        renderDrillList();
+      });
+      els.libraryBreadcrumb.appendChild(button);
+      if (index < path.length - 1) {
+        const sep = document.createElement("span");
+        sep.textContent = "›";
+        sep.className = "library-crumb-separator";
+        els.libraryBreadcrumb.appendChild(sep);
+      }
+    });
+  }
+
+  function selectLibraryRoot(root) {
+    libraryView.root = root === "user" ? "user" : "builtin";
+    libraryView.folderId = libraryRootFolderId(libraryView.root);
+    libraryView.query = "";
+    els.librarySearchInput.value = "";
+    renderDrillList();
+    renderLibraryEditState();
+  }
+
+  function selectLibraryDrill(source, drill) {
+    stopPlayback();
+    setActiveDrill(source, drill.id, { save: false });
+    libraryView.root = source;
+    libraryView.folderId = source === "builtin" ? drill.libraryFolderId : (drill.folderId || null);
+    selection = null;
+    commit();
+    if (globalThis.matchMedia?.("(max-width: 760px)").matches) setMobileWorkspace("graph");
+    setTimeout(fitGraph, 30);
   }
 
   function renderDrillList() {
     els.drillList.replaceChildren();
-    for (const drill of library.drills) {
+    els.builtInLibraryTab.classList.toggle("active", libraryView.root === "builtin");
+    els.myDrillsLibraryTab.classList.toggle("active", libraryView.root === "user");
+    renderLibraryBreadcrumb();
+
+    const query = String(libraryView.query || "").trim().toLowerCase();
+    if (!query) {
+      for (const folder of childFolders(libraryView.root, libraryView.folderId)) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "library-folder-item";
+        const icon = document.createElement("span");
+        icon.className = "library-folder-icon";
+        icon.textContent = "▸";
+        const text = document.createElement("span");
+        const strong = document.createElement("strong");
+        strong.textContent = folder.name;
+        const small = document.createElement("small");
+        const count = folderItemCount(libraryView.root, folder);
+        small.textContent = `${count} item${count === 1 ? "" : "s"}`;
+        text.append(strong, small);
+        button.append(icon, text);
+        button.addEventListener("click", () => {
+          libraryView.folderId = folder.id;
+          renderDrillList();
+          renderLibraryEditState();
+        });
+        els.drillList.appendChild(button);
+      }
+    }
+
+    const pool = query
+      ? (libraryView.root === "builtin" ? builtInCatalog.drills : library.drills).filter(drill => {
+          const haystack = `${drill.name} ${folderLabelForDrill(libraryView.root, drill)}`.toLowerCase();
+          return haystack.includes(query);
+        })
+      : drillsInFolder(libraryView.root, libraryView.folderId);
+
+    for (const drill of pool) {
+      const source = libraryView.root;
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `drill-list-item${drill.id === library.activeDrillId ? " active" : ""}`;
+      const active = library.activeDrillSource === source && drill.id === library.activeDrillId;
+      button.className = `drill-list-item${active ? " active" : ""}`;
+      const text = document.createElement("span");
+      text.className = "drill-list-copy";
       const strong = document.createElement("strong");
-      strong.textContent = drill.name;
+      strong.textContent = source === "builtin" ? builtInDisplayName(drill.name) : drill.name;
       const small = document.createElement("small");
-      small.textContent = `${drill.nodes.length} nodes`;
-      button.append(strong, small);
-      button.addEventListener("click", () => {
-        stopPlayback();
-        library.activeDrillId = drill.id;
-        selection = null;
-        commit();
-        setTimeout(fitGraph, 30);
-      });
+      const pathText = query ? `${folderLabelForDrill(source, drill)} · ` : "";
+      small.textContent = `${pathText}${drill.nodes.length} nodes${source === "builtin" ? " · read-only" : ""}`;
+      text.append(strong, small);
+      const badge = document.createElement("span");
+      badge.className = `library-source-badge ${source}`;
+      badge.textContent = source === "builtin" ? "Built-in" : "Mine";
+      button.append(text, badge);
+      button.addEventListener("click", () => selectLibraryDrill(source, drill));
       els.drillList.appendChild(button);
     }
+
+    if (!els.drillList.childElementCount) {
+      const empty = document.createElement("div");
+      empty.className = "library-empty";
+      empty.innerHTML = libraryView.root === "user"
+        ? `<strong>${query ? "No matching drills" : "This folder is empty"}</strong><span>${query ? "Try another search." : "Create a drill or folder here."}</span>`
+        : `<strong>No matching presets</strong><span>Try another search.</span>`;
+      els.drillList.appendChild(empty);
+    }
+    renderLibraryEditState();
+  }
+
+  function renderLibraryEditState() {
+    if (!library || !builtInCatalog) return;
+    const builtIn = isActiveBuiltIn();
+    const currentFolder = libraryView.root === "user" ? folderById("user", libraryView.folderId) : null;
+    els.newDrillBtn.hidden = libraryView.root !== "user";
+    els.newFolderBtn.hidden = libraryView.root !== "user";
+    els.renameFolderBtn.hidden = libraryView.root !== "user" || !currentFolder;
+    els.deleteFolderBtn.hidden = libraryView.root !== "user" || !currentFolder;
+    els.copyBuiltInBtn.hidden = !builtIn;
+    els.duplicateDrillBtn.hidden = builtIn;
+    els.moveDrillBtn.hidden = builtIn;
+    els.deleteDrillBtn.hidden = builtIn;
+
+    els.drillNameInput.disabled = builtIn;
+    els.repetitionsInput.disabled = builtIn;
+    els.repetitionsDownBtn.disabled = builtIn;
+    els.repetitionsUpBtn.disabled = builtIn;
+    els.setDelayInput.disabled = builtIn;
+    els.addShotBtn.disabled = builtIn;
+    els.addRandomBtn.disabled = builtIn;
+    els.addDrillNodeBtn.disabled = builtIn;
+    els.addCounterBtn.disabled = builtIn;
+    els.deleteSelectionBtn.disabled = builtIn;
+
+    const inspector = els.inspectorContent;
+    inspector.querySelectorAll("input,select,textarea,button").forEach(control => {
+      if (!control.classList.contains("builtin-copy-inline")) control.disabled = builtIn;
+    });
+    inspector.querySelector(".builtin-readonly-note")?.remove();
+    if (builtIn && activeDrill()) {
+      const note = document.createElement("div");
+      note.className = "builtin-readonly-note";
+      note.innerHTML = `<div><strong>Built-in preset</strong><span>Play, preview and Live tuning are available. Copy it to My drills before editing the graph or shot settings.</span></div>`;
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "button compact primary builtin-copy-inline";
+      copy.textContent = "Copy to My drills";
+      copy.addEventListener("click", copyActiveBuiltInToMyDrills);
+      note.appendChild(copy);
+      inspector.prepend(note);
+    }
+
+    const builtInCount = builtInCatalog.drills.length;
+    const userCount = library.drills.length;
+    els.libraryStatus.textContent = `${builtInCount} built-in · ${userCount} My drill${userCount === 1 ? "" : "s"}`;
   }
 
   function nodeHeight(drill, node) {
@@ -1528,6 +2214,11 @@
     const drill = activeDrill();
     const node = getNode(drill, article.dataset.nodeId);
     if (!node) return;
+    if (!activeDrillEditable()) {
+      selection = { kind: "node", id: node.id };
+      renderAll();
+      return;
+    }
     event.preventDefault();
     selection = { kind: "node", id: node.id };
     nodeDrag = {
@@ -1581,6 +2272,7 @@
 
   function onPortPointerDown(event) {
     if (event.button !== 0) return;
+    if (!activeDrillEditable()) { toast("Built-in presets are read-only. Copy it to My drills to change paths."); return; }
     event.preventDefault();
     event.stopPropagation();
     const drill = activeDrill();
@@ -1740,17 +2432,20 @@
   }
 
   function addNode(type) {
+    if (!activeDrillEditable()) { toast("Copy this built-in preset to My drills before editing it."); return; }
     let drill = activeDrill();
     if (!drill) {
       const created = defaultDrill("Custom drill");
-      library.drills = [created];
+      created.folderId = libraryView.root === "user" ? (libraryView.folderId || null) : null;
+      library.drills.push(created);
+      library.activeDrillSource = "user";
       library.activeDrillId = created.id;
       drill = created;
     }
     let node;
     if (type === "shot") node = makeShot(drill, "Shot");
     else if (type === "random") node = makeRandom();
-    else if (type === "drill") node = makeDrillNode("Sub-drill", library.drills.find(d => d.id !== drill.id)?.id ?? null);
+    else if (type === "drill") node = makeDrillNode("Sub-drill", allDrills().find(d => d.id !== drill.id)?.id ?? null);
     else node = makeCounter();
 
     const placement = findFreeNodePosition(drill, node);
@@ -1763,6 +2458,7 @@
   }
 
   function deleteSelection() {
+    if (!activeDrillEditable()) { toast("Built-in presets are read-only. Copy it to My drills to edit."); return; }
     const drill = activeDrill();
     if (!drill || !selection) return;
     if (selection.kind === "edge") {
@@ -1812,7 +2508,7 @@
 
   function drillOptions(selectedId, excludeId) {
     const rows = [`<option value="">Choose reusable drill</option>`];
-    for (const drill of library.drills) {
+    for (const drill of allDrills()) {
       if (drill.id === excludeId) continue;
       rows.push(`<option value="${attr(drill.id)}"${drill.id === selectedId ? " selected" : ""}>${escapeHtml(drill.name)}</option>`);
     }
@@ -1848,14 +2544,15 @@
     const prediction = predictTrajectory(p);
     return `
       <p class="spin-explainer"><strong>Spin:</strong> negative values mean underspin; positive values mean topspin. Rotations per second describe the ball directly.</p>
-      <div class="field-grid two">
-        <label class="field"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.1" aria-label="Decrease ball speed by 0.1 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.1" aria-label="Increase ball speed by 0.1 metres per second">+</button></span></label>
-        <label class="field"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-1" aria-label="Decrease ball rotation by 1 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" type="number" min="-120" max="120" step="1" value="${p.spinRps}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="1" aria-label="Increase ball rotation by 1 rotation per second">+</button></span></label>
-        <label class="field"><span>Elevation</span><span class="input-with-unit"><input id="shotElevationField" type="number" min="-20" max="45" step="0.5" value="${p.elevationDeg}"><small>°</small></span></label>
-        <label class="field"><span>Aim left/right</span><span class="input-with-unit"><input id="shotAimField" type="number" min="-60" max="60" step="0.5" value="${p.aimDeg}"><small>°</small></span></label>
+      ${liveTuningInlineHtml(p)}
+      <div class="shot-parameter-stack">
+        <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.1" aria-label="Decrease ball speed by 0.1 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.1" aria-label="Increase ball speed by 0.1 metres per second">+</button></span></label>
+        <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-1" aria-label="Decrease ball rotation by 1 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" type="number" min="-120" max="120" step="1" value="${p.spinRps}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="1" aria-label="Increase ball rotation by 1 rotation per second">+</button></span></label>
+        <label class="field shot-parameter-row"><span>Elevation</span><span class="input-with-unit"><input id="shotElevationField" type="number" min="-20" max="45" step="0.5" value="${p.elevationDeg}"><small>°</small></span></label>
+        <label class="field shot-parameter-row"><span>Aim left/right</span><span class="input-with-unit"><input id="shotAimField" type="number" min="-60" max="60" step="0.5" value="${p.aimDeg}"><small>°</small></span></label>
       </div>
       <div class="shot-view-stack">
-        <div><p class="helper">Predicted landing distance · yaw intentionally omitted</p>${distanceTrajectorySvg(prediction, 600, 150)}</div>
+        <div><p class="helper">Predicted top view</p>${topTrajectorySvg(prediction, 600, 280)}</div>
         <div><p class="helper">Predicted side view</p>${sideTrajectorySvg(prediction, 600, 300)}</div>
       </div>
       <div class="landing-card">${landingDescription(prediction)}</div>
@@ -2641,34 +3338,6 @@
     return { minX: Math.min(...xs) - margin, maxX: Math.max(...xs) + margin, minY: Math.min(...ys) - margin, maxY: Math.max(...ys) + margin };
   }
 
-  function distanceTrajectorySvg(prediction, width = 600, height = 150) {
-    const c = library.calibration;
-    const table = c.table;
-    const values = prediction.points.map(point => point.x).concat([c.pose.x, 0, table.length]);
-    if (prediction.landing) values.push(prediction.landing.x);
-    const minX = Math.min(...values) - .12;
-    const maxX = Math.max(...values) + .12;
-    const pad = 34;
-    const sx = value => pad + (value - minX) / Math.max(.001, maxX - minX) * (width - pad * 2);
-    const y = height / 2 + 8;
-    const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
-    const landingX = prediction.landing?.x ?? prediction.points.at(-1)?.x ?? c.pose.x;
-    const startX = c.pose.x;
-    return `<svg class="distance-trajectory" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted landing distance without yaw">
-      <line x1="${sx(minX)}" y1="${y}" x2="${sx(maxX)}" y2="${y}" stroke="#516071" stroke-width="3"/>
-      <line x1="${sx(0)}" y1="${y-18}" x2="${sx(0)}" y2="${y+18}" stroke="#7f91a4" stroke-width="2"/>
-      <line x1="${sx(table.length/2)}" y1="${y-22}" x2="${sx(table.length/2)}" y2="${y+22}" stroke="#d4dbe5" stroke-width="3"/>
-      <line x1="${sx(table.length)}" y1="${y-18}" x2="${sx(table.length)}" y2="${y+18}" stroke="#7f91a4" stroke-width="2"/>
-      <line x1="${sx(startX)}" y1="${y}" x2="${sx(landingX)}" y2="${y}" stroke="${color}" stroke-width="8" stroke-linecap="round"/>
-      <circle cx="${sx(startX)}" cy="${y}" r="8" fill="#32bda2" stroke="#d5fff6" stroke-width="2"/>
-      ${prediction.landing ? `<circle cx="${sx(landingX)}" cy="${y}" r="9" fill="${color}"/>` : ""}
-      <text x="${sx(0)}" y="${y+42}" text-anchor="middle" fill="#9fb0c2" font-size="12">near edge</text>
-      <text x="${sx(table.length/2)}" y="${y+42}" text-anchor="middle" fill="#d7dee7" font-size="12">net</text>
-      <text x="${sx(table.length)}" y="${y+42}" text-anchor="middle" fill="#9fb0c2" font-size="12">far edge</text>
-      <text x="${Math.min(width-40, Math.max(40, sx(landingX)))}" y="${y-22}" text-anchor="middle" fill="${color}" font-size="13" font-weight="700">x ${fmt(landingX,2)} m</text>
-    </svg>`;
-  }
-
   function topTrajectorySvg(prediction, width = 600, height = 310) {
     const c = library.calibration;
     const table = c.table;
@@ -2676,14 +3345,11 @@
     const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
     const path = prediction.points.map((point, index) => `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point.y),2)}`).join(" ");
     const rx = tr.sx(c.pose.x), ry = tr.sy(c.pose.y);
-    const yaw = radians(c.pose.yawDeg);
-    const arrow = Math.max(18, tr.scale * .25);
-    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Scale accurate top trajectory">
+    return `<svg class="shot-top-view" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted top view and landing position">
       <rect x="${tr.sx(0)}" y="${tr.sy(table.width/2)}" width="${tr.sx(table.length)-tr.sx(0)}" height="${tr.sy(-table.width/2)-tr.sy(table.width/2)}" rx="4" fill="#183e58" stroke="#7fa2bb" stroke-width="2"/>
       <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(table.width/2)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(-table.width/2)}" stroke="#d4dbe5" stroke-width="3"/>
       <path d="${path}" fill="none" stroke="${color}" stroke-width="4"/>
       <circle cx="${rx}" cy="${ry}" r="7" fill="#32bda2" stroke="#d5fff6" stroke-width="2"/>
-      <line x1="${rx}" y1="${ry}" x2="${rx + Math.cos(yaw)*arrow}" y2="${ry - Math.sin(yaw)*arrow}" stroke="#e4a84c" stroke-width="3"/>
       ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="6" fill="${color}"/>` : ""}
     </svg>`;
   }
@@ -3486,6 +4152,178 @@
     return Boolean(robot?.connected && [4, 5, 6, 7].includes(robot.wireState));
   }
 
+  function liveTuningIsActive() {
+    return Boolean(DrillAdjustments?.hasActiveTuning(liveTuning));
+  }
+
+  function liveTrajectoryTuningIsActive() {
+    return Boolean(DrillAdjustments?.hasActiveTuning({ ...liveTuning, pacePct: 0 }));
+  }
+
+  function formatTuningPercent(value) {
+    const n = Math.round(finite(value, 0));
+    return `${n > 0 ? "+" : ""}${n}%`;
+  }
+
+  function tunedDelaySeconds(seconds) {
+    return DrillAdjustments ? DrillAdjustments.delayWithPace(seconds, liveTuning) : Math.max(0, finite(seconds, 0));
+  }
+
+  function tuningElevationBounds() {
+    const nova = library.calibration.nova;
+    const slope = finite(nova.upDownPerDegree, 0);
+    let minElevationDeg = -20;
+    let maxElevationDeg = 45;
+    if (Math.abs(slope) > 1e-9) {
+      const a = (-50 - finite(nova.upDownAtZeroDeg, 10)) / slope;
+      const b = (100 - finite(nova.upDownAtZeroDeg, 10)) / slope;
+      minElevationDeg = Math.max(minElevationDeg, Math.min(a, b));
+      maxElevationDeg = Math.min(maxElevationDeg, Math.max(a, b));
+    }
+    return { minElevationDeg, maxElevationDeg };
+  }
+
+  function liveTuningOptions() {
+    const range = LaunchModel?.exitSpeedRange(library.calibration.nova.rawSpeedMap);
+    return {
+      ...tuningElevationBounds(),
+      minSpeedMps: range?.minMps ?? 1,
+      maxSpeedMps: range?.maxMps ?? 20,
+      landingToleranceM: .04,
+      clearanceToleranceM: .01,
+      minNetClearanceM: .002,
+    };
+  }
+
+  function adjustedShotForLiveTuning(baseParams) {
+    const params = {
+      speedMps: finite(baseParams?.speedMps, 8),
+      spinRps: finite(baseParams?.spinRps, 0),
+      elevationDeg: finite(baseParams?.elevationDeg, 4),
+      aimDeg: finite(baseParams?.aimDeg, 0),
+    };
+    if (!DrillAdjustments || !liveTrajectoryTuningIsActive()) {
+      const prediction = predictTrajectory(params);
+      return { params, basePrediction: prediction, prediction, landingErrorM: 0, clearanceErrorM: 0, targetClearanceM: prediction?.net?.clearanceM ?? null, warnings: [], changed: false };
+    }
+    const cacheKey = JSON.stringify([params, liveTuning, library.calibration]);
+    const cached = liveTuningCache.get(cacheKey);
+    if (cached) return cached;
+    const result = DrillAdjustments.applyShotTuning(
+      params,
+      liveTuning,
+      candidate => predictTrajectory(candidate),
+      liveTuningOptions()
+    );
+    if (liveTuningCache.size > 120) liveTuningCache.clear();
+    liveTuningCache.set(cacheKey, result);
+    return result;
+  }
+
+  function liveTuningShotForPreview() {
+    const drill = activeDrill();
+    if (!drill) return null;
+    if (selection?.kind === "node") {
+      const selected = getNode(drill, selection.id);
+      if (selected?.type === "shot") return selected;
+    }
+    return drill.nodes.find(node => node.type === "shot") || null;
+  }
+
+  function renderLiveTuning() {
+    if (!DrillAdjustments) return;
+    liveTuning = DrillAdjustments.normalizeTuning(liveTuning);
+    const values = [
+      [els.tuningPaceValue, "pacePct"],
+      [els.tuningClearanceValue, "clearancePct"],
+      [els.tuningSpinValue, "spinPct"],
+      [els.tuningSpeedValue, "speedPct"],
+    ];
+    for (const [output, key] of values) {
+      output.textContent = formatTuningPercent(liveTuning[key]);
+      output.closest(".tuning-control")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
+    }
+    const activeEntries = Object.entries(liveTuning).filter(([, value]) => Math.abs(value) > 1e-9);
+    els.liveTuningBtn.classList.toggle("active", activeEntries.length > 0);
+    els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "No adjustments";
+
+    const shot = liveTuningShotForPreview();
+    if (!shot) {
+      els.liveTuningImpactLabel.textContent = "No shot available";
+      els.liveTuningImpact.innerHTML = `<p class="helper">The selected drill has no direct shot node to preview.</p>`;
+      return;
+    }
+    els.liveTuningImpactLabel.textContent = `All balls · example: ${shot.label}`;
+    const result = adjustedShotForLiveTuning(shot.params);
+    const base = result.basePrediction || predictTrajectory(shot.params);
+    const tuned = result.prediction || base;
+    const baseClearance = base?.net?.clearanceM;
+    const tunedClearance = tuned?.net?.clearanceM;
+    const landingShiftCm = Number.isFinite(result.landingErrorM) ? result.landingErrorM * 100 : null;
+    const warnings = result.warnings || [];
+    els.liveTuningImpact.innerHTML = `
+      <div class="live-tuning-impact-grid">
+        <div><span>Speed</span><strong>${fmt(shot.params.speedMps,2)} → ${fmt(result.params.speedMps,2)} m/s</strong><small>effective shot</small></div>
+        <div><span>Spin</span><strong>${signed(shot.params.spinRps,1)} → ${signed(result.params.spinRps,1)} rps</strong><small>effective shot</small></div>
+        <div><span>Elevation</span><strong>${signed(shot.params.elevationDeg,1)}° → ${signed(result.params.elevationDeg,1)}°</strong><small>solver compensation</small></div>
+        <div><span>Landing shift</span><strong>${landingShiftCm == null ? "—" : `${fmt(landingShiftCm,1)} cm`}</strong><small>modeled distance</small></div>
+        <div><span>Net clearance</span><strong>${baseClearance == null ? "—" : `${fmt(baseClearance * 100,1)} cm`} → ${tunedClearance == null ? "—" : `${fmt(tunedClearance * 100,1)} cm`}</strong><small>bottom of ball over net</small></div>
+        <div><span>Scope</span><strong>Every ball</strong><small>including sub-drills</small></div>
+        <div><span>Stored drill</span><strong>Unchanged</strong><small>runtime layer only</small></div>
+      </div>
+      ${warnings.length ? `<p class="live-tuning-impact-warning">${escapeHtml(warnings.join(" "))}</p>` : ""}
+    `;
+  }
+
+  function requestImmediateLiveRetune() {
+    liveTuningRevision += 1;
+    if (!playbackRunning || calibrationTestRunning) return;
+
+    // A Nova Start packet is buffered by the robot, so it cannot be edited in
+    // place. Interrupt the currently buffered batch, then resume the same
+    // already-sampled traversal with freshly tuned commands. From this point
+    // on, use one-ball packets for the rest of this playback session so later
+    // clicks affect the next ball rather than waiting behind a multi-ball batch.
+    playbackResponsiveTuning = true;
+    playbackRetuneRequested = true;
+    els.runStatus.textContent = "Applying Live tuning to every ball…";
+
+    if (robot?.connected && (robotIsActive() || robot.phase === "running") && !liveRetuneStopPromise) {
+      liveRetuneStopPromise = robot.stopAndWaitFree()
+        .catch(error => {
+          robot.log(`Live tuning Stop was not confirmed: ${error.message}`, "warn");
+          return null;
+        })
+        .finally(() => { liveRetuneStopPromise = null; });
+    }
+  }
+
+  function stepLiveTuning(key, delta) {
+    if (!DrillAdjustments || !(key in liveTuning)) return;
+    liveTuning = DrillAdjustments.normalizeTuning({ ...liveTuning, [key]: liveTuning[key] + delta });
+    liveTuningCache.clear();
+    saveLiveTuningPreference();
+    requestImmediateLiveRetune();
+    renderLiveTuning();
+    renderInspector();
+  }
+
+  function resetLiveTuning() {
+    liveTuning = { ...DrillAdjustments.DEFAULT_TUNING };
+    liveTuningCache.clear();
+    saveLiveTuningPreference();
+    requestImmediateLiveRetune();
+    renderLiveTuning();
+    renderInspector();
+  }
+
+  function liveTuningInlineHtml(baseParams) {
+    if (!liveTrajectoryTuningIsActive()) return "";
+    const result = adjustedShotForLiveTuning(baseParams);
+    const shift = Number.isFinite(result.landingErrorM) ? `${fmt(result.landingErrorM * 100,1)} cm` : "unknown";
+    return `<div class="live-tuning-inline"><strong>Live tuning is active.</strong> Effective shot: ${fmt(result.params.speedMps,2)} m/s · ${signed(result.params.spinRps,1)} rps · ${signed(result.params.elevationDeg,1)}°. Modeled landing shift: ${shift}. Stored values below are unchanged.</div>`;
+  }
+
   function compileRobotSet(drillId) {
     const context = { shots: [], transitions: 0, warnings: [] };
     const result = compileRobotInvocation(drillId, context, [], 0);
@@ -3525,11 +4363,17 @@
 
       let edge = null;
       if (node.type === "shot") {
+        // Keep the compiled traversal immutable and based on stored drill values.
+        // Live tuning is layered over every shot later, when the robot execution
+        // plan is built. That makes retuning non-destructive and lets a running
+        // traversal be re-planned without re-sampling random/counter nodes.
         context.shots.push({
           drillId,
           nodeId: node.id,
           label: node.label,
           params: { ...node.params },
+          baseParams: { ...node.params },
+          tuningApplied: false,
           delayBefore: pendingDelay,
         });
         pendingDelay = 0;
@@ -3554,6 +4398,8 @@
       }
 
       if (!edge) return { ok: true, reason: "Flow ended", pendingDelay };
+      // Store the drill's raw delay. Pace tuning is applied when the execution
+      // plan is built, just like speed/spin/clearance tuning.
       pendingDelay += Math.max(0, finite(edge.delaySeconds, 0));
       node = getNode(drill, edge.target);
       if (!node) return { ok: false, reason: "A connection points to a missing node.", pendingDelay };
@@ -3606,16 +4452,34 @@
     };
   }
 
-  function buildRobotExecutionPlan(compiled) {
+  function buildRobotExecutionPlan(compiled, { maxBatchSize = 6 } = {}) {
     if (!Protocol) throw new Error("Protocol module is unavailable");
     if (!compiled.shots.length) throw new Error("This traversal contains no shots to send to the robot.");
 
     const warnings = [...compiled.warnings];
     const errors = [];
     const prepared = [];
+    const batchLimit = Math.max(1, Math.min(6, Math.trunc(finite(maxBatchSize, 6)) || 6));
+
+    // IMPORTANT: tune the entire compiled traversal, not the selected/inspected
+    // shot. The same runtime modifiers are applied independently to every ball.
+    const tunedShots = DrillAdjustments.applyTuningToShotList(
+      compiled.shots,
+      liveTuning,
+      candidate => predictTrajectory(candidate),
+      liveTuningOptions()
+    );
 
     for (let index = 0; index < compiled.shots.length; index += 1) {
-      const shot = compiled.shots[index];
+      const baseShot = compiled.shots[index];
+      const adjusted = tunedShots[index].adjustment;
+      const shot = {
+        ...baseShot,
+        params: { ...adjusted.params },
+        baseParams: { ...baseShot.params },
+        tuningApplied: adjusted.changed,
+      };
+      if (adjusted.warnings?.length) warnings.push(...adjusted.warnings.map(message => `“${shot.label}”: ${message}`));
       const preflight = robotShotPreflight(shot);
       errors.push(...preflight.errors);
       warnings.push(...preflight.warnings);
@@ -3623,8 +4487,8 @@
       // The fifth 32-bit field is frequency in Hz. Community stopwatch data
       // shows the pre-pause before this ball is 1/f: 0.5..1.5 Hz corresponds
       // to 2.00..0.667 s. Edge delays are therefore attached to the TARGET
-      // shot, not the source shot.
-      const timing = novaFrequencyForDelay(shot.delayBefore);
+      // shot, not the source shot. Pace is a runtime layer too.
+      const timing = novaFrequencyForDelay(tunedDelaySeconds(baseShot.delayBefore));
       if (index > 0 && timing.tooFast) {
         warnings.push(`“${compiled.shots[index - 1].label}” → “${shot.label}”: ${fmt(timing.desiredDelay,2)} s is faster than the Nova timing range; ${fmt(timing.encodedDelay,3)} s will be used.`);
       }
@@ -3644,6 +4508,7 @@
       });
       prepared.push({
         ...shot,
+        sourceIndex: Number.isInteger(baseShot.sourceIndex) ? baseShot.sourceIndex : index,
         wheelA,
         wheelB,
         frequencyHz: timing.frequencyHz,
@@ -3687,7 +4552,7 @@
         flush();
         pendingHostDelay = shot.hostDelayBefore;
       }
-      if (current.length >= 6) {
+      if (current.length >= batchLimit) {
         flush();
       }
       // For a long delay before the first shot, wait before starting the first
@@ -3699,12 +4564,14 @@
     }
     flush();
 
-    if (prepared.length > 6) {
-      warnings.push("This set is split into batches of at most 6 balls for BLE/robot stability. A small Ready→Start transition overhead can be added at those chunk boundaries.");
+    if (prepared.length > batchLimit) {
+      warnings.push(batchLimit === 1
+        ? "Live tuning responsiveness is active: balls are sent one at a time so the next ball can use a changed modifier. Ready→Start overhead can slightly affect the fastest paces."
+        : "This set is split into batches of at most 6 balls for BLE/robot stability. A small Ready→Start transition overhead can be added at those chunk boundaries.");
     }
 
     return {
-      trailingDelay: Math.max(0, finite(compiled.trailingDelay, 0)),
+      trailingDelay: tunedDelaySeconds(compiled.trailingDelay),
       batches,
       warnings: [...new Set(warnings)],
       shotCount: prepared.length,
@@ -3918,6 +4785,8 @@
     playbackToken += 1;
     const token = playbackToken;
     playbackRunning = true;
+    playbackRetuneRequested = false;
+    playbackResponsiveTuning = liveTuningIsActive();
     activeNodeRef = null;
     activeEdgeRef = null;
     runtimeCounterDisplay = new Map();
@@ -3935,46 +4804,101 @@
         updateProgress(completed, configured, infinite, `Preparing set ${currentNumber}${infinite ? " · ∞" : ` of ${configured}`}`);
         runtimeCounterDisplay = new Map();
 
-        // Compile every set independently so weighted choices are re-sampled and
-        // every drill/sub-drill invocation gets fresh Repeater state.
+        // Sample the drill graph exactly once for this set. Live tuning is not
+        // baked into this traversal; the execution plan can therefore be rebuilt
+        // instantly without changing random choices or Repeater state.
         const compiled = compileRobotSet(drill.id);
-        const plan = buildRobotExecutionPlan(compiled);
-        if (!warningsShown && plan.warnings.length) {
-          warningsShown = true;
-          plan.warnings.forEach(message => robot.log(`Plan warning: ${message}`, "warn"));
-          toast(plan.warnings[0]);
-        }
+        let nextShotIndex = 0;
 
-        for (let batchIndex = 0; batchIndex < plan.batches.length; batchIndex += 1) {
-          if (!playbackRunning || token !== playbackToken) break;
-          const batch = plan.batches[batchIndex];
-          if (batch.hostDelayBefore > 0) {
-            await waitWithStatus(batch.hostDelayBefore, token, batchIndex === 0 ? "First shot in" : "Long edge delay");
-            if (!playbackRunning || token !== playbackToken) break;
-          }
-          const firstShot = batch.shots[0];
-          activeNodeRef = { drillId: firstShot.drillId, nodeId: firstShot.nodeId };
-          activeEdgeRef = null;
-          if (firstShot.drillId === activeDrill()?.id) renderGraph();
-          els.runStatus.textContent = `Set ${currentNumber} · batch ${batchIndex + 1}/${plan.batches.length} · ${batch.shots.map(item => item.label).join(" → ")}`;
-          const timeoutMs = Math.max(20000, Math.ceil((batch.encodedSeconds + 12) * 1000));
-          await robot.startBatch(batch.packet, {
-            timeoutMs,
-            expectedDurationMs: batch.encodedSeconds * 1000,
-            description: `set ${currentNumber}, batch ${batchIndex + 1}/${plan.batches.length} (${batch.shots.length} ball${batch.shots.length === 1 ? "" : "s"})`,
+        while (playbackRunning && token === playbackToken && nextShotIndex < compiled.shots.length) {
+          if (liveRetuneStopPromise) await liveRetuneStopPromise.catch(() => null);
+          playbackRetuneRequested = false;
+
+          const remainingCompiled = {
+            ...compiled,
+            shots: compiled.shots.slice(nextShotIndex).map((shot, offset) => ({
+              ...shot,
+              sourceIndex: nextShotIndex + offset,
+            })),
+          };
+          const plan = buildRobotExecutionPlan(remainingCompiled, {
+            maxBatchSize: playbackResponsiveTuning ? 1 : 6,
           });
-          activeNodeRef = null;
-          if (activeDrill()) renderGraph();
+          if (!warningsShown && plan.warnings.length) {
+            warningsShown = true;
+            plan.warnings.forEach(message => robot.log(`Plan warning: ${message}`, "warn"));
+            toast(plan.warnings[0]);
+          }
+
+          let rebuildForRetune = false;
+          for (let batchIndex = 0; batchIndex < plan.batches.length; batchIndex += 1) {
+            if (!playbackRunning || token !== playbackToken) break;
+            const batch = plan.batches[batchIndex];
+            const batchStartIndex = batch.shots[0]?.sourceIndex ?? nextShotIndex;
+
+            if (playbackRetuneRequested) {
+              if (liveRetuneStopPromise) await liveRetuneStopPromise.catch(() => null);
+              nextShotIndex = batchStartIndex;
+              playbackRetuneRequested = false;
+              rebuildForRetune = true;
+              break;
+            }
+
+            if (batch.hostDelayBefore > 0) {
+              await waitWithStatus(batch.hostDelayBefore, token, batchIndex === 0 ? "First shot in" : "Long edge delay");
+              if (!playbackRunning || token !== playbackToken) break;
+              if (playbackRetuneRequested) {
+                nextShotIndex = batchStartIndex;
+                playbackRetuneRequested = false;
+                rebuildForRetune = true;
+                break;
+              }
+            }
+
+            const firstShot = batch.shots[0];
+            activeNodeRef = { drillId: firstShot.drillId, nodeId: firstShot.nodeId };
+            activeEdgeRef = null;
+            if (firstShot.drillId === activeDrill()?.id) renderGraph();
+            els.runStatus.textContent = `Set ${currentNumber} · ${playbackResponsiveTuning ? "live ball" : `batch ${batchIndex + 1}/${plan.batches.length}`} · ${batch.shots.map(item => item.label).join(" → ")}`;
+            const timeoutMs = Math.max(20000, Math.ceil((batch.encodedSeconds + 12) * 1000));
+            const revisionAtStart = liveTuningRevision;
+            await robot.startBatch(batch.packet, {
+              timeoutMs,
+              expectedDurationMs: batch.encodedSeconds * 1000,
+              description: `set ${currentNumber}, ${playbackResponsiveTuning ? "live ball" : `batch ${batchIndex + 1}/${plan.batches.length}`} (${batch.shots.length} ball${batch.shots.length === 1 ? "" : "s"})`,
+            });
+            activeNodeRef = null;
+            if (activeDrill()) renderGraph();
+
+            if (playbackRetuneRequested || liveTuningRevision !== revisionAtStart) {
+              if (liveRetuneStopPromise) await liveRetuneStopPromise.catch(() => null);
+              // We cannot ask the Nova which record inside an interrupted packet
+              // was the last one actually fired. Resume conservatively from the
+              // first record of that packet. Once a live edit has happened, the
+              // rest of playback uses one-ball packets, so subsequent edits have
+              // at most the currently firing ball in flight.
+              nextShotIndex = batchStartIndex;
+              playbackRetuneRequested = false;
+              rebuildForRetune = true;
+              break;
+            }
+
+            nextShotIndex = (batch.shots[batch.shots.length - 1]?.sourceIndex ?? batchStartIndex) + 1;
+          }
+
+          if (!playbackRunning || token !== playbackToken) break;
+          if (rebuildForRetune) continue;
+          if (nextShotIndex >= compiled.shots.length) break;
         }
 
         if (!playbackRunning || token !== playbackToken) break;
-        if (plan.trailingDelay > 0) await waitWithStatus(plan.trailingDelay, token, "Finishing set in");
+        if (compiled.trailingDelay > 0) await waitWithLivePace(compiled.trailingDelay, token, "Finishing set in");
         if (!playbackRunning || token !== playbackToken) break;
 
         completed += 1;
         updateProgress(completed, configured, infinite, infinite ? `∞ · ${completed} sets completed` : `${completed} of ${configured} sets completed`);
         if (!playbackRunning || token !== playbackToken || (!infinite && completed >= configured)) break;
-        await waitWithStatus(drill.settings.delayBetweenSets, token, "Next set in");
+        await waitWithLivePace(drill.settings.delayBetweenSets, token, "Next set in");
       }
 
       if (playbackRunning && token === playbackToken) {
@@ -3992,6 +4916,8 @@
     } finally {
       if (token === playbackToken) {
         playbackRunning = false;
+        playbackRetuneRequested = false;
+        playbackResponsiveTuning = false;
         activeNodeRef = null;
         activeEdgeRef = null;
         updatePlayButton();
@@ -4013,6 +4939,22 @@
     }
   }
 
+  async function waitWithLivePace(baseSeconds, token, prefix) {
+    const base = Math.max(0, finite(baseSeconds, 0));
+    if (base <= 0) return;
+    const start = performance.now();
+    while (playbackRunning && token === playbackToken) {
+      // Re-evaluate the pace multiplier every ~100 ms so pace buttons are
+      // genuinely live even during a between-set wait.
+      const duration = tunedDelaySeconds(base);
+      const elapsed = (performance.now() - start) / 1000;
+      const remaining = duration - elapsed;
+      if (remaining <= 0) return;
+      els.runStatus.textContent = `${prefix} ${fmt(remaining,1)}s`;
+      await sleep(Math.min(100, remaining * 1000), token);
+    }
+  }
+
   function sleep(ms, token) {
     return new Promise(resolve => setTimeout(() => resolve(token === playbackToken), ms));
   }
@@ -4024,6 +4966,8 @@
     if (!playbackRunning && !calibrationTestRunning && !needsRobotStop) return;
 
     playbackRunning = false;
+    playbackRetuneRequested = false;
+    playbackResponsiveTuning = false;
     calibrationTestRunning = false;
     if (hadCalibrationTest) calibrationTestMessage = needsRobotStop ? "Stopping calibration test shot…" : "Calibration test shot canceled.";
     playbackToken += 1;
@@ -4127,8 +5071,10 @@
       resetRepeatersTriggeredBySimulation(drill, node, context, repeaters);
       let edge = null;
       if (node.type === "shot") {
-        const p = node.params;
-        context.events.push({ kind: "shot", title: node.label, detail: `${fmt(p.speedMps,1)} m/s · ${spinWords(p.spinRps)}` });
+        const adjusted = adjustedShotForLiveTuning(node.params);
+        const p = adjusted.params;
+        const suffix = adjusted.changed ? ` · live tuning · elev ${signed(p.elevationDeg,1)}°` : "";
+        context.events.push({ kind: "shot", title: node.label, detail: `${fmt(p.speedMps,1)} m/s · ${spinWords(p.spinRps)}${suffix}` });
         edge = outgoing(drill, node.id)[0] ?? null;
       } else if (node.type === "random") {
         edge = weightedChoice(outgoing(drill, node.id));
@@ -4151,7 +5097,11 @@
         }
       }
       if (!edge) return { ok: true, reason: `Set ended after “${node.label}”.` };
-      if (edge.delaySeconds > 0) context.events.push({ kind: "delay", title: `Wait ${fmt(edge.delaySeconds,2)} seconds`, detail: `Before ${getNode(drill, edge.target)?.label || "next node"}` });
+      const effectiveDelay = tunedDelaySeconds(edge.delaySeconds);
+      if (effectiveDelay > 0) {
+        const tunedNote = Math.abs(effectiveDelay - edge.delaySeconds) > 1e-6 ? ` · stored ${fmt(edge.delaySeconds,2)} s` : "";
+        context.events.push({ kind: "delay", title: `Wait ${fmt(effectiveDelay,2)} seconds`, detail: `Before ${getNode(drill, edge.target)?.label || "next node"}${tunedNote}` });
+      }
       node = getNode(drill, edge.target);
     }
     return context.events.length >= limit ? { ok: false, reason: `Stopped at the ${limit}-event preview limit.` } : { ok: true, reason: "Set ended." };
@@ -4192,21 +5142,14 @@
     });
   }
 
-  function createDrill() {
-    const drill = defaultDrill(uniqueDrillName("Custom drill"));
-    library.drills.push(drill);
-    library.activeDrillId = drill.id;
-    selection = null;
-    commit({ message: "New drill created" });
-  }
-
-  function duplicateActiveDrill() {
-    const source = activeDrill();
-    if (!source) return;
+  function cloneDrillForUser(source, { folderId = null, nameBase = null } = {}) {
     const clone = structuredClone(source);
     const idMap = new Map();
     clone.id = makeId("drill");
-    clone.name = uniqueDrillName(`${source.name} copy`);
+    clone.name = uniqueDrillName(nameBase || `${builtInDisplayName(source.name)} copy`);
+    clone.folderId = library.folders.some(folder => folder.id === folderId) ? folderId : null;
+    delete clone.builtIn;
+    delete clone.libraryFolderId;
     clone.nodes.forEach(node => {
       const old = node.id;
       node.id = makeId(node.type);
@@ -4217,10 +5160,47 @@
       edge.source = idMap.get(edge.source);
       edge.target = idMap.get(edge.target);
     });
-    clone.nodes.filter(n => n.type === "counter").forEach(n => n.clearOnNodeIds = n.clearOnNodeIds.map(id => idMap.get(id)).filter(Boolean));
+    clone.nodes.filter(node => node.type === "counter").forEach(node => {
+      node.clearOnNodeIds = node.clearOnNodeIds.map(id => idMap.get(id)).filter(Boolean);
+    });
     clone.startNodeId = idMap.get(source.startNodeId) ?? clone.nodes[0]?.id ?? null;
+    return clone;
+  }
+
+  function createDrill() {
+    if (libraryView.root !== "user") selectLibraryRoot("user");
+    const drill = defaultDrill(uniqueDrillName("Custom drill"));
+    drill.folderId = libraryView.folderId || null;
+    library.drills.push(drill);
+    library.activeDrillSource = "user";
+    library.activeDrillId = drill.id;
+    selection = null;
+    commit({ message: "New drill created" });
+  }
+
+  function copyActiveBuiltInToMyDrills() {
+    const source = activeDrill();
+    if (!source || !isActiveBuiltIn()) return;
+    const clone = cloneDrillForUser(source, { folderId: null, nameBase: `${builtInDisplayName(source.name)} copy` });
     library.drills.push(clone);
+    library.activeDrillSource = "user";
     library.activeDrillId = clone.id;
+    libraryView = { root: "user", folderId: clone.folderId, query: "" };
+    els.librarySearchInput.value = "";
+    selection = null;
+    commit({ message: "Copied to My drills" });
+    setTimeout(fitGraph, 30);
+  }
+
+  function duplicateActiveDrill() {
+    const source = activeDrill();
+    if (!source) return;
+    if (isActiveBuiltIn()) { copyActiveBuiltInToMyDrills(); return; }
+    const clone = cloneDrillForUser(source, { folderId: source.folderId || null, nameBase: `${source.name} copy` });
+    library.drills.push(clone);
+    library.activeDrillSource = "user";
+    library.activeDrillId = clone.id;
+    libraryView = { root: "user", folderId: clone.folderId || null, query: "" };
     selection = null;
     commit({ message: "Drill duplicated" });
   }
@@ -4228,33 +5208,122 @@
   function deleteActiveDrill() {
     const drill = activeDrill();
     if (!drill) return;
-    if (library.drills.length <= 1) {
-      toast("Keep at least one drill.");
-      return;
-    }
+    if (isActiveBuiltIn()) { toast("Built-in presets cannot be deleted."); return; }
     askConfirm("Delete drill?", `Delete “${drill.name}”? Sub-drill nodes that reference it will become invalid.`, () => {
       library.drills = library.drills.filter(d => d.id !== drill.id);
-      library.activeDrillId = library.drills[0]?.id ?? null;
+      const next = library.drills.find(d => (d.folderId || null) === (drill.folderId || null)) || library.drills[0];
+      if (next) {
+        library.activeDrillSource = "user";
+        library.activeDrillId = next.id;
+      } else {
+        library.activeDrillSource = "builtin";
+        library.activeDrillId = builtInCatalog.defaultDrillId;
+      }
       selection = null;
       commit({ message: "Drill deleted" });
     });
   }
 
-  function restoreExampleLibrary() {
+  function uniqueFolderName(base, parentId, excludeId = null) {
+    const clean = String(base || "New folder").trim().slice(0, 90) || "New folder";
+    const used = new Set(library.folders
+      .filter(folder => folder.id !== excludeId && (folder.parentId || null) === (parentId || null))
+      .map(folder => folder.name.toLowerCase()));
+    if (!used.has(clean.toLowerCase())) return clean;
+    let index = 2;
+    while (used.has(`${clean} ${index}`.toLowerCase())) index += 1;
+    return `${clean} ${index}`;
+  }
+
+  function openFolderDialog(mode) {
+    if (libraryView.root !== "user") return;
+    const folder = folderById("user", libraryView.folderId);
+    folderDialogMode = mode;
+    els.folderDialogTitle.textContent = mode === "rename" ? "Rename folder" : "New folder";
+    els.folderNameInput.value = mode === "rename" && folder ? folder.name : "";
+    els.folderDialog.showModal();
+    setTimeout(() => els.folderNameInput.focus(), 20);
+  }
+
+  function saveFolderDialog() {
+    const parentFolder = folderById("user", libraryView.folderId);
+    if (folderDialogMode === "rename" && parentFolder) {
+      parentFolder.name = uniqueFolderName(els.folderNameInput.value, parentFolder.parentId, parentFolder.id);
+      els.folderDialog.close();
+      commit({ message: "Folder renamed" });
+      return;
+    }
+    const parentId = parentFolder?.id || null;
+    const folder = {
+      id: makeId("folder"),
+      name: uniqueFolderName(els.folderNameInput.value, parentId),
+      parentId,
+    };
+    library.folders.push(folder);
+    els.folderDialog.close();
+    libraryView.folderId = folder.id;
+    commit({ message: "Folder created" });
+  }
+
+  function deleteCurrentFolder() {
+    const folder = folderById("user", libraryView.folderId);
+    if (!folder) return;
     askConfirm(
-      "Restore default training library?",
-      "This replaces the locally saved drill library with the built-in shot and drill presets. Your calibration is preserved. Export first if you need the current drills.",
+      "Delete folder?",
+      `Delete “${folder.name}”? Drills and subfolders inside it will be moved up one level; no drills will be deleted.`,
       () => {
-        stopPlayback();
-        const calibration = sanitizeCalibration(library.calibration);
-        library = makeSampleLibrary();
-        library.calibration = calibration;
-        selection = null;
-        startupNotice = "Default training library restored.";
-        commit({ message: "Default training library restored" });
-        setTimeout(fitGraph, 40);
+        const parentId = folder.parentId || null;
+        library.drills.forEach(drill => { if (drill.folderId === folder.id) drill.folderId = parentId; });
+        library.folders.forEach(child => { if (child.parentId === folder.id) child.parentId = parentId; });
+        library.folders = library.folders.filter(item => item.id !== folder.id);
+        libraryView.folderId = parentId;
+        commit({ message: "Folder removed; contents kept" });
       }
     );
+  }
+
+  function folderDepth(folder) {
+    let depth = 0;
+    let cursor = folder;
+    const seen = new Set();
+    while (cursor?.parentId && !seen.has(cursor.id)) {
+      seen.add(cursor.id);
+      depth += 1;
+      cursor = folderById("user", cursor.parentId);
+    }
+    return depth;
+  }
+
+  function openMoveDrillDialog() {
+    const drill = activeDrill();
+    if (!drill || isActiveBuiltIn()) return;
+    els.moveDrillFolderSelect.replaceChildren();
+    const rootOption = document.createElement("option");
+    rootOption.value = "";
+    rootOption.textContent = "My drills /";
+    els.moveDrillFolderSelect.appendChild(rootOption);
+    for (const folder of [...library.folders].sort((a, b) => {
+      const ap = folderPath("user", a.id).map(item => item.name).join("/");
+      const bp = folderPath("user", b.id).map(item => item.name).join("/");
+      return ap.localeCompare(bp);
+    })) {
+      const option = document.createElement("option");
+      option.value = folder.id;
+      option.textContent = `${"  ".repeat(folderDepth(folder) + 1)}${folder.name}`;
+      if ((drill.folderId || "") === folder.id) option.selected = true;
+      els.moveDrillFolderSelect.appendChild(option);
+    }
+    els.moveDrillDialog.showModal();
+  }
+
+  function moveActiveDrill() {
+    const drill = activeDrill();
+    if (!drill || isActiveBuiltIn()) return;
+    const target = els.moveDrillFolderSelect.value || null;
+    drill.folderId = library.folders.some(folder => folder.id === target) ? target : null;
+    libraryView = { root: "user", folderId: drill.folderId || null, query: "" };
+    els.moveDrillDialog.close();
+    commit({ message: "Drill moved" });
   }
 
   function exportLibrary() {
@@ -4262,12 +5331,12 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "table-tennis-robot-studio-library.json";
+    a.download = "table-tennis-robot-studio-my-drills.json";
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    toast("Drill library exported");
+    toast("My drills and calibration exported");
   }
 
   function importLibrary(file) {
@@ -4275,9 +5344,10 @@
     reader.addEventListener("load", () => {
       try {
         library = sanitizeLibrary(JSON.parse(String(reader.result)));
+        libraryView = { root: library.activeDrillSource === "user" ? "user" : "builtin", folderId: library.activeDrillSource === "user" ? (activeDrill()?.folderId || null) : (activeDrill()?.libraryFolderId || "builtin-root"), query: "" };
         selection = null;
         stopPlayback();
-        commit({ message: "Drill library imported" });
+        commit({ message: "My drills and calibration imported" });
         setTimeout(fitGraph, 40);
       } catch (error) {
         toast(error instanceof Error ? error.message : "Import failed.");
@@ -4493,6 +5563,29 @@
     document.body.appendChild(banner);
   }
 
+  function setMobileWorkspace(mode) {
+    const normalized = mode === "drills" ? "drills" : mode === "calibrate" ? "calibrate" : "graph";
+    document.body.classList.toggle("mobile-drills-open", normalized === "drills");
+    const tabs = [
+      [els.mobileGraphNavBtn, normalized === "graph"],
+      [els.mobileDrillsNavBtn, normalized === "drills"],
+      [els.mobileCalibrationNavBtn, normalized === "calibrate"],
+    ];
+    for (const [button, active] of tabs) {
+      if (!button) continue;
+      button.classList.toggle("active", active);
+      if (active) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+  }
+
+  function openCalibrationWorkspace() {
+    setMobileWorkspace("calibrate");
+    setCalibrationTab("guided");
+    renderCalibration();
+    els.calibrationDialog.showModal();
+  }
+
   function bindEvents() {
     els.robotConnectBtn.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotStatusBtn.addEventListener("click", () => { updateRobotUI(); els.robotDialog.showModal(); });
@@ -4512,8 +5605,25 @@
     els.addCounterBtn.addEventListener("click", () => addNode("counter"));
     els.deleteSelectionBtn.addEventListener("click", deleteSelection);
     els.fitBtn.addEventListener("click", fitGraph);
+    els.mobileDrillsBtn.addEventListener("click", () => setMobileWorkspace("drills"));
+    els.closeMobileDrillsBtn.addEventListener("click", () => setMobileWorkspace("graph"));
+    els.mobileGraphNavBtn.addEventListener("click", () => setMobileWorkspace("graph"));
+    els.mobileDrillsNavBtn.addEventListener("click", () => setMobileWorkspace("drills"));
+    els.mobileCalibrationNavBtn.addEventListener("click", openCalibrationWorkspace);
+    els.builtInLibraryTab.addEventListener("click", () => selectLibraryRoot("builtin"));
+    els.myDrillsLibraryTab.addEventListener("click", () => selectLibraryRoot("user"));
+    els.librarySearchInput.addEventListener("input", () => { libraryView.query = els.librarySearchInput.value; renderDrillList(); });
     els.newDrillBtn.addEventListener("click", createDrill);
+    els.newFolderBtn.addEventListener("click", () => openFolderDialog("new"));
+    els.renameFolderBtn.addEventListener("click", () => openFolderDialog("rename"));
+    els.deleteFolderBtn.addEventListener("click", deleteCurrentFolder);
+    els.folderSaveBtn.addEventListener("click", saveFolderDialog);
+    els.folderNameInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveFolderDialog(); } });
+    els.copyBuiltInBtn.addEventListener("click", copyActiveBuiltInToMyDrills);
+    els.moveDrillBtn.addEventListener("click", openMoveDrillDialog);
+    els.moveDrillSaveBtn.addEventListener("click", moveActiveDrill);
     els.drillNameInput.addEventListener("change", () => {
+      if (!activeDrillEditable()) return;
       const drill = activeDrill();
       if (!drill) return;
       drill.name = uniqueDrillName(els.drillNameInput.value, drill.id);
@@ -4521,7 +5631,17 @@
     });
     els.duplicateDrillBtn.addEventListener("click", duplicateActiveDrill);
     els.deleteDrillBtn.addEventListener("click", deleteActiveDrill);
-    els.resetExamplesBtn.addEventListener("click", restoreExampleLibrary);
+
+    els.liveTuningBtn.addEventListener("click", () => {
+      renderLiveTuning();
+      els.liveTuningDialog.showModal();
+    });
+    els.closeLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
+    els.doneLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
+    els.resetLiveTuningBtn.addEventListener("click", resetLiveTuning);
+    els.liveTuningDialog.querySelectorAll("[data-tuning-key][data-tuning-delta]").forEach(button => {
+      button.addEventListener("click", () => stepLiveTuning(button.dataset.tuningKey, finite(button.dataset.tuningDelta, 0)));
+    });
 
     els.graphViewport.addEventListener("pointerdown", onCanvasPointerDown);
     els.graphViewport.addEventListener("wheel", onGraphWheel, { passive: false });
@@ -4568,6 +5688,7 @@
       setRepetitions(current <= 0 ? 1 : current + 1);
     });
     els.setDelayInput.addEventListener("change", () => {
+      if (!activeDrillEditable()) return;
       const drill = activeDrill();
       if (!drill) return;
       drill.settings.delayBetweenSets = clamp(els.setDelayInput.value, 0, 3600, 0);
@@ -4580,15 +5701,13 @@
       else void startPlayback();
     });
 
-    els.calibrationBtn.addEventListener("click", () => {
-      setCalibrationTab("guided");
-      renderCalibration();
-      els.calibrationDialog.showModal();
-    });
+    els.calibrationBtn.addEventListener("click", openCalibrationWorkspace);
     els.closeCalibrationBtn.addEventListener("click", () => {
       if (calibrationFeedRunning) void stopGuidedFeed();
       els.calibrationDialog.close();
+      setMobileWorkspace("graph");
     });
+    els.calibrationDialog.addEventListener("close", () => setMobileWorkspace("graph"));
     bindCalibrationInputs();
 
     els.previewBtn.addEventListener("click", () => {
@@ -4608,6 +5727,8 @@
     });
     els.exportBtn.addEventListener("click", exportLibrary);
 
+    document.querySelectorAll("[data-dialog-cancel]").forEach(button => button.addEventListener("click", () => button.closest("dialog")?.close()));
+
     els.confirmActionBtn.addEventListener("click", () => {
       const callback = confirmCallback;
       confirmCallback = null;
@@ -4624,9 +5745,16 @@
 
   try {
     assertRequiredElements();
-    if (!Protocol || !RobotController || !robot || !GuidedCalibration) throw new Error("Pongbot protocol/BLE/guided calibration modules did not load");
+    if (!Protocol || !RobotController || !robot || !GuidedCalibration || !DrillAdjustments) throw new Error("Pongbot protocol/BLE/guided calibration/drill adjustment modules did not load");
     Protocol.selfTest();
+    builtInCatalog = makeBuiltInCatalog();
+    library = initializeLibrary();
     repairLibraryIfNeeded();
+    liveTuning = loadLiveTuningPreference();
+    // Always start the browser at its root. The active drill can live in any
+    // folder, but entering the app should show the library structure rather
+    // than silently dropping the user inside that drill's folder.
+    libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
     bindEvents();
     els.graphWorld.style.transform = `scale(${graphZoom})`;
     els.graphSurface.style.width = `${SURFACE_WIDTH * graphZoom}px`;
