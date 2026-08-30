@@ -150,6 +150,7 @@
           <section class="robot-menu-card panel-card">
             <button id="calibrationBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">◎</span><span><strong>Calibration</strong><small>Guided calibration and trajectory model</small></span><span>›</span></button>
             <button id="robotSettingsShortcutBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">⚙</span><span><strong>Robot / model settings</strong><small>Geometry, air model and Nova scaling</small></span><span>›</span></button>
+            <button id="protocolDebugBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">⌁</span><span><strong>Protocol debugger</strong><small>Upload or paste timed BLE command scripts</small></span><span>›</span></button>
           </section>
           <section class="model-default-card panel-card"><h3>Current defaults</h3><dl><div><dt>Nozzle height</dt><dd>22.5 cm</dd></div><div><dt>Base to nozzle</dt><dd>26.5 cm</dd></div><div><dt>Exit speed model</dt><dd>Linear</dd></div></dl></section>
         </div>
@@ -402,6 +403,76 @@
     </div>
   </dialog>
 
+  <dialog id="protocolDebugDialog" class="app-dialog protocol-debug-dialog">
+    <div class="dialog-frame protocol-debug-frame">
+      <header>
+        <div>
+          <p class="eyebrow">Developer tool</p>
+          <h2>Nova protocol debugger</h2>
+          <p>Run an editable, timed sequence of raw Bluetooth commands without rebuilding or redeploying the app.</p>
+        </div>
+        <button id="closeProtocolDebugBtn" class="icon-button" type="button" aria-label="Close protocol debugger">×</button>
+      </header>
+
+      <div class="protocol-debug-warning">
+        <strong>Commands are sent to the connected robot exactly as written.</strong>
+        <span>Use a clear table area and keep the physical stop/power control reachable. Uploading a file only loads it; nothing is transmitted until you press Run script.</span>
+      </div>
+
+      <div class="protocol-debug-toolbar">
+        <label class="button ghost protocol-file-button">Open script<input id="protocolDebugFileInput" type="file" accept=".nova,.txt,text/plain" hidden></label>
+        <button id="protocolDebugExampleBtn" class="button ghost" type="button">Load safe example</button>
+        <button id="protocolDebugDownloadBtn" class="button ghost" type="button">Save script</button>
+        <button id="protocolDebugClearBtn" class="button ghost" type="button">Clear</button>
+      </div>
+
+      <div class="protocol-debug-layout">
+        <section class="protocol-debug-editor-card">
+          <div class="section-title-row"><div><h3>Command script</h3><small>Comments: # or // · WAIT accepts ms or s</small></div><span id="protocolDebugConnectionBadge" class="status-badge neutral">Disconnected</span></div>
+          <textarea id="protocolDebugEditor" class="protocol-debug-editor" spellcheck="false" autocomplete="off" aria-label="Protocol debug script" placeholder="# Example
+STATUS
+WAIT 500ms
+HEARTBEAT"></textarea>
+          <div class="protocol-debug-editor-actions">
+            <label class="form-check protocol-debug-heartbeat-toggle"><input id="protocolDebugPauseHeartbeat" type="checkbox"><span>Pause app heartbeat while script runs</span></label>
+            <div class="protocol-debug-editor-button-row"><button id="protocolDebugRunSelectionBtn" class="button ghost" type="button">Run line / selection</button><button id="protocolDebugValidateBtn" class="button ghost" type="button">Validate</button></div>
+          </div>
+          <div id="protocolDebugParseStatus" class="protocol-debug-parse-status" aria-live="polite"></div>
+        </section>
+
+        <aside class="protocol-debug-help-card">
+          <h3>Script format</h3>
+          <pre class="protocol-debug-format"># comment
+MARK change elevation
+TX 84 ...
+WAIT 250ms
+REQ 02 02 00 00 TIMEOUT 3s
+STATUS
+HEARTBEAT
+PAUSE
+CONTINUE
+STOP</pre>
+          <p><strong>TX</strong> sends bytes without waiting. <strong>REQ</strong> sends bytes and waits for the specified response opcode. Macros use the protocol frames already known by the app.</p>
+          <p class="helper">Hex can be compact or spaced, with optional <code>0x</code> prefixes. Example: <code>TX 83 06 00</code>.</p>
+        </aside>
+      </div>
+
+      <div class="protocol-debug-runbar">
+        <div><strong id="protocolDebugRunState">Ready</strong><small id="protocolDebugTimeline">Validate a script to see its timeline.</small></div>
+        <div class="protocol-debug-run-actions">
+          <button id="protocolDebugStopScriptBtn" class="button danger" type="button" disabled>Stop script</button>
+          <button id="protocolDebugStopNovaBtn" class="button danger ghost-danger" type="button">Stop Nova</button>
+          <button id="protocolDebugRunBtn" class="button primary" type="button">Run script</button>
+        </div>
+      </div>
+
+      <section class="protocol-debug-log-card">
+        <div class="section-title-row"><div><h3>Debug execution log</h3><small>Script timing plus the app's RX/TX protocol log</small></div><button id="protocolDebugDownloadLogBtn" class="button compact ghost" type="button">Download log</button></div>
+        <pre id="protocolDebugExecutionLog" class="protocol-debug-execution-log" aria-live="polite"></pre>
+      </section>
+    </div>
+  </dialog>
+
   <dialog id="liveTuningDialog" class="live-tuning-dialog">
     <div class="dialog-frame live-tuning-frame">
       <header>
@@ -524,6 +595,7 @@
   <script src="guided-calibration.js"></script>
   <script src="launch-model.js"></script>
   <script src="drill-adjustments.js"></script>
+  <script src="protocol-debug.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

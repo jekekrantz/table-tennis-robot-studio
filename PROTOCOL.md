@@ -313,3 +313,18 @@ This makes the calibration shot useful as an end-to-end test of:
 - one-ball Start;
 - run-completion detection;
 - return-to-Ready confirmation.
+
+## In-app timed protocol debugger
+
+The Robot screen includes a protocol debugger so protocol experiments can be changed as data files rather than app deployments. The debugger deliberately sits above `NovaBleController.sendRaw()` / `requestRaw()` and does not reinterpret bytes.
+
+Script grammar:
+
+- `TX <hex>`: enqueue a raw GATT write and continue after the write completes.
+- `REQ <opcode> <hex> [TIMEOUT <duration>]`: write raw bytes and wait for a successful response carrying the expected opcode.
+- `WAIT 250ms` / `WAIT 1.5s`: explicit spacing between actions.
+- `MARK text`: log-only marker.
+- `STATUS`, `HEARTBEAT`, `PAUSE`, `CONTINUE`, `STOP`: macros for frames already represented by `PongbotProtocol.COMMANDS` / the known response opcode.
+- `#` and `//` start comments; blank lines are ignored.
+
+The existing controller heartbeat continues during debug scripts unless **Pause app heartbeat while script runs** is checked. This matters when isolating whether `0x83` is required or when comparing exact traces. The debugger records script timing separately while the normal robot protocol log continues to capture all TX/RX frames, including unsolicited notifications.

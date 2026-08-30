@@ -288,3 +288,34 @@ The graph toolbar includes **Live tuning**, a non-destructive player-preference 
 - **Speed** uses smaller 2% steps from -50% to +50%. It changes exit speed while keeping spin fixed, then solves elevation to minimize landing shift. Hardware/model speed limits still apply.
 
 The stored shot parameters stay unchanged. Preview uses the effective tuned shots, and Play applies the same modifiers independently to every ball in the compiled traversal, including balls reached through sub-drills. Because a Start packet is buffered by the Nova, changing a modifier during playback interrupts that packet, rebuilds the remaining already-sampled traversal with the new values, and switches the rest of the run to one-ball packets so subsequent edits affect the next ball.
+
+## Protocol debugger
+
+Robot → **Protocol debugger** opens a developer tool for running timed raw BLE scripts without rebuilding the app. A `.nova` or `.txt` file can be uploaded, edited in the browser, validated, saved locally, and rerun as often as needed.
+
+Supported commands:
+
+```text
+# or // comment
+MARK free-form label
+TX <hex bytes>
+REQ <expected-opcode-hex> <hex bytes> [TIMEOUT <duration>]
+WAIT <duration>
+STATUS
+HEARTBEAT
+PAUSE
+CONTINUE
+STOP
+```
+
+Durations accept `ms` or `s`; bare numbers are milliseconds. Hex may be compact (`830600`) or spaced (`83 06 00`) with optional `0x` prefixes. `TX` is fire-and-forget, while `REQ` waits for a response with the specified opcode. Uploading or editing never transmits anything; **Run script** is explicit. The debugger can optionally pause the app's automatic 10-second heartbeat for deterministic protocol experiments and restores it afterward.
+
+`debug-scripts/status-heartbeat.nova` is a safe starter example. The debugger has a separate stop-script control and a **Stop Nova** control, and can download a combined execution + BLE protocol log for comparison between experiments.
+
+For fast iteration, select one or more lines in the editor and choose **Run line / selection**; with no selection, it runs the line containing the cursor. `Ctrl+Enter` / `Cmd+Enter` does the same thing. This is useful for tweaking one `0x84` candidate frame repeatedly while leaving the longer setup script untouched.
+
+### Calibration fit diagnostics
+
+Guided calibration now reports signed landing-distance residuals (`predicted - measured`) against both elevation and raw wheel input. The plots are intended to separate ordinary shot-to-shot scatter from systematic model error. Residuals can be downloaded as CSV for offline analysis.
+
+The current trajectory calibration assumes the launch point itself is fixed as elevation changes. If the physical head pivots behind the nozzle, that assumption can be checked from the elevation residual plot before adding more geometry parameters: for a simple horizontal pivot-to-nozzle offset `d`, the launch point changes by `Δz = d sin(θ)` and `Δx = d(cos(θ)-1)` relative to zero elevation.

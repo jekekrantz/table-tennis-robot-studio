@@ -5,13 +5,14 @@ root = Path(__file__).resolve().parent.parent
 html = (root / "index.html").read_text(encoding="utf-8")
 app = (root / "app.js").read_text(encoding="utf-8")
 ids = set(re.findall(r'\bid="([^"]+)"', html))
-for expected in ["calibrationGuidedPanel","guidedPlacementTable","guidedPlacementGround","guidedDistanceInput","guidedNetHeightInput","guidedSaveNextBtn","guidedComputeBtn","guidedSpeedMinInput","guidedSpeedMaxInput","guidedFeedBtn","guidedRepeatCountInput","guidedNozzleXInput","liveTuningBtn","liveTuningDialog","tuningPaceValue","tuningClearanceValue","tuningSpinValue","tuningSpeedValue","resetLiveTuningBtn","builtInLibraryTab","myDrillsLibraryTab","libraryBreadcrumb","librarySearchInput","newFolderBtn","copyBuiltInBtn","moveDrillBtn","folderDialog","moveDrillDialog","libraryScreen","runScreen","editorScreen","robotScreen","mobileLibraryNavBtn","mobileRunNavBtn","mobileEditNavBtn","mobileRobotNavBtn","addNodeDialog","drillDetailsDialog","addNodeMenuBtn","runEditDrillBtn","editorRunBtn","robotDiagnosticsBtn"]:
+for expected in ["calibrationGuidedPanel","guidedPlacementTable","guidedPlacementGround","guidedDistanceInput","guidedNetHeightInput","guidedSaveNextBtn","guidedComputeBtn","guidedSpeedMinInput","guidedSpeedMaxInput","guidedFeedBtn","guidedRepeatCountInput","guidedNozzleXInput","liveTuningBtn","liveTuningDialog","tuningPaceValue","tuningClearanceValue","tuningSpinValue","tuningSpeedValue","resetLiveTuningBtn","builtInLibraryTab","myDrillsLibraryTab","libraryBreadcrumb","librarySearchInput","newFolderBtn","copyBuiltInBtn","moveDrillBtn","folderDialog","moveDrillDialog","libraryScreen","runScreen","editorScreen","robotScreen","mobileLibraryNavBtn","mobileRunNavBtn","mobileEditNavBtn","mobileRobotNavBtn","addNodeDialog","drillDetailsDialog","addNodeMenuBtn","runEditDrillBtn","editorRunBtn","robotDiagnosticsBtn","protocolDebugBtn","protocolDebugDialog","protocolDebugEditor","protocolDebugRunBtn","protocolDebugStopScriptBtn","protocolDebugStopNovaBtn","protocolDebugFileInput"]:
     if expected not in ids: raise SystemExit(f"Missing guided calibration control: {expected}")
-for script in ("guided-calibration.js", "launch-model.js", "drill-adjustments.js", "app.js"):
+for script in ("guided-calibration.js", "launch-model.js", "drill-adjustments.js", "protocol-debug.js", "app.js"):
     if f'<script src="{script}"></script>' not in html: raise SystemExit(f"{script} is not loaded")
 if html.index("guided-calibration.js") > html.index("app.js"): raise SystemExit("guided-calibration.js must load before app.js")
 if html.index("launch-model.js") > html.index("app.js"): raise SystemExit("launch-model.js must load before app.js")
 if html.index("drill-adjustments.js") > html.index("app.js"): raise SystemExit("drill-adjustments.js must load before app.js")
+if html.index("protocol-debug.js") > html.index("app.js"): raise SystemExit("protocol-debug.js must load before app.js")
 for svg_id in ("poseSvg", "calibrationSideTrajectory", "tableDimensionSvg"):
     if not re.search(rf'<svg id="{svg_id}"[^>]*hidden', html): raise SystemExit(f"{svg_id} must remain hidden")
 if 'value="base_back"' not in html: raise SystemExit("Ground calibration must expose the back-of-base distance reference")
@@ -30,6 +31,8 @@ if 'params: { speedMps: 5.97, spinRps: 0, elevationDeg: 12.5, aimDeg: 0 }' not i
     raise SystemExit("New shot defaults must be a safe center no-spin ball")
 if 'Linear raw wheel input → launch speed' not in app:
     raise SystemExit("Guided calibration result must expose the linear speed model")
+for token in ("Fit diagnostics", "Residual by elevation", "Residual by wheel input", "Elevation-pivot hypothesis", "guidedDownloadResidualsBtn"):
+    if token not in app: raise SystemExit(f"Missing calibration residual diagnostics: {token}")
 if 'supported linear exit-speed range' not in app:
     raise SystemExit("Shot validation must use the linear exit-speed range")
 if 'hybridRange' in app:
@@ -95,6 +98,11 @@ for token in ('measureRenderedNodeHeights', 'nodeHeightCache', 'MOBILE_LAYOUT_CE
     if token not in app: raise SystemExit(f"Missing collision-free content-sized graph layout: {token}")
 for token in ('.spin-ball-icon', '.spin-direction-symbol', '.shot-metrics { display:flex; gap:5px; flex-wrap:nowrap'):
     if token not in css: raise SystemExit(f"Missing compact speed/spin node presentation: {token}")
+for token in ("openProtocolDebugger", "runProtocolDebugScript", "requestRaw", "sendRaw", "PROTOCOL_DEBUG_STORAGE_KEY"):
+    if token not in app and token not in (root / "pongbot-ble.js").read_text(encoding="utf-8"):
+        raise SystemExit(f"Missing protocol-debug integration: {token}")
+if ".protocol-debug-layout" not in css or ".protocol-debug-editor" not in css:
+    raise SystemExit("Missing responsive protocol-debug UI styles")
 if '...builtInCatalog.drills.map(drill => drill.id)' not in app:
     raise SystemExit("Saved My drills must preserve sub-drill references to Built-in presets")
 

@@ -137,6 +137,11 @@ async function main() {
     throw new Error(`Mock connection did not reach Ready: ${JSON.stringify(controller.snapshot())}`);
   }
 
+  const rawStatus = await controller.requestRaw(P.COMMANDS.status, 0x02, 2000, "mock raw status");
+  const parsedRawStatus = P.parseStatusFrame(rawStatus);
+  if (parsedRawStatus.state !== 3) throw new Error("requestRaw did not return the Ready status frame");
+  await controller.sendRaw(P.COMMANDS.heartbeat, { label: "mock fire-and-forget heartbeat" });
+
   const ball = P.packBallRecord({
     wheelA: 2861,
     wheelB: 2861,

@@ -125,6 +125,20 @@ function syntheticRows({ placement = "table", nozzleHeightM = 0.225, nozzleXFrom
   assert(groundFit.distanceRmseM < 0.015, `ground RMSE too high: ${groundFit.distanceRmseM}`);
   assert.equal(groundFit.clearanceCount, 0);
   assert.equal(groundFit.nozzleXReference, "base_back");
+  assert(groundFit.distanceDiagnostics, "calibration should expose distance diagnostics");
+  assert.equal(groundFit.distanceDiagnostics.count, groundFit.distanceCount);
+  assert.equal(groundFit.distanceDiagnostics.byElevation.length, 5);
+  assert.equal(groundFit.distanceDiagnostics.byRawSpeed.length, 3);
+  close(groundFit.distanceDiagnostics.meanErrorM, 0, 0.002, "synthetic distance bias");
+
+  const syntheticResidualSummary = C.summarizeDistanceResiduals([
+    { rawSpeed: 2000, elevationDeg: 10, distanceErrorM: -0.01 },
+    { rawSpeed: 2200, elevationDeg: 20, distanceErrorM: 0.00 },
+    { rawSpeed: 2400, elevationDeg: 30, distanceErrorM: 0.01 },
+  ]);
+  close(syntheticResidualSummary.elevationTrendMPerDeg, 0.001, 1e-12, "elevation residual slope");
+  close(syntheticResidualSummary.speedTrendMPerRaw, 0.00005, 1e-12, "speed residual slope");
+  assert.equal(syntheticResidualSummary.byElevation.length, 3);
 
   const seedModel = C.constants.USER_SEED_LINEAR_MODEL;
   const seed = C.speedFromMap(2167, C.constants.USER_SEED_SPEED_MAP);

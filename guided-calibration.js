@@ -432,6 +432,8 @@
     const rms = arr => arr.length ? Math.sqrt(arr.reduce((s, v) => s + v * v, 0) / arr.length) : null;
     const maxAbs = arr => arr.length ? Math.max(...arr.map(Math.abs)) : null;
 
+    const distanceDiagnostics = summarizeDistanceResiduals(residualRows);
+
     return {
       placement: setup.placement,
       nozzleHeightM: hFit.x,
@@ -448,7 +450,52 @@
       clearanceMaxAbsM: maxAbs(clearanceErrors),
       distanceCount: distanceErrors.length,
       clearanceCount: clearanceErrors.length,
+      distanceDiagnostics,
       residualRows,
+    };
+  }
+
+  function summarizeDistanceResiduals(residualRows) {
+    const rows = (residualRows || []).filter(row => Number.isFinite(row?.distanceErrorM));
+    const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    const rms = values => values.length ? Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length) : null;
+    const groupBy = key => {
+      const groups = new Map();
+      for (const row of rows) {
+        const value = row[key];
+        if (!groups.has(value)) groups.set(value, []);
+        groups.get(value).push(row.distanceErrorM);
+      }
+      return [...groups.entries()]
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([value, errors]) => ({
+          [key]: Number(value),
+          count: errors.length,
+          meanErrorM: mean(errors),
+          rmseM: rms(errors),
+          maxAbsM: Math.max(...errors.map(Math.abs)),
+        }));
+    };
+    const regressionSlope = key => {
+      if (rows.length < 2) return null;
+      const xs = rows.map(row => Number(row[key]));
+      const ys = rows.map(row => row.distanceErrorM);
+      const mx = mean(xs);
+      const my = mean(ys);
+      const denominator = xs.reduce((sum, x) => sum + (x - mx) * (x - mx), 0);
+      if (!(denominator > 1e-12)) return null;
+      return xs.reduce((sum, x, index) => sum + (x - mx) * (ys[index] - my), 0) / denominator;
+    };
+    const errors = rows.map(row => row.distanceErrorM);
+    return {
+      count: rows.length,
+      meanErrorM: mean(errors),
+      rmseM: rms(errors),
+      maxAbsM: errors.length ? Math.max(...errors.map(Math.abs)) : null,
+      elevationTrendMPerDeg: regressionSlope("elevationDeg"),
+      speedTrendMPerRaw: regressionSlope("rawSpeed"),
+      byElevation: groupBy("elevationDeg"),
+      byRawSpeed: groupBy("rawSpeed"),
     };
   }
 
@@ -482,5 +529,6 @@
     seedSpeedMps,
     speedFromMap,
     rawFromSpeed,
+    summarizeDistanceResiduals,
   };
 });

@@ -372,6 +372,22 @@
       }
     }
 
+    async sendRaw(bytes, { label = "debug raw" } = {}) {
+      if (!this.connected) throw new Error("Nova is not connected");
+      const command = P.toUint8(bytes);
+      this.log(`TX ${label}`, "tx", command);
+      await this.enqueueWrite(command);
+      return command;
+    }
+
+    requestRaw(bytes, expectedOpcode, timeoutMs = 5000, label = "debug request") {
+      const opcode = Number(expectedOpcode);
+      if (!Number.isInteger(opcode) || opcode < 0 || opcode > 0xff) {
+        return Promise.reject(new Error("Expected response opcode must be 0..255"));
+      }
+      return this.requestCommand(bytes, opcode, timeoutMs, label);
+    }
+
     requestCommand(bytes, expectedOpcode, timeoutMs = 5000, label = "command", options = {}) {
       if (!this.connected) return Promise.reject(new Error("Nova is not connected"));
       const command = P.toUint8(bytes);

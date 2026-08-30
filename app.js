@@ -266,6 +266,26 @@
     robotPageDevice: $("robotPageDevice"),
     robotDiagnosticsBtn: $("robotDiagnosticsBtn"),
     robotSettingsShortcutBtn: $("robotSettingsShortcutBtn"),
+    protocolDebugBtn: $("protocolDebugBtn"),
+    protocolDebugDialog: $("protocolDebugDialog"),
+    closeProtocolDebugBtn: $("closeProtocolDebugBtn"),
+    protocolDebugFileInput: $("protocolDebugFileInput"),
+    protocolDebugExampleBtn: $("protocolDebugExampleBtn"),
+    protocolDebugDownloadBtn: $("protocolDebugDownloadBtn"),
+    protocolDebugClearBtn: $("protocolDebugClearBtn"),
+    protocolDebugEditor: $("protocolDebugEditor"),
+    protocolDebugPauseHeartbeat: $("protocolDebugPauseHeartbeat"),
+    protocolDebugValidateBtn: $("protocolDebugValidateBtn"),
+    protocolDebugRunSelectionBtn: $("protocolDebugRunSelectionBtn"),
+    protocolDebugParseStatus: $("protocolDebugParseStatus"),
+    protocolDebugConnectionBadge: $("protocolDebugConnectionBadge"),
+    protocolDebugRunState: $("protocolDebugRunState"),
+    protocolDebugTimeline: $("protocolDebugTimeline"),
+    protocolDebugStopScriptBtn: $("protocolDebugStopScriptBtn"),
+    protocolDebugStopNovaBtn: $("protocolDebugStopNovaBtn"),
+    protocolDebugRunBtn: $("protocolDebugRunBtn"),
+    protocolDebugExecutionLog: $("protocolDebugExecutionLog"),
+    protocolDebugDownloadLogBtn: $("protocolDebugDownloadLogBtn"),
   };
 
   let startupNotice = "";
@@ -297,6 +317,9 @@
   let runtimeCounterDisplay = new Map();
   let calibrationViewTransform = null;
   let robotLogLines = [];
+  let protocolDebugLogLines = [];
+  let protocolDebugRunToken = 0;
+  let protocolDebugRunning = false;
   let stopPromise = null;
   let liveTuning = DrillAdjustments ? { ...DrillAdjustments.DEFAULT_TUNING } : { pacePct: 0, clearancePct: 0, spinPct: 0, speedPct: 0 };
   const liveTuningCache = new Map();
@@ -306,6 +329,7 @@
   let liveRetuneStopPromise = null;
 
   const Protocol = globalThis.PongbotProtocol;
+  const ProtocolDebug = globalThis.NovaProtocolDebug;
   const RobotController = globalThis.NovaBleController;
   const robot = Protocol && RobotController ? new RobotController() : null;
 
@@ -4273,14 +4297,14 @@
     g.placement = placement;
     if (placement === "ground") {
       g.distanceReference = "base_back";
-      g.nozzleXcm = 34;
+      g.nozzleXcm = 26.5;
       g.elevationMinDeg = 5;
       g.elevationMaxDeg = 45;
       g.elevationCount = 5;
       for (const shot of g.shots || []) shot.netClearanceCm = null;
     } else {
       g.distanceReference = "net";
-      g.nozzleXcm = 34;
+      g.nozzleXcm = 26.5;
       g.elevationMinDeg = 10;
       g.elevationMaxDeg = 30;
       g.elevationCount = 5;
@@ -4517,6 +4541,17 @@
         clearanceMaxAbsM: result.clearanceMaxAbsM,
         distanceCount: result.distanceCount,
         clearanceCount: result.clearanceCount,
+        distanceDiagnostics: result.distanceDiagnostics,
+        residualRows: result.residualRows.map(row => ({
+          rawSpeed: row.rawSpeed,
+          elevationDeg: row.elevationDeg,
+          distanceM: row.distanceM,
+          predictedDistanceM: row.predictedDistanceM,
+          distanceErrorM: row.distanceErrorM,
+          netClearanceM: row.netClearanceM,
+          predictedClearanceM: row.predictedClearanceM,
+          clearanceErrorM: row.clearanceErrorM,
+        })),
       };
       saveLibrary();
       els.guidedComputeStatus.textContent = "Calibration computed. Review the fit before applying it.";
@@ -4529,6 +4564,106 @@
     } finally {
       els.guidedComputeBtn.disabled = false;
     }
+  }
+
+  function residualGroupMeans(rows, key) {
+    const groups = new Map();
+    for (const row of rows || []) {
+      if (!Number.isFinite(row?.distanceErrorM) || !Number.isFinite(Number(row?.[key]))) continue;
+      const value = Number(row[key]);
+      if (!groups.has(value)) groups.set(value, []);
+      groups.get(value).push(row.distanceErrorM * 100);
+    }
+    return [...groups.entries()].sort((a,b) => a[0] - b[0]).map(([value, errors]) => ({
+      value,
+      meanCm: errors.reduce((sum, error) => sum + error, 0) / errors.length,
+      count: errors.length,
+    }));
+  }
+
+  function guidedResidualChartSvg(rows, key, title, xLabel) {
+    const valid = (rows || []).filter(row => Number.isFinite(row?.distanceErrorM) && Number.isFinite(Number(row?.[key])));
+    if (!valid.length) return `<div class="residual-chart-empty">No distance residuals available.</div>`;
+    const width = 620, height = 250;
+    const pad = { left: 52, right: 18, top: 34, bottom: 42 };
+    const xs = valid.map(row => Number(row[key]));
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const errorsCm = valid.map(row => row.distanceErrorM * 100);
+    const rawMax = Math.max(1, ...errorsCm.map(Math.abs));
+    const yMax = Math.max(2, Math.ceil(rawMax / 2) * 2);
+    const sx = value => pad.left + (xMax === xMin ? 0.5 : (value - xMin) / (xMax - xMin)) * (width - pad.left - pad.right);
+    const sy = value => pad.top + (yMax - value) / (2 * yMax) * (height - pad.top - pad.bottom);
+    const zeroY = sy(0);
+    const groups = residualGroupMeans(valid, key);
+    const meansPath = groups.map((group, index) => `${index ? "L" : "M"}${sx(group.value).toFixed(1)},${sy(group.meanCm).toFixed(1)}`).join(" ");
+    const uniqueX = [...new Set(xs)].sort((a,b) => a-b);
+    const xTicks = uniqueX.length <= 8 ? uniqueX : [xMin, xMax];
+    const pointMarkup = valid.map(row => {
+      const errorCm = row.distanceErrorM * 100;
+      const measured = Number.isFinite(row.distanceM) ? `${fmt(row.distanceM * 100,1)} cm measured` : "measurement unavailable";
+      const predicted = Number.isFinite(row.predictedDistanceM) ? `${fmt(row.predictedDistanceM * 100,1)} cm predicted` : "prediction unavailable";
+      return `<circle cx="${sx(Number(row[key])).toFixed(1)}" cy="${sy(errorCm).toFixed(1)}" r="4.2" class="residual-point"><title>Raw ${Math.round(row.rawSpeed)} · ${fmt(row.elevationDeg,1)}° · ${measured} · ${predicted} · error ${errorCm >= 0 ? "+" : ""}${fmt(errorCm,2)} cm</title></circle>`;
+    }).join("");
+    const meansMarkup = groups.map(group => `<circle cx="${sx(group.value).toFixed(1)}" cy="${sy(group.meanCm).toFixed(1)}" r="5.2" class="residual-mean"><title>Group mean ${group.meanCm >= 0 ? "+" : ""}${fmt(group.meanCm,2)} cm · ${group.count} shots</title></circle>`).join("");
+    return `<figure class="residual-chart-card">
+      <figcaption><strong>${escapeHtml(title)}</strong><small>Predicted − measured landing distance</small></figcaption>
+      <svg class="residual-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">
+        <line x1="${pad.left}" y1="${zeroY.toFixed(1)}" x2="${width-pad.right}" y2="${zeroY.toFixed(1)}" class="residual-zero"/>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height-pad.bottom}" class="residual-axis"/>
+        <line x1="${pad.left}" y1="${height-pad.bottom}" x2="${width-pad.right}" y2="${height-pad.bottom}" class="residual-axis"/>
+        <text x="${pad.left-8}" y="${sy(yMax)+4}" text-anchor="end" class="residual-tick">+${fmt(yMax,0)}</text>
+        <text x="${pad.left-8}" y="${zeroY+4}" text-anchor="end" class="residual-tick">0</text>
+        <text x="${pad.left-8}" y="${sy(-yMax)+4}" text-anchor="end" class="residual-tick">−${fmt(yMax,0)}</text>
+        <text x="15" y="${height/2}" transform="rotate(-90 15 ${height/2})" text-anchor="middle" class="residual-axis-label">error (cm)</text>
+        ${xTicks.map(value => `<g><line x1="${sx(value)}" y1="${height-pad.bottom}" x2="${sx(value)}" y2="${height-pad.bottom+5}" class="residual-axis"/><text x="${sx(value)}" y="${height-pad.bottom+19}" text-anchor="middle" class="residual-tick">${key === "rawSpeed" ? Math.round(value) : `${fmt(value,0)}°`}</text></g>`).join("")}
+        <text x="${(pad.left+width-pad.right)/2}" y="${height-5}" text-anchor="middle" class="residual-axis-label">${escapeHtml(xLabel)}</text>
+        ${meansPath ? `<path d="${meansPath}" class="residual-mean-line"/>` : ""}
+        ${pointMarkup}${meansMarkup}
+      </svg>
+      <div class="residual-legend"><span><i class="residual-point-key"></i>shot</span><span><i class="residual-mean-key"></i>group mean</span></div>
+    </figure>`;
+  }
+
+  function guidedResidualDiagnosticsMarkup(result) {
+    const rows = (result.residualRows || []).filter(row => Number.isFinite(row?.distanceErrorM));
+    if (!rows.length) return "";
+    const diagnostics = result.distanceDiagnostics || GuidedCalibration?.summarizeDistanceResiduals?.(rows) || null;
+    const biasCm = diagnostics?.meanErrorM == null ? null : diagnostics.meanErrorM * 100;
+    const elevTrendCmPer10 = diagnostics?.elevationTrendMPerDeg == null ? null : diagnostics.elevationTrendMPerDeg * 1000;
+    const speedTrendCmPer100 = diagnostics?.speedTrendMPerRaw == null ? null : diagnostics.speedTrendMPerRaw * 10000;
+    return `<section class="fit-diagnostics">
+      <div class="fit-diagnostics-heading"><div><h4>Fit diagnostics</h4><p>Look for structure rather than only RMSE. Random scatter suggests shot-to-shot variation; a repeatable slope with elevation or speed suggests model mismatch.</p></div><button id="guidedDownloadResidualsBtn" class="button ghost" type="button">Download residuals CSV</button></div>
+      <div class="fit-diagnostic-stats">
+        <div><span>Mean bias</span><strong>${biasCm == null ? "—" : `${biasCm >= 0 ? "+" : ""}${fmt(biasCm,2)} cm`}</strong></div>
+        <div><span>Elevation trend</span><strong>${elevTrendCmPer10 == null ? "—" : `${elevTrendCmPer10 >= 0 ? "+" : ""}${fmt(elevTrendCmPer10,2)} cm / 10°`}</strong></div>
+        <div><span>Speed trend</span><strong>${speedTrendCmPer100 == null ? "—" : `${speedTrendCmPer100 >= 0 ? "+" : ""}${fmt(speedTrendCmPer100,2)} cm / 100 raw`}</strong></div>
+        <div><span>Max |error|</span><strong>${result.distanceMaxAbsM == null ? "—" : `${fmt(result.distanceMaxAbsM * 100,2)} cm`}</strong></div>
+      </div>
+      <div class="residual-chart-grid">
+        ${guidedResidualChartSvg(rows, "elevationDeg", "Residual by elevation", "elevation")}
+        ${guidedResidualChartSvg(rows, "rawSpeed", "Residual by wheel input", "raw wheel input")}
+      </div>
+      <div class="pitch-geometry-note"><strong>Elevation-pivot hypothesis</strong><p>The current fit assumes the launch point stays fixed while only the launch angle changes. If the elevation pivot is behind the nozzle, the nozzle itself rises and moves slightly backward as elevation increases. For a horizontal pivot-to-nozzle offset <em>d</em>, a simple rigid-head model gives Δz = d·sin(θ) and Δx = d·(cos(θ) − 1) relative to 0°. A systematic residual pattern with elevation is evidence that this geometry should be fitted explicitly; random scatter is not.</p></div>
+    </section>`;
+  }
+
+  function downloadGuidedResiduals() {
+    const result = guidedState().lastResult;
+    const rows = (result?.residualRows || []).filter(row => Number.isFinite(row?.distanceErrorM));
+    if (!rows.length) { toast("No residual data to download"); return; }
+    const header = ["raw_speed","elevation_deg","measured_distance_cm","predicted_distance_cm","error_cm","measured_net_clearance_cm","predicted_net_clearance_cm","clearance_error_cm"];
+    const body = rows.map(row => [
+      row.rawSpeed,
+      row.elevationDeg,
+      row.distanceM == null ? "" : row.distanceM * 100,
+      row.predictedDistanceM == null ? "" : row.predictedDistanceM * 100,
+      row.distanceErrorM == null ? "" : row.distanceErrorM * 100,
+      row.netClearanceM == null ? "" : row.netClearanceM * 100,
+      row.predictedClearanceM == null ? "" : row.predictedClearanceM * 100,
+      row.clearanceErrorM == null ? "" : row.clearanceErrorM * 100,
+    ].map(value => typeof value === "number" ? Number(value.toFixed(6)) : value).join(","));
+    protocolDebugDownload("nova-calibration-residuals.csv", [header.join(","), ...body].join("\n"), "text/csv");
+    toast("Calibration residuals downloaded");
   }
 
   function renderGuidedResult() {
@@ -4559,9 +4694,11 @@
         ${result.speedModel ? `<p class="fit-equation">v = ${fmt(result.speedModel.interceptMps,4)} + ${fmt(result.speedModel.slopeMpsPerRaw,7)} × raw <span>m/s · profile RMSE ${fmt((result.speedModelRmseMps || 0) * 1000,1)} mm/s</span></p>` : ""}
         ${result.speedMap.map(p => `<div><span>${Math.round(p.raw)}</span><strong>${fmt(p.speedMps,3)} m/s</strong><small>${fmt(p.speedMps * 3.6,2)} km/h</small></div>`).join("")}
       </div>
+      ${guidedResidualDiagnosticsMarkup(result)}
       <button id="guidedApplyResultBtn" class="button primary wide" type="button">Apply calibration to Robot Studio</button>`;
     els.guidedResults.hidden = false;
     $("guidedApplyResultBtn")?.addEventListener("click", applyGuidedCalibrationResult);
+    $("guidedDownloadResidualsBtn")?.addEventListener("click", downloadGuidedResiduals);
   }
 
   function applyGuidedCalibrationResult() {
@@ -6035,6 +6172,243 @@
     updatePlayButton();
     renderCalibrationTestShotPanel();
     renderGuidedCalibration();
+    renderProtocolDebugState();
+  }
+
+  const PROTOCOL_DEBUG_STORAGE_KEY = "ttstudio.protocolDebugScript.v1";
+  const PROTOCOL_DEBUG_EXAMPLE = `# Safe example: status + heartbeat only.
+# Uploading or editing a script never sends anything until Run script is pressed.
+MARK Read state before heartbeat
+STATUS
+WAIT 500ms
+MARK Send heartbeat and wait for its response
+HEARTBEAT
+WAIT 500ms
+STATUS
+`;
+
+  function protocolDebugDownload(filename, text, type = "text/plain") {
+    const blob = new Blob([String(text || "")], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function appendProtocolDebugLog(message, kind = "info") {
+    const stamp = new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 });
+    const marker = kind === "error" ? "!!" : kind === "tx" ? "TX" : kind === "rx" ? "RX" : kind === "wait" ? "… " : kind === "mark" ? "──" : "· ";
+    protocolDebugLogLines.push(`${stamp} ${marker} ${message}`);
+    if (protocolDebugLogLines.length > 400) protocolDebugLogLines = protocolDebugLogLines.slice(-400);
+    if (els.protocolDebugExecutionLog) {
+      els.protocolDebugExecutionLog.textContent = protocolDebugLogLines.join("\n");
+      els.protocolDebugExecutionLog.scrollTop = els.protocolDebugExecutionLog.scrollHeight;
+    }
+  }
+
+  function renderProtocolDebugState() {
+    if (!els.protocolDebugDialog) return;
+    const snapshot = robot?.snapshot?.() || { connected: false, authenticated: false };
+    const ready = Boolean(snapshot.connected && snapshot.authenticated);
+    els.protocolDebugConnectionBadge.textContent = ready ? "Connected" : snapshot.connected ? "Connecting" : "Disconnected";
+    els.protocolDebugConnectionBadge.className = `status-badge ${ready ? "valid" : "neutral"}`;
+    els.protocolDebugRunBtn.disabled = protocolDebugRunning || !ready;
+    els.protocolDebugRunSelectionBtn.disabled = protocolDebugRunning || !ready;
+    els.protocolDebugStopScriptBtn.disabled = !protocolDebugRunning;
+    els.protocolDebugStopNovaBtn.disabled = !ready;
+    if (!protocolDebugRunning) els.protocolDebugRunState.textContent = ready ? "Ready" : "Connect Nova first";
+  }
+
+  function validateProtocolDebugScript({ notify = false } = {}) {
+    if (!ProtocolDebug) {
+      els.protocolDebugParseStatus.textContent = "Protocol debug parser did not load.";
+      els.protocolDebugParseStatus.className = "protocol-debug-parse-status error";
+      return null;
+    }
+    const parsed = ProtocolDebug.parseScript(els.protocolDebugEditor.value);
+    if (parsed.errors.length) {
+      const first = parsed.errors[0];
+      els.protocolDebugParseStatus.textContent = `${parsed.errors.length} error${parsed.errors.length === 1 ? "" : "s"}. Line ${first.lineNumber}: ${first.message}`;
+      els.protocolDebugParseStatus.className = "protocol-debug-parse-status error";
+      els.protocolDebugTimeline.textContent = "Fix the script errors before running.";
+      if (notify) toast(`Debug script: line ${first.lineNumber} · ${first.message}`);
+      return parsed;
+    }
+    const summary = ProtocolDebug.summarize(parsed.actions);
+    const waitSeconds = summary.waitMs / 1000;
+    els.protocolDebugParseStatus.textContent = `${summary.total} action${summary.total === 1 ? "" : "s"} · ${summary.send} raw TX · ${summary.request} request${summary.request === 1 ? "" : "s"} · ${summary.wait} wait${summary.wait === 1 ? "" : "s"}`;
+    els.protocolDebugParseStatus.className = "protocol-debug-parse-status ok";
+    els.protocolDebugTimeline.textContent = `Explicit waits: ${waitSeconds.toFixed(waitSeconds < 10 ? 2 : 1)} s · response waits add only as needed.`;
+    if (notify) toast("Debug script is valid");
+    return parsed;
+  }
+
+  function openProtocolDebugger() {
+    if (!els.protocolDebugEditor.value) {
+      try { els.protocolDebugEditor.value = localStorage.getItem(PROTOCOL_DEBUG_STORAGE_KEY) || PROTOCOL_DEBUG_EXAMPLE; }
+      catch (_) { els.protocolDebugEditor.value = PROTOCOL_DEBUG_EXAMPLE; }
+    }
+    validateProtocolDebugScript();
+    renderProtocolDebugState();
+    els.protocolDebugDialog.showModal();
+  }
+
+  function protocolDebugWait(ms, token) {
+    return new Promise((resolve, reject) => {
+      const started = performance.now();
+      const tick = () => {
+        if (token !== protocolDebugRunToken) { reject(new Error("Script stopped")); return; }
+        const remaining = ms - (performance.now() - started);
+        if (remaining <= 0) { resolve(); return; }
+        setTimeout(tick, Math.min(remaining, 50));
+      };
+      tick();
+    });
+  }
+
+  async function runProtocolDebugParsed(parsed, runLabel = "script") {
+    if (!parsed || parsed.errors.length || !parsed.actions.length) return;
+    if (!robot?.connected || !robot.authenticated) { toast("Connect Nova before running a debug script."); return; }
+
+    protocolDebugRunToken += 1;
+    const token = protocolDebugRunToken;
+    protocolDebugRunning = true;
+    protocolDebugLogLines = [];
+    els.protocolDebugExecutionLog.textContent = "";
+    els.protocolDebugRunState.textContent = "Running…";
+    renderProtocolDebugState();
+    const pauseHeartbeat = Boolean(els.protocolDebugPauseHeartbeat.checked);
+    if (pauseHeartbeat) {
+      robot.stopHeartbeat();
+      appendProtocolDebugLog("Automatic 10 s app heartbeat paused for this run", "mark");
+    }
+    appendProtocolDebugLog(`Started ${runLabel}: ${parsed.actions.length} action${parsed.actions.length === 1 ? "" : "s"}`, "mark");
+
+    try {
+      for (let index = 0; index < parsed.actions.length; index += 1) {
+        if (token !== protocolDebugRunToken) throw new Error("Script stopped");
+        const action = parsed.actions[index];
+        els.protocolDebugRunState.textContent = `Running ${index + 1}/${parsed.actions.length} · line ${action.lineNumber}`;
+        if (action.type === "mark") {
+          appendProtocolDebugLog(action.text, "mark");
+        } else if (action.type === "wait") {
+          appendProtocolDebugLog(`WAIT ${action.durationMs} ms`, "wait");
+          await protocolDebugWait(action.durationMs, token);
+        } else if (action.type === "send") {
+          appendProtocolDebugLog(`line ${action.lineNumber} · TX ${action.hex}`, "tx");
+          await robot.sendRaw(Protocol.bytesFromHex(action.hex), { label: `debug line ${action.lineNumber}` });
+        } else if (action.type === "request") {
+          appendProtocolDebugLog(`line ${action.lineNumber} · REQ 0x${action.expectedOpcode.toString(16).padStart(2, "0")} · ${action.hex}`, "tx");
+          const frame = await robot.requestRaw(Protocol.bytesFromHex(action.hex), action.expectedOpcode, action.timeoutMs, action.label || `debug line ${action.lineNumber}`);
+          appendProtocolDebugLog(`line ${action.lineNumber} · response ${frame.hex}`, "rx");
+        }
+      }
+      if (token === protocolDebugRunToken) {
+        els.protocolDebugRunState.textContent = "Completed";
+        appendProtocolDebugLog(`${runLabel} completed`, "mark");
+        toast(`${runLabel === "script" ? "Debug script" : "Debug selection"} completed`);
+      }
+    } catch (error) {
+      if (token === protocolDebugRunToken) {
+        els.protocolDebugRunState.textContent = error.message === "Script stopped" ? "Stopped" : "Failed";
+        appendProtocolDebugLog(error.message, error.message === "Script stopped" ? "mark" : "error");
+        if (error.message !== "Script stopped") toast(error.message);
+      }
+    } finally {
+      if (pauseHeartbeat && robot?.connected && robot.authenticated) {
+        robot.startHeartbeat();
+        appendProtocolDebugLog("Automatic app heartbeat restored", "mark");
+      }
+      if (token === protocolDebugRunToken) protocolDebugRunning = false;
+      renderProtocolDebugState();
+    }
+  }
+
+  async function runProtocolDebugScript() {
+    const parsed = validateProtocolDebugScript({ notify: true });
+    await runProtocolDebugParsed(parsed, "script");
+  }
+
+  function protocolDebugSelectionSource() {
+    const editor = els.protocolDebugEditor;
+    const start = editor.selectionStart ?? 0;
+    const end = editor.selectionEnd ?? start;
+    if (end > start) return editor.value.slice(start, end);
+    const lineStart = editor.value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const nextBreak = editor.value.indexOf("\n", start);
+    const lineEnd = nextBreak < 0 ? editor.value.length : nextBreak;
+    return editor.value.slice(lineStart, lineEnd);
+  }
+
+  async function runProtocolDebugSelection() {
+    const source = protocolDebugSelectionSource();
+    const parsed = ProtocolDebug?.parseScript(source);
+    if (!parsed) return;
+    if (parsed.errors.length) {
+      const first = parsed.errors[0];
+      toast(`Selection: ${first.message}`);
+      return;
+    }
+    if (!parsed.actions.length) { toast("Select a command or place the cursor on a command line."); return; }
+    await runProtocolDebugParsed(parsed, "line / selection");
+  }
+
+  function stopProtocolDebugScript() {
+    if (!protocolDebugRunning) return;
+    protocolDebugRunToken += 1;
+    protocolDebugRunning = false;
+    els.protocolDebugRunState.textContent = "Stopped";
+    appendProtocolDebugLog("Script stopped by user", "mark");
+    renderProtocolDebugState();
+  }
+
+  async function stopNovaFromProtocolDebugger() {
+    if (!robot?.connected || !robot.authenticated) return;
+    stopProtocolDebugScript();
+    try {
+      els.protocolDebugRunState.textContent = "Stopping Nova…";
+      await robot.stopAndWaitFree();
+      els.protocolDebugRunState.textContent = "Nova Ready";
+      appendProtocolDebugLog("Nova STOP sent; robot returned Ready", "mark");
+    } catch (error) {
+      els.protocolDebugRunState.textContent = "Stop failed";
+      appendProtocolDebugLog(`STOP failed: ${error.message}`, "error");
+      toast(error.message);
+    }
+    renderProtocolDebugState();
+  }
+
+  function loadProtocolDebugFile(file) {
+    if (!file) return;
+    if (file.size > 200000) { toast("Debug script is too large (200 kB maximum)."); return; }
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      els.protocolDebugEditor.value = String(reader.result || "");
+      try { localStorage.setItem(PROTOCOL_DEBUG_STORAGE_KEY, els.protocolDebugEditor.value); } catch (_) {}
+      validateProtocolDebugScript();
+      toast(`Loaded ${file.name}`);
+    });
+    reader.addEventListener("error", () => toast("Could not read debug script."));
+    reader.readAsText(file);
+  }
+
+  function downloadProtocolDebugLog() {
+    const combined = [
+      "# Table Tennis Robot Studio protocol debug log",
+      `# ${new Date().toISOString()}`,
+      "",
+      "## Script execution",
+      protocolDebugLogLines.join("\n") || "(empty)",
+      "",
+      "## BLE protocol log",
+      robotLogLines.join("\n") || "(empty)",
+      "",
+    ].join("\n");
+    protocolDebugDownload(`nova-debug-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`, combined);
   }
 
   function appendRobotLog(detail) {
@@ -6170,6 +6544,22 @@
     els.robotConnectBtn.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotStatusBtn.addEventListener("click", () => navigateApp("robot", { push: true }));
     els.robotDiagnosticsBtn?.addEventListener("click", () => { updateRobotUI(); els.robotDialog.showModal(); });
+    els.protocolDebugBtn?.addEventListener("click", openProtocolDebugger);
+    els.closeProtocolDebugBtn?.addEventListener("click", () => { stopProtocolDebugScript(); els.protocolDebugDialog.close(); });
+    els.protocolDebugExampleBtn?.addEventListener("click", () => { els.protocolDebugEditor.value = PROTOCOL_DEBUG_EXAMPLE; try { localStorage.setItem(PROTOCOL_DEBUG_STORAGE_KEY, els.protocolDebugEditor.value); } catch (_) {} validateProtocolDebugScript(); });
+    els.protocolDebugClearBtn?.addEventListener("click", () => { els.protocolDebugEditor.value = ""; try { localStorage.removeItem(PROTOCOL_DEBUG_STORAGE_KEY); } catch (_) {} validateProtocolDebugScript(); });
+    els.protocolDebugDownloadBtn?.addEventListener("click", () => protocolDebugDownload("nova-debug-script.nova", els.protocolDebugEditor.value));
+    els.protocolDebugDownloadLogBtn?.addEventListener("click", downloadProtocolDebugLog);
+    els.protocolDebugValidateBtn?.addEventListener("click", () => validateProtocolDebugScript({ notify: true }));
+    els.protocolDebugRunSelectionBtn?.addEventListener("click", () => { void runProtocolDebugSelection(); });
+    els.protocolDebugRunBtn?.addEventListener("click", () => { void runProtocolDebugScript(); });
+    els.protocolDebugStopScriptBtn?.addEventListener("click", stopProtocolDebugScript);
+    els.protocolDebugStopNovaBtn?.addEventListener("click", () => { void stopNovaFromProtocolDebugger(); });
+    els.protocolDebugFileInput?.addEventListener("change", event => { loadProtocolDebugFile(event.target.files?.[0]); event.target.value = ""; });
+    els.protocolDebugEditor?.addEventListener("input", () => { try { localStorage.setItem(PROTOCOL_DEBUG_STORAGE_KEY, els.protocolDebugEditor.value); } catch (_) {} validateProtocolDebugScript(); });
+    els.protocolDebugEditor?.addEventListener("keydown", event => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void runProtocolDebugSelection(); }
+    });
     els.closeRobotDialogBtn.addEventListener("click", () => els.robotDialog.close());
     els.robotRefreshStatusBtn.addEventListener("click", () => { void refreshRobotStatus(); });
     els.robotDisconnectBtn.addEventListener("click", () => { void disconnectRobotFromDialog(); });
