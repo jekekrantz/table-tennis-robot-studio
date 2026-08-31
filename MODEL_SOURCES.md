@@ -68,43 +68,20 @@ integrator. The default step is 0.004 s and is user-adjustable.
 
 ## Nova launch-speed and spin calibration
 
-The default raw-motor conversion combines two empirical sources:
+The launch geometry is not inferred from the external speed data. It uses the measured fixed chain documented in `README.md` and `CALIBRATION_REFIT.md`.
 
-1. Local no-spin trajectory measurements, evaluated with the current geometry
-   constraint (nozzle height 0.225 m, base-back to nozzle 0.265 m):
-   raw 2025 -> 5.04 m/s, raw 2167 -> 5.39 m/s, raw 2388 -> 5.79 m/s.
-2. Spinsight measurements for Nova speed/spin settings. The published table reports
-   in-flight km/h and rps, so the speed values are not treated as nozzle-exit speed
-   directly. A least-squares overlap correction is first fit against the local
-   launch-speed observations.
-
-The corrected Spinsight speed observations and the local launch-speed observations
-are then fit with one first-order model rather than interpolated point-to-point:
+The operational raw-wheel-input -> launch-speed relation is one two-parameter affine model fitted to the local no-spin ground-distance calibration:
 
 ```text
-v_exit [m/s] = 2.431958 + 0.001333941 * raw_wheel_input
-RMSE = 0.160589 m/s over the 21 combined source observations
+v_exit [m/s] = -0.27588934 + 0.00239366039 * raw_wheel_input
+calibrated raw range = 2000..3000
 ```
 
-First-, second-, and third-order fits were compared; their RMSE values were
-approximately 0.1606, 0.1595, and 0.1590 m/s respectively. The negligible reduction
-from extra polynomial terms did not justify the added curvature, so the first-order
-model is used. Guided calibration likewise regularizes its fitted no-spin speed
-points to a straight line.
+No piecewise speed map or per-raw latent speed parameters are used. Outside the measured range the same line is extrapolated and the UI warns that it is extrapolation.
 
-Spin remains based on the published speed-dependent max-spin-setting / max-rps table.
-At any fixed Nova speed, rps is modeled linearly with the upper-minus-lower wheel
-command difference.
+The Spinsight-derived table is retained only as an empirical **spin-capacity** reference versus Nova's native speed-setting axis. Its raw-setting conversion does not replace or bend the global launch-speed line.
 
-Protocol setting formulas and Spinsight table:
-
-- https://github.com/olanga/nova/wiki/General-information
-- https://github.com/olanga/nova/wiki/Spinsight-measurements-with-Nova-S-Pro
-- Independent high-spin cross-check (7500 / 500 wheels ~= 67 rps):
-  https://www.tabletennisdaily.com/forum/topics/pongbot-nova-s-pro-owners-review-and-discussion-thread.36322/page-12
-
-This is an empirical command-to-ball model, not a manufacturer calibration. Robot-to-robot
-variation, wheel contamination, ball wear and measurement geometry can shift it.
+Guided calibration uses the fixed pivot-chain release point, distance/incidence-dependent relative uncertainty and iterative MAD rejection of standardized landing-distance residuals before the affine coefficients are finalized.
 
 ## Remaining limitations
 

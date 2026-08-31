@@ -12,11 +12,7 @@ including:
 - https://www.tabletennisdaily.com/forum/topics/pongbot-nova-s-pro-owners-review-and-discussion-thread.36322/
 - Pongbot's public Nova S Pro documentation.
 
-No third-party source tree or dependency is vendored in this repository. Protocol
-UUIDs, packet values, mathematical constants, and observed wire-format facts are
-retained for interoperability. Contributors should not copy third-party implementation
-code into this repository unless its license is identified and compatible and its
-required notices are preserved.
+Except for the small QR generator documented below, no third-party implementation source tree is vendored. Protocol UUIDs, packet values, mathematical constants, and observed wire-format facts are retained for interoperability. Contributors should not add third-party implementation code unless its license is identified and compatible and all required notices are preserved.
 
 The trajectory model also cites scientific/standards sources in `MODEL_SOURCES.md`;
 those references describe the model and do not bundle the referenced publications.
@@ -24,3 +20,11 @@ those references describe the model and do not bundle the referenced publication
 Pongbot/PONGBOT and other product names may be trademarks of their respective owners.
 This is an independent community project and is not affiliated with or endorsed by
 Pongbot.
+
+## Vendored QR generator
+
+`vendor/qrcode.min.js` contains the **QRCode for JavaScript** implementation by
+Kazuhiko Arase (copyright 2009), as distributed inside the `qrcode-terminal`
+package. That QRCode component is MIT-licensed. This project adds a small browser/SVG
+wrapper so drill QR sharing works fully offline and does not depend on a CDN at
+runtime. See `vendor/QRCode-LICENSE.txt` for the retained license notice.

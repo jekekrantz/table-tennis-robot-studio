@@ -84,9 +84,35 @@ Then open `http://localhost:8080` in Chrome on the Android device.
 The app is static and can be served directly from the repository root. `.nojekyll`
 is included so GitHub Pages serves the files as-is.
 
+Production loads a generated **`runtime.bundle.js`**, containing the JavaScript runtime
+in one versioned file. The separate source files remain in the repository for development
+and tests. This makes deployment much less vulnerable to a new HTML/app shell being mixed
+with missing or stale runtime modules.
+
 For the intended repository, configure GitHub Pages to deploy the `main` branch from
-`/ (root)`. No ChatGPT/GitHub connection is required; files can be uploaded manually
-or pushed with normal Git tooling.
+`/ (root)`. **Deploy the complete release together; do not upload only a hand-picked set
+of files such as `index.html` and `app.js`.**
+
+The safest update from a local checkout is:
+
+```bash
+python3 scripts/build_runtime_bundle.py --check
+bash scripts/preflight.sh
+git add -A
+git status
+git commit -m "Update Table Tennis Robot Studio"
+git push
+```
+
+`git add -A` is intentional: it adds newly introduced files and removes obsolete ones in
+the same commit. The included GitHub Actions workflow runs the repository preflight on
+pushes to `main`. `RELEASE_MANIFEST.sha256` also records the exact release file set and
+can be verified locally with `sha256sum -c RELEASE_MANIFEST.sha256`.
+
+If the deployed site reports that its runtime did not load, compare the repository with
+the release ZIP. The root must contain `runtime.bundle.js` and `BUILD_ID`, and the bundle
+query in `index.html` must use that build ID. Wait for GitHub Pages to finish deploying,
+then reload. Clearing browser site data should not be the first troubleshooting step.
 
 ## Connect and run a drill
 
@@ -107,17 +133,16 @@ The guided calibration supports two experiment geometries. **On table** uses the
 
 ## Robot geometry and calibration
 
-The current working default geometry is:
+The launch point is a fixed measured mechanical chain referenced from the **back of the robot base**:
 
 ```text
-nozzle height above support surface: 0.225 m
-back of robot base -> nozzle:         0.265 m
+base back -> yaw pivot:    0.242 m
+yaw pivot -> pitch pivot: 0.075 m
+pitch pivot -> wheels:    0.075 m
+yaw pivot height:         0.240 m above the support surface
 ```
 
-These values are calibration estimates rather than manufacturer-specified dimensions.
-The 22.5 cm height is treated as the current geometry constraint; the 26.5 cm horizontal
-offset is the best-fit value from the local no-spin landing measurements under that
-constraint. Both remain editable/calibratable.
+These dimensions are treated as exact project measurements for now and are not calibration parameters. Aim/yaw rotates the two links after the yaw pivot; elevation rotates the final pitch-to-wheel link, so the physical release point moves with both aim and elevation.
 
 The editor uses physical inputs:
 
@@ -126,26 +151,24 @@ The editor uses physical inputs:
 - elevation: degrees
 - aim: degrees
 
-The default motor conversion uses a single linear raw-wheel-input → nozzle-exit-speed
-model. It is fit to the local no-spin trajectory measurements at raw inputs 2025,
-2167 and 2388 (5.04, 5.39 and 5.79 m/s) together with the published Spinsight Nova
-speed data after an overlap correction from in-flight speed to nozzle-exit speed.
-For the current default data the fit is approximately:
+Raw wheel input -> launch speed is deliberately **one global affine model** with two fitted parameters only:
 
 ```text
-v_exit [m/s] = 2.43196 + 0.00133394 * raw_wheel_input
-RMSE over the combined source points = 0.1606 m/s
+v_exit [m/s] = intercept + slope * raw_wheel_input
 ```
 
-The low-order fit deliberately smooths the quantization/noise in the Spinsight table
-instead of interpolating through every reported speed. Spin conversion remains
-speed-dependent and uses the Spinsight max-spin table; at a fixed Nova speed the
-wheel-difference → rps relation is linear. Guided calibration fits its collected
-no-spin speed points to one straight line before applying them, and those local
-results are then combined with the external Spinsight prior.
+The current fixed-geometry robust fit of the visible 2026-08-28 flat-ground measurements is approximately:
 
-Real Play currently permits physical head orientation types `0` and `4`. Side/mixed
-orientations remain blocked until their physical spin axes are verified.
+```text
+v_exit [m/s] = -0.27588934 + 0.00239366039 * raw_wheel_input
+measured raw range = 2000..3000
+```
+
+The measured range is used only to mark extrapolation; it does not create extra knots or clamp the line. Guided calibration fits the intercept and slope jointly across all active observations. Distance uncertainty is weighted approximately as predicted distance divided by the sine of predicted ground-incidence angle, and iterative MAD rejection is applied to standardized residuals. Mechanical dimensions stay fixed.
+
+A **measurement offset** can be applied before fitting. The convention is `corrected distance = entered distance + offset`; for example, if a tape's zero is 10 cm behind the back of the base, enter `-10 cm`.
+
+Real Play currently permits physical head orientation types `0` and `4`. Side/mixed orientations remain blocked until their physical spin axes are verified.
 
 ## Default training library
 
@@ -246,33 +269,38 @@ The core offline test can also be run directly:
 node selftest.js
 ```
 
-The GitHub Actions workflow runs the same syntax and mock checks on pushes and pull
-requests.
+For a full local regression pass, run `bash scripts/preflight.sh`.
 
 ## Repository layout
 
 ```text
 index.html                 App shell
 styles.css                 App styles
-app.js                     Drill editor, calibration, trajectory and orchestration
+app.js                     Drill editor, runtime, calibration and orchestration
+robot-geometry.js          Fixed measured base/yaw/pitch/wheel geometry
+launch-model.js            One global affine raw-input → launch-speed model
+guided-calibration.js      Weighted robust calibration solver
 pongbot-protocol.js        Protocol encoding/decoding and parameter conversion
-pongbot-ble.js             Web Bluetooth transport and Nova state machine
-selftest.js                Offline protocol/BLE integration test
+pongbot-ble.js             Web Bluetooth transport, telemetry and Nova state machine
+protocol-debug.js          Raw timed protocol-script parser/executor
+studio-features-core.js    Portable drills, AI/debug validation and serialization
+studio-features.js         Sharing, AI assistant and Guided Debug UI
+debug-advisor.js           Deterministic/optional backend debug-advisor abstraction
+debug-packs/               Importable bounded diagnostic experiment packs
+docs/                      Feature and interchange-format documentation
+vendor/                    Small vendored browser dependencies with licenses
+tools/                     Optional local development companions
+scripts/                   Local serving, tests and preflight helpers
 PROTOCOL.md                Packet-level protocol notes and provenance
 MODEL_SOURCES.md           Trajectory-model sources and assumptions
 TRAINING_LIBRARY.md         Default shot/drill presets and coaching references
 SECURITY.md                Safety/privacy guidance for contributors
-THIRD_PARTY_NOTICES.md     External references and provenance notes
-scripts/                   Local development and preflight helpers
-.github/workflows/         CI checks
+THIRD_PARTY_NOTICES.md     External references and vendored-component notices
 ```
 
 ## Licensing and provenance
 
-The repository is licensed under GPL-3.0. No third-party source tree or runtime
-dependency is vendored. Protocol interoperability facts were informed by direct
-hardware work and public community references; see `THIRD_PARTY_NOTICES.md` and
-`PROTOCOL.md`.
+The repository is licensed under GPL-3.0. A small MIT-licensed QRCode component is vendored under `vendor/` so QR drill sharing works offline; its license is retained there. Protocol interoperability facts were informed by direct hardware work and public community references; see `THIRD_PARTY_NOTICES.md` and `PROTOCOL.md`.
 
 Pongbot/PONGBOT and other product names may be trademarks of their respective owners.
 This is an independent community project and is not affiliated with or endorsed by
@@ -287,7 +315,19 @@ The graph toolbar includes **Live tuning**, a non-destructive player-preference 
 - **Spin** uses 5% steps from -100% to +300%. It scales spin magnitude while keeping exit speed fixed, then solves elevation to minimize landing shift. A no-spin shot remains no-spin.
 - **Speed** uses smaller 2% steps from -50% to +50%. It changes exit speed while keeping spin fixed, then solves elevation to minimize landing shift. Hardware/model speed limits still apply.
 
-The stored shot parameters stay unchanged. Preview uses the effective tuned shots, and Play applies the same modifiers independently to every ball in the compiled traversal, including balls reached through sub-drills. Because a Start packet is buffered by the Nova, changing a modifier during playback interrupts that packet, rebuilds the remaining already-sampled traversal with the new values, and switches the rest of the run to one-ball packets so subsequent edits affect the next ball.
+The stored shot parameters stay unchanged. Preview uses the effective tuned shots, and Play applies the same modifiers independently to every ball in the compiled traversal, including balls reached through sub-drills. Live changes are queued for the **next sequence buffer** instead of STOP/restarting the active buffer, so tuning does not deliberately insert a physical pause.
+
+Normal playback also crosses logical set boundaries when possible. A single Nova START may contain records from more than one set, up to the current conservative nine-record transport window. Ordinary set boundaries do not generate STOP/START. Inter-ball and between-set delays are encoded in the shot frequency field whenever the requested interval is within the known Nova range; a host-side wait/buffer boundary is used only when the requested delay cannot be represented there. The **Guided debug** tool contains bounded experiments for larger buffers, heartbeat behavior and attempting to append a second START while playback is active; normal playback stays conservative until those firmware-dependent behaviors are proven on hardware.
+
+## Drill sharing and AI-assisted editing
+
+Drills can be shared without accounts or a backend. **Share** can create a URL-fragment link, use the native device share sheet when available, render a locally generated QR code, or save a human-readable `.ttdrill` file. Opening a shared link or importing a file always shows a preview before creating an independent copy in **My drills**.
+
+The editor also provides **AI assist**. The default local assistant handles common table-tennis creation/edit requests offline. Advanced options support session-memory-only BYOK provider calls (the user supplies both provider model ID and key) and a first-class external-AI handoff: copy/download one self-contained request, use any preferred assistant, then paste/import the returned versioned drill. Every proposal is validated locally before Apply and never bypasses the normal drill compiler or robot-control path. Browser speech recognition is used for prompt transcription when available and only after the user taps the microphone button.
+
+## Guided protocol debugger
+
+Robot -> **Guided debug** runs one bounded diagnostic experiment at a time and records outgoing/incoming BLE traffic, timings, heartbeat events, connection changes and errors automatically. Human input is limited to physical observations such as whether the robot paused. The built-in adaptive tree starts with continuous-play questions: long START packets, heartbeat traffic, active-buffer append attempts and status traffic during playback. Sessions can be exported as JSON or copied as a compact ChatGPT handoff. Imported test packs are schema-checked and bounded before they can run.
 
 ## Protocol debugger
 
@@ -316,6 +356,6 @@ For fast iteration, select one or more lines in the editor and choose **Run line
 
 ### Calibration fit diagnostics
 
-Guided calibration now reports signed landing-distance residuals (`predicted - measured`) against both elevation and raw wheel input. The plots are intended to separate ordinary shot-to-shot scatter from systematic model error. Residuals can be downloaded as CSV for offline analysis.
+Guided calibration reports signed landing-distance residuals (`predicted - measured`) against both elevation and raw wheel input. It also exports the original entered distance, measurement offset, corrected distance, predicted distance, predicted incidence angle, per-shot uncertainty, standardized residual and MAD inclusion/rejection status as CSV.
 
-The current trajectory calibration assumes the launch point itself is fixed as elevation changes. If the physical head pivots behind the nozzle, that assumption can be checked from the elevation residual plot before adding more geometry parameters: for a simple horizontal pivot-to-nozzle offset `d`, the launch point changes by `Δz = d sin(θ)` and `Δx = d(cos(θ)-1)` relative to zero elevation.
+The release point used for every residual already comes from the fixed measured yaw/pitch/wheel pivot chain, so elevation and aim change the launch coordinates before free flight begins.

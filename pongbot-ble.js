@@ -75,6 +75,7 @@
         hex: bytes ? P.hex(bytes) : "",
       };
       this.dispatchEvent(new CustomEvent("log", { detail }));
+      this.dispatchEvent(new CustomEvent("telemetry", { detail: { ...detail, perfMs: typeof performance !== "undefined" ? performance.now() : Date.now() } }));
       if (direction === "error") console.error(`[Nova] ${message}`, detail.hex);
       else console.debug(`[Nova] ${message}`, detail.hex);
     }
@@ -284,6 +285,26 @@
         this.log(`STOP acknowledgement failed: ${error.message}; still polling state`, "warn");
       }
       return this.waitForFree(timeoutMs);
+    }
+
+    emergencyShutdown() {
+      // Browser page-exit handlers cannot reliably await BLE writes. Start a
+      // best-effort STOP immediately, then disconnect GATT and clear timers.
+      this.disconnectRequested = true;
+      this.stopHeartbeat();
+      try {
+        if (this.connected && this.authenticated && this.writeChar) {
+          const payload = P.toUint8(P.COMMANDS.stop);
+          if (typeof this.writeChar.writeValueWithoutResponse === "function") {
+            void this.writeChar.writeValueWithoutResponse(payload).catch(() => {});
+          } else if (typeof this.writeChar.writeValue === "function") {
+            void this.writeChar.writeValue(payload).catch(() => {});
+          }
+          this.log("Page closing: best-effort STOP queued", "tx", payload);
+        }
+      } catch (_) {}
+      try { if (this.device?.gatt?.connected) this.device.gatt.disconnect(); } catch (_) {}
+      this.forceDisconnect();
     }
 
     async disconnect({ stopFirst = true } = {}) {

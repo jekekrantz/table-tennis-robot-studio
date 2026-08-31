@@ -1,0 +1,9 @@
+# Table Tennis Robot Studio protocol-debug example
+# This script only queries status and sends the known heartbeat command.
+
+MARK before heartbeat
+STATUS
+WAIT 500ms
+HEARTBEAT
+WAIT 500ms
+STATUS

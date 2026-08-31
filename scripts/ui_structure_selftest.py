@@ -1,93 +1,202 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import re
+
 root = Path(__file__).resolve().parent.parent
 html = (root / "index.html").read_text(encoding="utf-8")
 app = (root / "app.js").read_text(encoding="utf-8")
+css = (root / "styles.css").read_text(encoding="utf-8")
+features = (root / "studio-features.js").read_text(encoding="utf-8")
+core = (root / "studio-features-core.js").read_text(encoding="utf-8")
+ble = (root / "pongbot-ble.js").read_text(encoding="utf-8")
 ids = set(re.findall(r'\bid="([^"]+)"', html))
-for expected in ["calibrationGuidedPanel","guidedPlacementTable","guidedPlacementGround","guidedDistanceInput","guidedNetHeightInput","guidedSaveNextBtn","guidedComputeBtn","guidedSpeedMinInput","guidedSpeedMaxInput","guidedFeedBtn","guidedRepeatCountInput","guidedNozzleXInput","liveTuningBtn","liveTuningDialog","tuningPaceValue","tuningClearanceValue","tuningSpinValue","tuningSpeedValue","resetLiveTuningBtn","builtInLibraryTab","myDrillsLibraryTab","libraryBreadcrumb","librarySearchInput","newFolderBtn","copyBuiltInBtn","moveDrillBtn","folderDialog","moveDrillDialog","libraryScreen","runScreen","editorScreen","robotScreen","mobileLibraryNavBtn","mobileRunNavBtn","mobileEditNavBtn","mobileRobotNavBtn","addNodeDialog","drillDetailsDialog","addNodeMenuBtn","runEditDrillBtn","editorRunBtn","robotDiagnosticsBtn","protocolDebugBtn","protocolDebugDialog","protocolDebugEditor","protocolDebugRunBtn","protocolDebugStopScriptBtn","protocolDebugStopNovaBtn","protocolDebugFileInput"]:
-    if expected not in ids: raise SystemExit(f"Missing guided calibration control: {expected}")
-for script in ("guided-calibration.js", "launch-model.js", "drill-adjustments.js", "protocol-debug.js", "app.js"):
-    if f'<script src="{script}"></script>' not in html: raise SystemExit(f"{script} is not loaded")
-if html.index("guided-calibration.js") > html.index("app.js"): raise SystemExit("guided-calibration.js must load before app.js")
-if html.index("launch-model.js") > html.index("app.js"): raise SystemExit("launch-model.js must load before app.js")
-if html.index("drill-adjustments.js") > html.index("app.js"): raise SystemExit("drill-adjustments.js must load before app.js")
-if html.index("protocol-debug.js") > html.index("app.js"): raise SystemExit("protocol-debug.js must load before app.js")
+
+# Core guided calibration / navigation / debug controls.
+for expected in [
+    "calibrationGuidedPanel", "guidedPlacementTable", "guidedPlacementGround",
+    "guidedDistanceInput", "guidedNetHeightInput", "guidedSaveNextBtn",
+    "guidedComputeBtn", "guidedSpeedMinInput", "guidedSpeedMaxInput",
+    "guidedFeedBtn", "guidedRepeatCountInput", "guidedNozzleXInput",
+    "guidedMeasurementOffsetInput", "guidedExportMeasurementsBtn",
+    "liveTuningBtn", "liveTuningDialog", "tuningPaceValue", "tuningClearanceValue",
+    "tuningSpinValue", "tuningSpeedValue", "resetLiveTuningBtn",
+    "builtInLibraryTab", "myDrillsLibraryTab", "libraryBreadcrumb", "librarySearchInput",
+    "newFolderBtn", "copyBuiltInBtn", "moveDrillBtn", "folderDialog", "moveDrillDialog",
+    "libraryScreen", "runScreen", "editorScreen", "robotScreen",
+    "mobileLibraryNavBtn", "mobileRunNavBtn", "mobileEditNavBtn", "mobileRobotNavBtn",
+    "addNodeDialog", "drillDetailsDialog", "addNodeMenuBtn", "runEditDrillBtn",
+    "editorRunBtn", "robotDiagnosticsBtn", "protocolDebugBtn", "protocolDebugDialog",
+    "protocolDebugEditor", "protocolDebugRunBtn", "protocolDebugStopScriptBtn",
+    "protocolDebugStopNovaBtn", "protocolDebugFileInput", "robotDialogContext",
+    "robotDialogConnectBtn",
+]:
+    if expected not in ids:
+        raise SystemExit(f"Missing required UI control: {expected}")
+
+# Production uses one generated runtime bundle so a partial GitHub Pages upload cannot
+# mix a new app shell with missing/old dependency files. Source files stay separate for
+# development/tests and scripts/build_runtime_bundle.py verifies bundle freshness.
+if not re.search(r'<script src="runtime\.bundle\.js\?v=[A-Za-z0-9._-]+" onerror="globalThis\.__TTRS_BUNDLE_LOAD_ERROR = true"></script>', html):
+    raise SystemExit("index.html must load the versioned runtime.bundle.js")
+for obsolete_script in (
+    "pongbot-protocol.js", "pongbot-ble.js", "robot-geometry.js", "launch-model.js",
+    "guided-calibration.js", "drill-adjustments.js", "protocol-debug.js",
+    "studio-features-core.js", "debug-advisor.js", "app.js", "vendor/qrcode.min.js",
+    "studio-features.js",
+):
+    if f'<script src="{obsolete_script}"></script>' in html:
+        raise SystemExit(f"production index must not load {obsolete_script} separately")
+if "deploy the complete release" not in html.lower():
+    raise SystemExit("runtime bundle fallback must explain incomplete deployments")
+
 for svg_id in ("poseSvg", "calibrationSideTrajectory", "tableDimensionSvg"):
-    if not re.search(rf'<svg id="{svg_id}"[^>]*hidden', html): raise SystemExit(f"{svg_id} must remain hidden")
-if 'value="base_back"' not in html: raise SystemExit("Ground calibration must expose the back-of-base distance reference")
-if 'value="26.5"' not in html: raise SystemExit("Guided calibration must default to 26.5 cm nozzle offset")
-if 'const DEFAULT_NOVA_NOZZLE_HEIGHT_M = 0.225;' not in app: raise SystemExit("Default nozzle height must be 22.5 cm")
-if 'pose: { x: 0.265, y: 0, yawDeg: 0 }' not in app: raise SystemExit("Default launch point must be 26.5 cm")
-for token in ('data-step-target="shotSpeedField"','data-step-delta="0.1"','data-step-target="shotSpinField"','data-step-delta="1"'):
-    if token not in app: raise SystemExit(f"Missing shot editor stepper control: {token}")
-if 'Predicted top view' not in app or 'topTrajectorySvg(prediction, 600, 280)' not in app:
-    raise SystemExit("Shot inspector must use the top-view landing visualization")
+    if not re.search(rf'<svg id="{svg_id}"[^>]*hidden', html):
+        raise SystemExit(f"{svg_id} must remain hidden")
+
+# Fixed measured geometry / base-back coordinate convention.
+for token in (
+    'value="base_back"',
+    'id="guidedNozzleXInput" type="number" step="0.1" value="0"',
+    'Base back from near edge',
+    'Measurement offset',
+):
+    if token not in html:
+        raise SystemExit(f"Missing base-back calibration convention: {token}")
+for token in (
+    'geometryReference: ROBOT_GEOMETRY_REFERENCE',
+    'pose: { x: 0, y: 0, yawDeg: 0 }',
+    'robotPose: { x: 0, y: 0, yawDeg: 0 }',
+    'x: clamp(els.drillRobotXInput.value, -1.5, 4.2, 0)',
+    'RobotGeometry.releasePoint',
+):
+    if token not in app:
+        raise SystemExit(f"Missing fixed-pivot/base-back model integration: {token}")
+for obsolete in (
+    'const DEFAULT_NOVA_NOZZLE_HEIGHT_M = 0.225;',
+    'pose: { x: 0.265, y: 0, yawDeg: 0 }',
+    'robotPose: { x: 0.265, y: 0, yawDeg: 0 }',
+):
+    if obsolete in app:
+        raise SystemExit(f"Obsolete fixed-nozzle convention remains: {obsolete}")
+
+# One global affine raw -> launch-speed model.
+for token in (
+    'Global speed line:', 'slopeMpsPerRaw', 'interceptMps',
+    'the same affine line is extrapolated',
+    'Global linear raw wheel input → launch speed',
+):
+    if token not in app:
+        raise SystemExit(f"Missing affine speed-model behavior: {token}")
+for forbidden in ('USER_SEED_SPEED_MAP', 'LOCAL_EXIT_SPEED_MAP', 'speedFromMap(', 'result.speedMap'):
+    if forbidden in app:
+        raise SystemExit(f"Piecewise speed model leaked into app.js: {forbidden}")
+
+# Calibration robustness / export.
+for token in (
+    "Robust fit diagnostics", "Residual by elevation", "Residual by wheel input",
+    "guidedDownloadResidualsBtn", "measurementSigmaM", "MAD-rejected",
+    "exportGuidedMeasurements", "measurementOffsetCm",
+):
+    if token not in app and token not in (root / "guided-calibration.js").read_text(encoding="utf-8"):
+        raise SystemExit(f"Missing robust calibration/export behavior: {token}")
+
+# Shot editor and semantic presentation.
+for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.1"',
+              'data-step-target="shotSpinField"', 'data-step-delta="1"',
+              'Predicted top view', 'topTrajectorySvg(prediction, 600, 280)',
+              'class="shot-parameter-stack"', 'class="field shot-parameter-row"'):
+    if token not in app:
+        raise SystemExit(f"Missing shot-editor behavior: {token}")
 if 'distanceTrajectorySvg(' in app:
     raise SystemExit("Obsolete one-dimensional landing-distance visualization remains")
-for token in ('class="shot-parameter-stack"','class="field shot-parameter-row"'):
-    if token not in app: raise SystemExit(f"Shot controls must be stacked into visible rows: {token}")
-if 'params: { speedMps: 5.97, spinRps: 0, elevationDeg: 12.5, aimDeg: 0 }' not in app:
-    raise SystemExit("New shot defaults must be a safe center no-spin ball")
-if 'Linear raw wheel input → launch speed' not in app:
-    raise SystemExit("Guided calibration result must expose the linear speed model")
-for token in ("Fit diagnostics", "Residual by elevation", "Residual by wheel input", "Elevation-pivot hypothesis", "guidedDownloadResidualsBtn"):
-    if token not in app: raise SystemExit(f"Missing calibration residual diagnostics: {token}")
-if 'supported linear exit-speed range' not in app:
-    raise SystemExit("Shot validation must use the linear exit-speed range")
-if 'hybridRange' in app:
-    raise SystemExit("Obsolete hybrid speed-range path remains in app.js")
+if 'params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 }' not in app:
+    raise SystemExit("New-shot default must use the re-solved safe center no-spin ball")
+
+# Continuous playback: no artificial STOP/START at ordinary logical set boundaries.
+for token in (
+    'function compilePlaybackWindow', 'NOVA_SEQUENCE_RECORD_LIMIT = 9', 'maxRecords = NOVA_SEQUENCE_RECORD_LIMIT', 'maxBatchSize = NOVA_SEQUENCE_RECORD_LIMIT',
+    'continuous sequence', 'Tuning queued for the next sequence buffer',
+    'avoids an artificial STOP/START', 'nextCarryDelay',
+):
+    if token not in app:
+        raise SystemExit(f"Missing continuous playback behavior: {token}")
+if 'playbackResponsiveTuning' in app:
+    raise SystemExit("Obsolete one-ball responsive tuning mode remains")
 for token in ("adjustedShotForLiveTuning", "tunedDelaySeconds", "Live tuning is active", "never stored inside a drill"):
-    if token not in app and token not in html: raise SystemExit(f"Missing live tuning integration: {token}")
-for token in ("applyTuningToShotList", "requestImmediateLiveRetune", "playbackResponsiveTuning", "maxBatchSize: playbackResponsiveTuning ? 1 : 6", "All balls · example"):
-    if token not in app: raise SystemExit(f"Missing all-ball/immediate live tuning behavior: {token}")
+    if token not in app and token not in html:
+        raise SystemExit(f"Missing live tuning integration: {token}")
 if 'Every ball, including balls from sub-drills' not in html:
     raise SystemExit("Live tuning dialog must explain all-ball scope")
 for token in ('LIVE_TUNING_STORAGE_KEY', 'saveLiveTuningPreference', 'loadLiveTuningPreference'):
-    if token not in app: raise SystemExit(f"Live tuning must persist outside drill storage: {token}")
-for token in ('data-tuning-key="speedPct" data-tuning-delta="-2"', 'data-tuning-key="speedPct" data-tuning-delta="2"', 'range −100% to +200%', 'range −100% to +300%'):
-    if token not in html: raise SystemExit(f"Missing expanded Live tuning UI: {token}")
+    if token not in app:
+        raise SystemExit(f"Live tuning must persist outside drill storage: {token}")
+
+# Connection friction / lifecycle safety / copy-on-edit.
+for token in (
+    'function requestRobotConnection', 'browserBluetoothInstructions',
+    'Connect once and the app will continue automatically', 'emergencyPageExit',
+    'robot?.emergencyShutdown?.()', 'Copy this drill to edit it?',
+):
+    if token not in app:
+        raise SystemExit(f"Missing low-friction connection/safety/edit behavior: {token}")
+for token in ('emergencyShutdown()', 'best-effort STOP queued'):
+    if token not in ble:
+        raise SystemExit(f"Missing BLE page-exit safety behavior: {token}")
+
+# Feature modules: sharing + AI + guided debugger.
+for token in (
+    'table-tennis-robot-studio/drill', 'makeShareUrl', 'parseShareHash',
+    'validateDebugPack', 'compactTelemetry', 'validateAdvisorResponse',
+):
+    if token not in core:
+        raise SystemExit(f"Missing feature-core primitive: {token}")
+for token in (
+    'Share drill', 'AI assist', 'Guided debug', 'Copy AI request', 'Show QR code',
+    'Import test pack JSON', 'Copy ChatGPT handoff', 'SpeechRecognition',
+    'promptRequestsFreshDrill', "proposalIntent==='create'", 'Create drill',
+):
+    if token not in features:
+        raise SystemExit(f"Missing integrated feature UI: {token}")
+
+# Library/navigation semantics.
 if 'libraryView = { root: "builtin", folderId: "builtin-root", query: "" };' not in app:
     raise SystemExit("Drill browser must start at the Built-in root")
-
 for name in (
-    "Drill: Forehand / backhand alternating",
-    "Drill: 2-2 forehand / backhand",
-    "Drill: Falkenberg",
-    "Drill: Three spots random",
-    "Shot: No-spin center",
-    "Shot: Heavy topspin center",
-    "Shot: Backspin center",
-    "Shot: Short underspin to forehand",
-    "Shot: Long wide topspin to backhand",
-    "Match: Short forehand underspin → wide recovery",
-    "Match: Short backhand underspin → forehand recovery",
-    "Match: Short receive → random long attack",
-    "Match: Backhand exchange → switch",
-    "Match: Weighted rally",
-    "Match: Random pattern mix",
+    "Drill: Forehand / backhand alternating", "Drill: 2-2 forehand / backhand",
+    "Drill: Falkenberg", "Drill: Three spots random", "Shot: No-spin center",
+    "Shot: Heavy topspin center", "Shot: Backspin center", "Shot: Short underspin to forehand",
+    "Shot: Long wide topspin to backhand", "Match: Short forehand underspin → wide recovery",
+    "Match: Short backhand underspin → forehand recovery", "Match: Short receive → random long attack",
+    "Match: Backhand exchange → switch", "Match: Weighted rally", "Match: Random pattern mix",
 ):
-    if name not in app: raise SystemExit(f"Missing built-in training preset: {name}")
+    if name not in app:
+        raise SystemExit(f"Missing built-in training preset: {name}")
 for legacy in ("Serve + third ball", "Two forehands then backhand", "Match-play mix"):
-    # Legacy names may appear only in the one-time migration marker, not as newly built drills.
-    if f'defaultDrill("{legacy}")' in app: raise SystemExit(f"Legacy built-in drill is still created: {legacy}")
-if '>Restore defaults</button>' in html: raise SystemExit("Built-in drills must not rely on a destructive Restore defaults action")
+    if f'defaultDrill("{legacy}")' in app:
+        raise SystemExit(f"Legacy built-in drill is still created: {legacy}")
+if '>Restore defaults</button>' in html:
+    raise SystemExit("Built-in drills must not rely on a destructive Restore defaults action")
 for token in ("Built-in", "My drills", "Copy to My drills", "New folder"):
-    if token not in html: raise SystemExit(f"Missing separated-library UI: {token}")
+    if token not in html:
+        raise SystemExit(f"Missing separated-library UI: {token}")
 for token in ("LIBRARY_STRUCTURE_VERSION = 2", "makeBuiltInCatalog", "migrateLegacyLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
-    if token not in app: raise SystemExit(f"Missing separated-library model: {token}")
+    if token not in app:
+        raise SystemExit(f"Missing separated-library model: {token}")
 
-print("UI structure self-test: PASS")
-
-css = (root / "styles.css").read_text(encoding="utf-8")
-for token in (".mobile-primary-nav", ".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell", ".drill-library-card", ".flow-terminal", ".add-node-choice-grid"):
-    if token not in css: raise SystemExit(f"Missing intent-first responsive UI structure: {token}")
-for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"', 'openAddNodeMenu', 'openAddNodeConfig', 'openDrillDetails'):
-    if token not in app: raise SystemExit(f"Missing app navigation/create flow: {token}")
+# Responsive structure.
+for token in (".mobile-primary-nav", ".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell",
+              ".drill-library-card", ".flow-terminal", ".add-node-choice-grid", ".feature-dialog", ".debug-frame"):
+    if token not in css:
+        raise SystemExit(f"Missing responsive UI structure: {token}")
+for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"',
+              'openAddNodeMenu', 'openAddNodeConfig', 'openDrillDetails'):
+    if token not in app:
+        raise SystemExit(f"Missing app navigation/create flow: {token}")
 if 'navigateApp("library", { push: false })' not in app:
     raise SystemExit("App must start on the drill library")
-for token in ('description: ""', 'tags: []', 'robotPose: { x: 0.265, y: 0, yawDeg: 0 }'):
-    if token not in app: raise SystemExit(f"Missing drill metadata model: {token}")
+for token in ('description: ""', 'tags: []', 'robotPose: { x: 0, y: 0, yawDeg: 0 }'):
+    if token not in app:
+        raise SystemExit(f"Missing drill metadata model: {token}")
 if 'configure it first' not in app.lower():
     raise SystemExit("Add-node flow must configure before creating")
 if 'renderSyntheticEndpoints' not in app or 'START' not in app or 'END' not in app:
@@ -95,14 +204,11 @@ if 'renderSyntheticEndpoints' not in app or 'START' not in app or 'END' not in a
 if 'mobileGraphLayoutEnabled' not in app or 'mobileLayoutMap' not in app:
     raise SystemExit("Mobile editor must use vertical graph layout")
 for token in ('measureRenderedNodeHeights', 'nodeHeightCache', 'MOBILE_LAYOUT_CENTER_X', 'horizontalGap = 48'):
-    if token not in app: raise SystemExit(f"Missing collision-free content-sized graph layout: {token}")
+    if token not in app:
+        raise SystemExit(f"Missing collision-free content-sized graph layout: {token}")
 for token in ('.spin-ball-icon', '.spin-direction-symbol', '.shot-metrics { display:flex; gap:5px; flex-wrap:nowrap'):
-    if token not in css: raise SystemExit(f"Missing compact speed/spin node presentation: {token}")
-for token in ("openProtocolDebugger", "runProtocolDebugScript", "requestRaw", "sendRaw", "PROTOCOL_DEBUG_STORAGE_KEY"):
-    if token not in app and token not in (root / "pongbot-ble.js").read_text(encoding="utf-8"):
-        raise SystemExit(f"Missing protocol-debug integration: {token}")
-if ".protocol-debug-layout" not in css or ".protocol-debug-editor" not in css:
-    raise SystemExit("Missing responsive protocol-debug UI styles")
+    if token not in css:
+        raise SystemExit(f"Missing compact speed/spin node presentation: {token}")
 if '...builtInCatalog.drills.map(drill => drill.id)' not in app:
     raise SystemExit("Saved My drills must preserve sub-drill references to Built-in presets")
 

@@ -5,7 +5,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  // Measured Nova geometry. These are intentionally fixed, not fit parameters.
+  // User-measured geometry. These are fixed physical constants, not fit parameters.
   const GEOMETRY_REFERENCE = "base-back-pivots-v1";
   const BASE_BACK_TO_YAW_PIVOT_M = 0.242;
   const YAW_TO_PITCH_PIVOT_M = 0.075;

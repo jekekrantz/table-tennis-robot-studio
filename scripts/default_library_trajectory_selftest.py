@@ -19,8 +19,11 @@ TABLE_W = 1.525
 NET_H = 0.1525
 BALL_D = 0.04
 BALL_R = BALL_D / 2
-POSE_X = 0.265
-NOZZLE_H = 0.225
+BASE_BACK_X = 0.0
+BASE_BACK_TO_YAW = 0.242
+YAW_TO_PITCH = 0.075
+PITCH_TO_WHEELS = 0.075
+YAW_PIVOT_H = 0.240
 G = 9.80665
 DT = 0.004
 MAX_T = 4.0
@@ -145,7 +148,16 @@ def rk4(position, velocity, omega):
 def simulate(speed: float, spin_rps: float, elevation_deg: float, aim_deg: float):
     yaw = math.radians(aim_deg)
     elevation = math.radians(elevation_deg)
-    position = [POSE_X, 0.0, NOZZLE_H]
+    # Fixed measured mechanical chain. Base yaw is zero in the default library;
+    # aim rotates the yaw->pitch and pitch->wheel links, while elevation rotates
+    # the final pitch->wheel link vertically.
+    head_yaw = yaw
+    release_horizontal = PITCH_TO_WHEELS * math.cos(elevation)
+    position = [
+        BASE_BACK_X + BASE_BACK_TO_YAW + (YAW_TO_PITCH + release_horizontal) * math.cos(head_yaw),
+        (YAW_TO_PITCH + release_horizontal) * math.sin(head_yaw),
+        YAW_PIVOT_H + PITCH_TO_WHEELS * math.sin(elevation),
+    ]
     velocity = [
         speed * math.cos(elevation) * math.cos(yaw),
         speed * math.cos(elevation) * math.sin(yaw),
@@ -196,7 +208,7 @@ def parse_presets():
 
 def main():
     # The blank/custom Shot node must itself start as a safe, useful ball.
-    default_landing, default_net = simulate(5.97, 0.0, 12.5, 0.0)
+    default_landing, default_net = simulate(5.84, 0.0, 10.3, 0.0)
     assert default_landing is not None and default_net is not None, "default new shot has no complete trajectory"
     assert TABLE_L / 2 < default_landing[0] < TABLE_L, f"default new shot misses opponent half: {default_landing}"
     assert default_net[0] >= 0.075, f"default new shot has insufficient net clearance: {default_net[0]*100:.2f} cm"

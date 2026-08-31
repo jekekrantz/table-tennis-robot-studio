@@ -4,7 +4,7 @@ The built-in library is intended to give a useful starting point for common robo
 
 ## Shot feeds
 
-All default feeds assume the robot is centered at the near edge, the nozzle is 26.5 cm from the back of the base, and the nozzle center is 22.5 cm above the tabletop. They were numerically solved with the app's current aerodynamic trajectory model. Target points deliberately stay well away from the table edges, and modeled net clearance is normally 8–12 cm to tolerate ordinary shot-to-shot variation.
+All default feeds assume the **back of the robot base** is centered on the near edge. Their launch coordinates come from the fixed measured chain: base back -> yaw pivot 24.2 cm, yaw -> pitch pivot 7.5 cm, pitch pivot -> wheels 7.5 cm, with the yaw pivot 24.0 cm above the support surface. Aim and elevation therefore move the physical release point. The presets were re-solved with the app's current aerodynamic trajectory model. Target points deliberately stay well away from the table edges, and modeled net clearance is normally 8–12 cm to tolerate ordinary shot-to-shot variation.
 
 Built-in shot feeds:
 

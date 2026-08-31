@@ -8,32 +8,48 @@
   const RAW_BASE = 969.9321047526674;
   const RAW_PER_SPEED_LEVEL = 630.455868089234;
   const RAW_DELTA_PER_SPIN_LEVEL = 342.036255843120;
+  const HARDWARE_RAW_MIN = 400;
+  const HARDWARE_RAW_MAX = 7500;
+  const DEFAULT_MOTOR_SCALING = Object.freeze({
+    rawAtZeroSpeedLevel: RAW_BASE,
+    rawPerSpeedLevel: RAW_PER_SPEED_LEVEL,
+    rawDeltaPerSpinLevel: RAW_DELTA_PER_SPIN_LEVEL,
+  });
 
-  const LOCAL_EXIT_SPEED_MAP = [
-    { raw: 2025, speedMps: 5.04 },
-    { raw: 2167, speedMps: 5.39 },
-    { raw: 2388, speedMps: 5.79 },
-  ];
+  // One affine motor law, fitted to the robust fixed-geometry ground calibration.
+  // There are deliberately no speed knots or interpolation tables in the motor model.
+  const DEFAULT_LINEAR_EXIT_MODEL = Object.freeze({
+    interceptMps: -0.2758895085,
+    slopeMpsPerRaw: 0.0023936604543,
+    calibratedRawMin: 2000,
+    calibratedRawMax: 3000,
+    source: "2026-08-28-ground-calibration-fixed-geometry",
+  });
 
+  // Spinsight data are retained only for the speed-dependent spin-capacity estimate.
+  // They do not define or bend the raw-wheel-input -> exit-speed relationship.
   const SPINSIGHT_MEASURED_CURVE = [
-    { level: 1.5, speedKmh: 13, maxSpinSetting: 5, maxSpinRps: 28 },
-    { level: 2.0, speedKmh: 17, maxSpinSetting: 6, maxSpinRps: 36 },
-    { level: 2.5, speedKmh: 19, maxSpinSetting: 7, maxSpinRps: 43 },
-    { level: 3.0, speedKmh: 20, maxSpinSetting: 8, maxSpinRps: 52 },
-    { level: 3.5, speedKmh: 23, maxSpinSetting: 9, maxSpinRps: 56 },
-    { level: 4.0, speedKmh: 24, maxSpinSetting: 10, maxSpinRps: 61 },
-    { level: 4.5, speedKmh: 25, maxSpinSetting: 10, maxSpinRps: 66 },
-    { level: 5.0, speedKmh: 29, maxSpinSetting: 9, maxSpinRps: 59 },
-    { level: 5.5, speedKmh: 29, maxSpinSetting: 8, maxSpinRps: 53 },
-    { level: 6.0, speedKmh: 33, maxSpinSetting: 8, maxSpinRps: 53 },
-    { level: 6.5, speedKmh: 34, maxSpinSetting: 7, maxSpinRps: 46 },
-    { level: 7.0, speedKmh: 36, maxSpinSetting: 6, maxSpinRps: 42 },
-    { level: 7.5, speedKmh: 39, maxSpinSetting: 5, maxSpinRps: 33 },
-    { level: 8.0, speedKmh: 40, maxSpinSetting: 4, maxSpinRps: 28 },
-    { level: 8.5, speedKmh: 42, maxSpinSetting: 3, maxSpinRps: 21 },
-    { level: 9.0, speedKmh: 46, maxSpinSetting: 2, maxSpinRps: 16 },
-    { level: 9.5, speedKmh: 47, maxSpinSetting: 1, maxSpinRps: 13 },
-    { level: 10.0, speedKmh: 48, maxSpinSetting: 0, maxSpinRps: 0 },
+    { level: 0.0, maxSpinSetting: 2, maxSpinRps: 13.2, estimated: true },
+    { level: 0.5, maxSpinSetting: 3, maxSpinRps: 19.8, estimated: true },
+    { level: 1.0, maxSpinSetting: 4, maxSpinRps: 26.4, estimated: true },
+    { level: 1.5, maxSpinSetting: 5, maxSpinRps: 28 },
+    { level: 2.0, maxSpinSetting: 6, maxSpinRps: 36 },
+    { level: 2.5, maxSpinSetting: 7, maxSpinRps: 43 },
+    { level: 3.0, maxSpinSetting: 8, maxSpinRps: 52 },
+    { level: 3.5, maxSpinSetting: 9, maxSpinRps: 56 },
+    { level: 4.0, maxSpinSetting: 10, maxSpinRps: 61 },
+    { level: 4.5, maxSpinSetting: 10, maxSpinRps: 66 },
+    { level: 5.0, maxSpinSetting: 9, maxSpinRps: 59 },
+    { level: 5.5, maxSpinSetting: 8, maxSpinRps: 53 },
+    { level: 6.0, maxSpinSetting: 8, maxSpinRps: 53 },
+    { level: 6.5, maxSpinSetting: 7, maxSpinRps: 46 },
+    { level: 7.0, maxSpinSetting: 6, maxSpinRps: 42 },
+    { level: 7.5, maxSpinSetting: 5, maxSpinRps: 33 },
+    { level: 8.0, maxSpinSetting: 4, maxSpinRps: 28 },
+    { level: 8.5, maxSpinSetting: 3, maxSpinRps: 21 },
+    { level: 9.0, maxSpinSetting: 2, maxSpinRps: 16 },
+    { level: 9.5, maxSpinSetting: 1, maxSpinRps: 13 },
+    { level: 10.0, maxSpinSetting: 0, maxSpinRps: 0 },
   ];
 
   function finite(value, fallback = 0) {
@@ -42,6 +58,7 @@
   }
   function clamp(value, lo, hi) { return Math.max(lo, Math.min(hi, value)); }
   function lerp(a, b, t) { return a + (b - a) * t; }
+
   function interpolateCurve(x, points, xField, yField) {
     const sorted = points.slice().sort((a, b) => a[xField] - b[xField]);
     if (!sorted.length) return null;
@@ -58,169 +75,206 @@
     return sorted[sorted.length - 1][yField];
   }
 
-  function rawFromLevel(level) { return RAW_BASE + RAW_PER_SPEED_LEVEL * finite(level, 0); }
-  function levelFromRaw(raw) { return (finite(raw, RAW_BASE) - RAW_BASE) / RAW_PER_SPEED_LEVEL; }
-  function spinsightSpeedMpsAtLevel(level) {
-    return interpolateCurve(level, SPINSIGHT_MEASURED_CURVE, "level", "speedKmh") / 3.6;
+  function normalizeMotorScaling(scaling = DEFAULT_MOTOR_SCALING) {
+    const source = scaling && typeof scaling === "object" ? scaling : DEFAULT_MOTOR_SCALING;
+    const rawAtZeroSpeedLevel = finite(
+      source.rawAtZeroSpeedLevel ?? source.wheelBaseRpm,
+      DEFAULT_MOTOR_SCALING.rawAtZeroSpeedLevel
+    );
+    let rawPerSpeedLevel = finite(
+      source.rawPerSpeedLevel ?? source.wheelRpmPerSpeed,
+      DEFAULT_MOTOR_SCALING.rawPerSpeedLevel
+    );
+    let rawDeltaPerSpinLevel = finite(
+      source.rawDeltaPerSpinLevel ?? source.wheelRpmPerSpin,
+      DEFAULT_MOTOR_SCALING.rawDeltaPerSpinLevel
+    );
+    if (!(rawPerSpeedLevel > 1e-9)) rawPerSpeedLevel = DEFAULT_MOTOR_SCALING.rawPerSpeedLevel;
+    if (!(rawDeltaPerSpinLevel > 1e-9)) rawDeltaPerSpinLevel = DEFAULT_MOTOR_SCALING.rawDeltaPerSpinLevel;
+    return { rawAtZeroSpeedLevel, rawPerSpeedLevel, rawDeltaPerSpinLevel };
   }
-
-  // Spinsight reports in-flight speed, whereas the local trajectory calibration
-  // estimates nozzle-exit speed. Fit one affine overlap correction before using
-  // the Spinsight table as an external source for the command/speed relation.
-  function fitInFlightToExitCorrection(localMap = LOCAL_EXIT_SPEED_MAP) {
-    const pairs = localMap.map(point => ({
-      x: spinsightSpeedMpsAtLevel(levelFromRaw(point.raw)),
-      y: point.speedMps,
-    })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
-    if (pairs.length < 2) return { slope: 1, interceptMps: 0 };
-    const meanX = pairs.reduce((s, p) => s + p.x, 0) / pairs.length;
-    const meanY = pairs.reduce((s, p) => s + p.y, 0) / pairs.length;
-    const denom = pairs.reduce((s, p) => s + Math.pow(p.x - meanX, 2), 0);
-    const slope = denom > 1e-12
-      ? pairs.reduce((s, p) => s + (p.x - meanX) * (p.y - meanY), 0) / denom
-      : 1;
-    return { slope, interceptMps: meanY - slope * meanX };
+  function rawFromLevel(level, scaling = DEFAULT_MOTOR_SCALING) {
+    const s = normalizeMotorScaling(scaling);
+    return s.rawAtZeroSpeedLevel + s.rawPerSpeedLevel * finite(level, 0);
   }
-
-  const EXIT_CORRECTION = fitInFlightToExitCorrection();
-  function correctionFor(localMap) { return localMap ? fitInFlightToExitCorrection(localMap) : EXIT_CORRECTION; }
-  function estimatedExitSpeedAtLevel(level, localMap = null) {
-    const corr = correctionFor(localMap);
-    return corr.interceptMps + corr.slope * spinsightSpeedMpsAtLevel(level);
+  function levelFromRaw(raw, scaling = DEFAULT_MOTOR_SCALING) {
+    const s = normalizeMotorScaling(scaling);
+    return (finite(raw, s.rawAtZeroSpeedLevel) - s.rawAtZeroSpeedLevel) / s.rawPerSpeedLevel;
   }
-
-  // Keep the source points available for diagnostics and re-fitting, but do not
-  // interpolate through them for normal operation. The measured SpinSight curve
-  // is quantized/noisy enough that point-to-point interpolation creates artificial
-  // flats and slope changes in a motor system that is expected to be close to linear.
-  function combinedExitSpeedCurve(localMap = LOCAL_EXIT_SPEED_MAP) {
-    const external = SPINSIGHT_MEASURED_CURVE.map(point => ({
-      raw: rawFromLevel(point.level),
-      speedMps: estimatedExitSpeedAtLevel(point.level, localMap),
-      source: "spinsight-corrected",
-      level: point.level,
-    }));
-    const local = localMap.map(point => ({ ...point, source: "local-trajectory" }));
-    return external.concat(local).sort((a, b) => a.raw - b.raw);
-  }
-
-  function fitLinearExitModel(localMap = LOCAL_EXIT_SPEED_MAP) {
-    const points = combinedExitSpeedCurve(localMap)
-      .filter(point => Number.isFinite(point.raw) && Number.isFinite(point.speedMps));
-    if (points.length < 2) {
-      return {
-        slopeMpsPerRaw: 0.0013339412562561616,
-        interceptMps: 2.4319583819816337,
-        rmseMps: 0,
-        pointCount: points.length,
-        minRaw: 1915.6159068865184,
-        maxRaw: 7274.490785645007,
-      };
+  function sanitizeLinearModel(model, fallback = DEFAULT_LINEAR_EXIT_MODEL) {
+    const source = model && typeof model === "object" ? model : fallback;
+    const interceptMps = finite(source.interceptMps, fallback.interceptMps);
+    let slopeMpsPerRaw = finite(source.slopeMpsPerRaw, fallback.slopeMpsPerRaw);
+    if (!(slopeMpsPerRaw > 1e-9)) slopeMpsPerRaw = fallback.slopeMpsPerRaw;
+    let calibratedRawMin = finite(source.calibratedRawMin ?? source.minRaw, fallback.calibratedRawMin);
+    let calibratedRawMax = finite(source.calibratedRawMax ?? source.maxRaw, fallback.calibratedRawMax);
+    if (calibratedRawMax < calibratedRawMin) [calibratedRawMin, calibratedRawMax] = [calibratedRawMax, calibratedRawMin];
+    if (calibratedRawMax - calibratedRawMin < 1) {
+      calibratedRawMin = fallback.calibratedRawMin;
+      calibratedRawMax = fallback.calibratedRawMax;
     }
+    return {
+      interceptMps,
+      slopeMpsPerRaw,
+      calibratedRawMin,
+      calibratedRawMax,
+      source: String(source.source || fallback.source || "linear-calibration"),
+    };
+  }
+
+  // Utility for importing old calibration files. Samples are converted once to one
+  // least-squares straight line; normal operation never interpolates between samples.
+  function fitLinearExitModel(samples, options = {}) {
+    const points = (samples || [])
+      .map(point => ({ raw: finite(point?.raw, NaN), speedMps: finite(point?.speedMps, NaN) }))
+      .filter(point => Number.isFinite(point.raw) && Number.isFinite(point.speedMps));
+    if (points.length < 2) return sanitizeLinearModel(options.fallback || DEFAULT_LINEAR_EXIT_MODEL);
     const meanRaw = points.reduce((sum, point) => sum + point.raw, 0) / points.length;
     const meanSpeed = points.reduce((sum, point) => sum + point.speedMps, 0) / points.length;
     const denominator = points.reduce((sum, point) => sum + Math.pow(point.raw - meanRaw, 2), 0);
-    const slopeMpsPerRaw = denominator > 1e-12
-      ? points.reduce((sum, point) => sum + (point.raw - meanRaw) * (point.speedMps - meanSpeed), 0) / denominator
-      : 0;
+    if (denominator < 1e-12) return sanitizeLinearModel(options.fallback || DEFAULT_LINEAR_EXIT_MODEL);
+    const slopeMpsPerRaw = points.reduce((sum, point) => sum + (point.raw - meanRaw) * (point.speedMps - meanSpeed), 0) / denominator;
     const interceptMps = meanSpeed - slopeMpsPerRaw * meanRaw;
     const rmseMps = Math.sqrt(points.reduce((sum, point) => {
       const residual = interceptMps + slopeMpsPerRaw * point.raw - point.speedMps;
       return sum + residual * residual;
     }, 0) / points.length);
-    return {
-      slopeMpsPerRaw,
+    const model = sanitizeLinearModel({
       interceptMps,
-      rmseMps,
-      pointCount: points.length,
-      minRaw: Math.min(...points.map(point => point.raw)),
-      maxRaw: Math.max(...points.map(point => point.raw)),
-    };
+      slopeMpsPerRaw,
+      calibratedRawMin: Math.min(...points.map(point => point.raw)),
+      calibratedRawMax: Math.max(...points.map(point => point.raw)),
+      source: options.source || "legacy-samples-import",
+    });
+    return { ...model, rmseMps, pointCount: points.length };
   }
 
-  const DEFAULT_LINEAR_EXIT_MODEL = fitLinearExitModel();
-  function linearModelFor(localMap) { return localMap ? fitLinearExitModel(localMap) : DEFAULT_LINEAR_EXIT_MODEL; }
-
-  function exitSpeedFromRaw(raw, localMap = null) {
-    const model = linearModelFor(localMap);
-    const boundedRaw = clamp(finite(raw, model.minRaw), model.minRaw, model.maxRaw);
-    return model.interceptMps + model.slopeMpsPerRaw * boundedRaw;
+  function exitSpeedFromRaw(raw, model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const m = sanitizeLinearModel(model);
+    // Intentionally no calibration-range clamp: the model is affine everywhere.
+    return m.interceptMps + m.slopeMpsPerRaw * finite(raw, m.calibratedRawMin);
   }
 
-  function rawFromExitSpeed(speedMps, localMap = null) {
-    const model = linearModelFor(localMap);
-    const minMps = model.interceptMps + model.slopeMpsPerRaw * model.minRaw;
-    const maxMps = model.interceptMps + model.slopeMpsPerRaw * model.maxRaw;
-    const target = clamp(finite(speedMps, minMps), Math.min(minMps, maxMps), Math.max(minMps, maxMps));
-    if (Math.abs(model.slopeMpsPerRaw) < 1e-12) return model.minRaw;
-    return clamp((target - model.interceptMps) / model.slopeMpsPerRaw, model.minRaw, model.maxRaw);
+  function rawFromExitSpeed(speedMps, model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const m = sanitizeLinearModel(model);
+    return (finite(speedMps, exitSpeedFromRaw(m.calibratedRawMin, m)) - m.interceptMps) / m.slopeMpsPerRaw;
   }
 
-  function exitSpeedRange(localMap = null) {
-    const model = linearModelFor(localMap);
-    const a = model.interceptMps + model.slopeMpsPerRaw * model.minRaw;
-    const b = model.interceptMps + model.slopeMpsPerRaw * model.maxRaw;
+  function calibratedSpeedRange(model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const m = sanitizeLinearModel(model);
+    const a = exitSpeedFromRaw(m.calibratedRawMin, m);
+    const b = exitSpeedFromRaw(m.calibratedRawMax, m);
     return {
       minMps: Math.min(a, b),
       maxMps: Math.max(a, b),
-      minRaw: model.minRaw,
-      maxRaw: model.maxRaw,
+      minRaw: m.calibratedRawMin,
+      maxRaw: m.calibratedRawMax,
     };
   }
 
-  function spinCapacityAtLevel(level) {
+  function hardwareSpeedRange(model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const m = sanitizeLinearModel(model);
+    const a = exitSpeedFromRaw(HARDWARE_RAW_MIN, m);
+    const b = exitSpeedFromRaw(HARDWARE_RAW_MAX, m);
     return {
-      maxSpinSetting: Math.max(0, interpolateCurve(level, SPINSIGHT_MEASURED_CURVE, "level", "maxSpinSetting")),
-      maxSpinRps: Math.max(0, interpolateCurve(level, SPINSIGHT_MEASURED_CURVE, "level", "maxSpinRps")),
+      minMps: Math.min(a, b),
+      maxMps: Math.max(a, b),
+      minRaw: HARDWARE_RAW_MIN,
+      maxRaw: HARDWARE_RAW_MAX,
     };
   }
-  function spinRpsFromSpinSetting(level, spinSetting, { clampToMeasuredCapacity = false } = {}) {
-    const cap = spinCapacityAtLevel(level);
+
+  // Backward-compatible name. This is a hardware-command range, not a model clamp.
+  function exitSpeedRange(model = DEFAULT_LINEAR_EXIT_MODEL) {
+    return hardwareSpeedRange(model);
+  }
+
+  function isRawCalibrated(raw, model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const m = sanitizeLinearModel(model);
+    const r = finite(raw, NaN);
+    return Number.isFinite(r) && r >= m.calibratedRawMin && r <= m.calibratedRawMax;
+  }
+
+  function isSpeedCalibrated(speedMps, model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const range = calibratedSpeedRange(model);
+    const s = finite(speedMps, NaN);
+    return Number.isFinite(s) && s >= range.minMps && s <= range.maxMps;
+  }
+
+  function clampRawToHardware(raw) {
+    return clamp(finite(raw, RAW_BASE), HARDWARE_RAW_MIN, HARDWARE_RAW_MAX);
+  }
+
+  function normalizeSpinCurve(curve = SPINSIGHT_MEASURED_CURVE) {
+    const source = Array.isArray(curve) && curve.length ? curve : SPINSIGHT_MEASURED_CURVE;
+    const points = source.map(point => ({
+      level: finite(point?.level, NaN),
+      maxSpinSetting: Math.max(0, finite(point?.maxSpinSetting, NaN)),
+      maxSpinRps: Math.max(0, finite(point?.maxSpinRps, NaN)),
+    })).filter(point => Number.isFinite(point.level) && Number.isFinite(point.maxSpinSetting) && Number.isFinite(point.maxSpinRps));
+    return points.length >= 2 ? points : SPINSIGHT_MEASURED_CURVE;
+  }
+  function spinCapacityAtLevel(level, curve = SPINSIGHT_MEASURED_CURVE) {
+    const points = normalizeSpinCurve(curve);
+    return {
+      maxSpinSetting: Math.max(0, interpolateCurve(level, points, "level", "maxSpinSetting")),
+      maxSpinRps: Math.max(0, interpolateCurve(level, points, "level", "maxSpinRps")),
+    };
+  }
+  function spinRpsFromSpinSetting(level, spinSetting, { clampToMeasuredCapacity = false, curve = SPINSIGHT_MEASURED_CURVE } = {}) {
+    const cap = spinCapacityAtLevel(level, curve);
     if (cap.maxSpinSetting <= 1e-9 || cap.maxSpinRps <= 1e-9) return 0;
     const sign = Math.sign(finite(spinSetting, 0));
     let magnitude = Math.abs(finite(spinSetting, 0));
     if (clampToMeasuredCapacity) magnitude = Math.min(magnitude, cap.maxSpinSetting);
     return sign * magnitude / cap.maxSpinSetting * cap.maxSpinRps;
   }
-  function spinSettingFromRps(level, spinRps, { clampToMeasuredCapacity = true } = {}) {
-    const cap = spinCapacityAtLevel(level);
+  function spinSettingFromRps(level, spinRps, { clampToMeasuredCapacity = true, curve = SPINSIGHT_MEASURED_CURVE } = {}) {
+    const cap = spinCapacityAtLevel(level, curve);
     if (cap.maxSpinSetting <= 1e-9 || cap.maxSpinRps <= 1e-9) return 0;
     const sign = Math.sign(finite(spinRps, 0));
     let magnitude = Math.abs(finite(spinRps, 0)) / cap.maxSpinRps * cap.maxSpinSetting;
     if (clampToMeasuredCapacity) magnitude = Math.min(magnitude, cap.maxSpinSetting);
     return sign * magnitude;
   }
-  function spinRpsFromRawWheels(wheelA, wheelB) {
-    const a = finite(wheelA, RAW_BASE);
-    const b = finite(wheelB, RAW_BASE);
-    const level = levelFromRaw((a + b) / 2);
-    const spinSetting = (a - b) / (2 * RAW_DELTA_PER_SPIN_LEVEL);
-    return spinRpsFromSpinSetting(level, spinSetting, { clampToMeasuredCapacity: false });
+  function spinRpsFromRawWheels(wheelA, wheelB, scaling = DEFAULT_MOTOR_SCALING) {
+    const s = normalizeMotorScaling(scaling);
+    const curve = Array.isArray(scaling?.spinsightCurve) ? scaling.spinsightCurve : SPINSIGHT_MEASURED_CURVE;
+    const a = finite(wheelA, s.rawAtZeroSpeedLevel);
+    const b = finite(wheelB, s.rawAtZeroSpeedLevel);
+    const level = levelFromRaw((a + b) / 2, s);
+    const spinSetting = (a - b) / (2 * s.rawDeltaPerSpinLevel);
+    return spinRpsFromSpinSetting(level, spinSetting, { clampToMeasuredCapacity: false, curve });
   }
 
-  return {
-    constants: {
+  return Object.freeze({
+    constants: Object.freeze({
       RAW_BASE,
       RAW_PER_SPEED_LEVEL,
       RAW_DELTA_PER_SPIN_LEVEL,
-      LOCAL_EXIT_SPEED_MAP,
-      SPINSIGHT_MEASURED_CURVE,
-      EXIT_CORRECTION,
+      HARDWARE_RAW_MIN,
+      HARDWARE_RAW_MAX,
       DEFAULT_LINEAR_EXIT_MODEL,
-    },
+      DEFAULT_MOTOR_SCALING,
+      SPINSIGHT_MEASURED_CURVE,
+    }),
+    normalizeMotorScaling,
     rawFromLevel,
     levelFromRaw,
-    spinsightSpeedMpsAtLevel,
-    fitInFlightToExitCorrection,
-    estimatedExitSpeedAtLevel,
-    combinedExitSpeedCurve,
+    sanitizeLinearModel,
     fitLinearExitModel,
     exitSpeedFromRaw,
     rawFromExitSpeed,
+    calibratedSpeedRange,
+    hardwareSpeedRange,
     exitSpeedRange,
+    isRawCalibrated,
+    isSpeedCalibrated,
+    clampRawToHardware,
+    normalizeSpinCurve,
     spinCapacityAtLevel,
     spinRpsFromSpinSetting,
     spinSettingFromRps,
     spinRpsFromRawWheels,
-  };
+  });
 });

@@ -1,0 +1,31 @@
+{
+  "format": "table-tennis-robot-studio/debug-pack",
+  "version": 1,
+  "objective": "Test heartbeat/status traffic and whether a second START can append while a sequence is active.",
+  "tests": [
+    {
+      "id": "heartbeat-long",
+      "title": "Long sequence with heartbeat",
+      "purpose": "Keep a sequence active across the normal heartbeat interval.",
+      "summary": "20 balls at 0.8 Hz with heartbeat enabled",
+      "heartbeat": "normal app heartbeat ON",
+      "expectedDurationMs": 27000,
+      "actions": [{"type": "start_sequence", "count": 20, "delayMs": 1250, "wheelA": 2500, "wheelB": 2500, "pitchDeg": 15, "yawPattern": [-6, 0, 6]}],
+      "question": "Did heartbeat traffic coincide with a physical pause or interruption?",
+      "answers": ["yes", "no", "other"],
+      "next": {"yes": "append", "no": "append", "other": "append"}
+    },
+    {
+      "id": "append",
+      "title": "Attempt active buffer append",
+      "purpose": "Send a second bounded START while the first sequence should still be running, without STOP.",
+      "summary": "12-ball START, then an 8-ball START about 4 s later",
+      "heartbeat": "normal; one status/heartbeat probe before append",
+      "expectedDurationMs": 23000,
+      "actions": [{"type": "active_append", "firstCount": 12, "secondCount": 8, "appendAfterMs": 4000, "delayMs": 1000, "wheelA": 2400, "wheelB": 2400, "pitchDeg": 15, "yawPattern": [-4, 4], "diagnosticTraffic": true}],
+      "question": "Did the second group continue smoothly without a stop or reset?",
+      "answers": ["yes", "no", "other"],
+      "next": {"yes": "conclude", "no": "conclude", "other": "conclude"}
+    }
+  ]
+}

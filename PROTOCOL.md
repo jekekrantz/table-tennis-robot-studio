@@ -134,8 +134,8 @@ Directly validated. There is no padding:
 
 ```text
 offset  size  type       meaning
-0       4     int32 LE   wheel A rpm
-4       4     int32 LE   wheel B rpm
+0       4     int32 LE   wheel A raw command value
+4       4     int32 LE   wheel B raw command value
 8       4     float32 LE launch pitch, degrees
 12      4     float32 LE launch yaw, degrees
 16      4     float32 LE frequency, Hz
@@ -243,11 +243,11 @@ used up to 9. Their later client intentionally divides unlimited drills into
 individual custom-drill packets **never longer than 6 balls** for better
 reliability.
 
-Table Tennis Robot Studio uses the later conservative 6-record limit.
+Normal Table Tennis Robot Studio playback currently uses a conservative **9-record** START window. This deliberately crosses ordinary logical set boundaries without STOP/START while staying below the 10+ record size reported unreliable by earlier community testing. Guided Debug contains explicit 16- and 20-record experiments to determine whether a particular Nova firmware accepts larger buffers; those experiments do not silently raise the normal runtime limit.
 
 ## Recovered native parameter conversion
 
-Wheel base and spin delta:
+Wheel base and spin delta (legacy community variable names use `rpm`, but these are treated here as raw command units, not verified physical RPM):
 
 ```text
 base_rpm  = 969.9321047526674 + 630.455868089234 * speed_setting
@@ -278,7 +278,7 @@ placement = yaw_deg / 2.2
 ```
 
 Community clients clamp wheel speeds around the physical operating envelope;
-Table Tennis Robot Studio uses 400–7500 rpm.
+Table Tennis Robot Studio clamps these fields to raw command values 400–7500. The project does **not** treat these integers as measured physical wheel RPM.
 
 ## Evidence and provenance
 
@@ -288,7 +288,7 @@ known Start packet, Start/Stop acknowledgements and state transitions.
 
 **Community evidence used operationally:** Web Bluetooth UUID confirmation,
 one-run Start metadata `01 01 00 00`, completion signature state5/detail1,
-frequency/pre-pause stopwatch interpretation, 400–7500 clamp, and 6-record
+frequency/pre-pause stopwatch interpretation, 400–7500 raw-command clamp, and historical 6-record
 chunking strategy.
 
 

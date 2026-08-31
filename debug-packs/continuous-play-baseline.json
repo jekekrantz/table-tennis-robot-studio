@@ -1,0 +1,31 @@
+{
+  "format": "table-tennis-robot-studio/debug-pack",
+  "version": 1,
+  "objective": "Determine whether Nova can play long buffered sequences continuously without explicit STOP between logical groups.",
+  "tests": [
+    {
+      "id": "nine-record-baseline",
+      "title": "Nine-record baseline",
+      "purpose": "Verify the conservative normal runtime window has no internal physical pause.",
+      "summary": "9 alternating balls in one START at 1 Hz",
+      "heartbeat": "normal app heartbeat",
+      "expectedDurationMs": 11000,
+      "actions": [{"type": "start_sequence", "count": 9, "delayMs": 1000, "wheelA": 2400, "wheelB": 2400, "pitchDeg": 15, "yawPattern": [-5, 5]}],
+      "question": "Did the robot physically pause anywhere inside this nine-ball sequence?",
+      "answers": ["yes", "no", "other"],
+      "next": {"yes": "conclude", "no": "sixteen-record", "other": "conclude"}
+    },
+    {
+      "id": "sixteen-record",
+      "title": "Sixteen records in one START",
+      "purpose": "Probe beyond the conservative normal runtime window without any intermediate STOP.",
+      "summary": "16 alternating balls in one START at 1 Hz",
+      "heartbeat": "normal app heartbeat",
+      "expectedDurationMs": 18000,
+      "actions": [{"type": "start_sequence", "count": 16, "delayMs": 1000, "wheelA": 2400, "wheelB": 2400, "pitchDeg": 15, "yawPattern": [-5, 5]}],
+      "question": "Did all 16 balls run, and was there any physical pause inside the sequence?",
+      "answers": ["yes", "no", "other"],
+      "next": {"yes": "conclude", "no": "conclude", "other": "conclude"}
+    }
+  ]
+}

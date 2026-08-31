@@ -1,0 +1,17 @@
+'use strict';
+const assert=require('assert');
+const fs=require('fs');
+const app=fs.readFileSync('app.js','utf8');
+const ble=fs.readFileSync('pongbot-ble.js','utf8');
+assert(app.includes('compilePlaybackWindow'));
+assert(app.includes('NOVA_SEQUENCE_RECORD_LIMIT = 9'));
+assert(app.includes('Math.min(NOVA_SEQUENCE_RECORD_LIMIT'));
+assert(app.includes('Ordinary set boundaries do not cause STOP/START'));
+assert(app.includes('Tuning queued for the next sequence buffer'));
+assert(!app.includes('subsequent balls are sent one at a time'));
+assert(app.includes('requestRobotConnection("Play drill"'));
+assert(app.includes('exportGuidedMeasurements'));
+assert(app.includes('Copy this drill to edit it?'));
+assert(ble.includes('emergencyShutdown()'));
+assert(ble.includes('best-effort STOP queued'));
+console.log('PASS continuous playback / connection / shutdown source invariants');
