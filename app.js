@@ -7,7 +7,6 @@
   const STORAGE_KEY = "table-tennis-robot-studio";
   const LIVE_TUNING_STORAGE_KEY = "table-tennis-robot-studio-live-tuning";
   const SCHEMA_VERSION = 1;
-  const LIBRARY_STRUCTURE_VERSION = 2;
   // Trajectory launch coordinates come from the fixed measured pivot chain.
   const ROBOT_GEOMETRY_REFERENCE = "base-back-pivots-v1";
   const SURFACE_WIDTH = 2600;
@@ -29,6 +28,7 @@
   const GuidedCalibration = globalThis.GuidedCalibration;
   const LaunchModel = globalThis.NovaLaunchModel;
   const DrillAdjustments = globalThis.DrillAdjustments;
+  const ShotVariation = globalThis.ShotVariation;
   const els = {
     repetitionsInput: $("repetitionsInput"),
     repetitionsDownBtn: $("repetitionsDownBtn"),
@@ -331,13 +331,15 @@
   let protocolDebugRunToken = 0;
   let protocolDebugRunning = false;
   let stopPromise = null;
-  let liveTuning = DrillAdjustments ? { ...DrillAdjustments.DEFAULT_TUNING } : { pacePct: 0, clearancePct: 0, spinPct: 0, speedPct: 0 };
+  let liveTuning = null;
   const liveTuningCache = new Map();
   let liveTuningRevision = 0;
   let playbackRetuneRequested = false;
   let liveRetuneStopPromise = null;
   let pendingRobotAction = null;
   let pendingRobotReason = "";
+  const shotVariationCache = new Map();
+  let shotVariationRng = ShotVariation?.createRng(Date.now());
 
   const Protocol = globalThis.PongbotProtocol;
   const ProtocolDebug = globalThis.NovaProtocolDebug;
@@ -363,8 +365,6 @@
   function makeUserLibrary(calibration = defaultCalibration()) {
     return {
       schemaVersion: SCHEMA_VERSION,
-      libraryStructureVersion: LIBRARY_STRUCTURE_VERSION,
-      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
       activeDrillSource: "builtin",
       activeDrillId: builtInCatalog?.defaultDrillId ?? null,
       calibration: sanitizeCalibration(calibration),
@@ -378,8 +378,6 @@
     if (!Array.isArray(library.drills)) library.drills = [];
     if (!Array.isArray(library.folders)) library.folders = [];
     library.schemaVersion = SCHEMA_VERSION;
-    library.libraryStructureVersion = LIBRARY_STRUCTURE_VERSION;
-    library.builtInLibraryVersion = DEFAULT_LIBRARY_VERSION;
     if (!library.calibration) library.calibration = defaultCalibration();
 
     const folderIds = new Set(library.folders.map(folder => folder.id));
@@ -486,15 +484,7 @@
   }
 
   function defaultNovaCalibration() {
-    const speedModel = LaunchModel
-      ? LaunchModel.sanitizeLinearModel(LaunchModel.constants.DEFAULT_LINEAR_EXIT_MODEL)
-      : {
-          interceptMps: -0.2758895085,
-          slopeMpsPerRaw: 0.0023936604543,
-          calibratedRawMin: 2000,
-          calibratedRawMax: 3000,
-          source: "2026-08-28-ground-calibration-fixed-geometry",
-        };
+    const speedModel = LaunchModel.sanitizeLinearModel(LaunchModel.constants.DEFAULT_LINEAR_EXIT_MODEL);
     return {
       rawAtZeroSpeedLevel: 969.9321047526674,
       rawPerSpeedLevel: 630.455868089234,
@@ -507,7 +497,7 @@
     };
   }
   function defaultGuidedCalibration() {
-    const plan = GuidedCalibration ? GuidedCalibration.buildPlan({
+    const plan = GuidedCalibration.buildPlan({
       placement: "ground",
       baseBackXFromNearEdgeM: 0,
       speedModel: defaultNovaCalibration().speedModel,
@@ -517,7 +507,7 @@
       speedMinRaw: 2000,
       speedMaxRaw: 3000,
       speedCount: 6,
-    }) : { shots: [] };
+    });
     return {
       placement: "ground",
       distanceReference: "base_back",
@@ -617,113 +607,164 @@
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  const DEFAULT_LIBRARY_VERSION = 5;
-  const LEGACY_BUILT_IN_DRILL_NAMES = [
-    "Match-play mix",
-    "Serve + third ball",
-    "Two forehands then backhand",
-  ];
+  const DEFAULT_LIBRARY_VERSION = 6;
+
+  const DEFAULT_VARIATION_PROFILES = Object.freeze({
+    neutral: Object.freeze({ depthCm: 10, lateralCm: 12, clearanceDeltaCm: 2, speedDeltaMps: .5, spinDeltaRps: 2 }),
+    shortNeutral: Object.freeze({ depthCm: 8, lateralCm: 8, clearanceDeltaCm: 1.5, speedDeltaMps: .4, spinDeltaRps: 2 }),
+    short: Object.freeze({ depthCm: 8, lateralCm: 8, clearanceDeltaCm: 1.5, speedDeltaMps: .4, spinDeltaRps: 4 }),
+    rally: Object.freeze({ depthCm: 12, lateralCm: 10, clearanceDeltaCm: 2, speedDeltaMps: .65, spinDeltaRps: 6 }),
+    deep: Object.freeze({ depthCm: 7, lateralCm: 7, clearanceDeltaCm: 1.5, speedDeltaMps: .5, spinDeltaRps: 5 }),
+    spin: Object.freeze({ depthCm: 10, lateralCm: 10, clearanceDeltaCm: 2, speedDeltaMps: .55, spinDeltaRps: 8 }),
+    fast: Object.freeze({ depthCm: 6, lateralCm: 7, clearanceDeltaCm: 1.5, speedDeltaMps: .45, spinDeltaRps: 4 }),
+  });
 
   // Re-solved for the fixed pivot-chain release geometry with the back of the base
   // centered on the near edge. Targets preserve the previous modeled placements.
   const DEFAULT_SHOT_PRESETS = Object.freeze({
     noSpinCenter: {
       label: "No-spin center",
+      variationProfile: "neutral",
       params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 },
       target: { xM: 2.154, yM: 0, netClearanceCm: 10.1 },
     },
     shortNoSpin: {
       label: "Short no-spin",
+      variationProfile: "shortNeutral",
       params: { speedMps: 4.84, spinRps: 0, elevationDeg: 14.3, aimDeg: 0 },
       target: { xM: 1.950, yM: 0, netClearanceCm: 10.0 },
     },
     shortBackspinForehand: {
       label: "Short underspin to forehand",
+      variationProfile: "short",
       params: { speedMps: 4.85, spinRps: -18, elevationDeg: 11.4, aimDeg: 13.8 },
       target: { xM: 1.951, yM: 0.420, netClearanceCm: 8.0 },
     },
     shortBackspinBackhand: {
       label: "Short underspin to backhand",
+      variationProfile: "short",
       params: { speedMps: 4.85, spinRps: -18, elevationDeg: 11.4, aimDeg: -13.8 },
       target: { xM: 1.951, yM: -0.420, netClearanceCm: 8.0 },
     },
     topspinForehand: {
       label: "Topspin to forehand",
+      variationProfile: "rally",
       params: { speedMps: 7.51, spinRps: 22, elevationDeg: 8.9, aimDeg: 13.5 },
       target: { xM: 2.253, yM: 0.481, netClearanceCm: 10.1 },
     },
     topspinBackhand: {
       label: "Topspin to backhand",
+      variationProfile: "rally",
       params: { speedMps: 7.51, spinRps: 22, elevationDeg: 8.9, aimDeg: -13.5 },
       target: { xM: 2.253, yM: -0.481, netClearanceCm: 10.1 },
     },
     deepTopspinForehand: {
       label: "Long wide topspin to forehand",
+      variationProfile: "deep",
       params: { speedMps: 8.96, spinRps: 22, elevationDeg: 7.1, aimDeg: 12.8 },
       target: { xM: 2.449, yM: 0.500, netClearanceCm: 10.0 },
     },
     deepTopspinBackhand: {
       label: "Long wide topspin to backhand",
+      variationProfile: "deep",
       params: { speedMps: 8.96, spinRps: 22, elevationDeg: 7.1, aimDeg: -12.8 },
       target: { xM: 2.449, yM: -0.500, netClearanceCm: 10.0 },
     },
     topspinElbow: {
       label: "Topspin to elbow",
+      variationProfile: "rally",
       params: { speedMps: 7.25, spinRps: 22, elevationDeg: 9.1, aimDeg: 0 },
       target: { xM: 2.252, yM: 0, netClearanceCm: 10.0 },
     },
     heavyTopspin: {
       label: "Heavy topspin center",
+      variationProfile: "spin",
       params: { speedMps: 6.90, spinRps: 35, elevationDeg: 11.1, aimDeg: 0 },
       target: { xM: 2.249, yM: 0, netClearanceCm: 12.0 },
     },
     backspinForehand: {
       label: "Backspin to forehand",
+      variationProfile: "spin",
       params: { speedMps: 4.96, spinRps: -18, elevationDeg: 13.1, aimDeg: 12.8 },
       target: { xM: 2.082, yM: 0.419, netClearanceCm: 12.1 },
     },
     backspinBackhand: {
       label: "Backspin to backhand",
+      variationProfile: "spin",
       params: { speedMps: 4.96, spinRps: -18, elevationDeg: 13.1, aimDeg: -12.8 },
       target: { xM: 2.082, yM: -0.419, netClearanceCm: 12.1 },
     },
     backspinCenter: {
       label: "Backspin center",
+      variationProfile: "spin",
       params: { speedMps: 4.84, spinRps: -18, elevationDeg: 13.4, aimDeg: 0 },
       target: { xM: 2.081, yM: 0, netClearanceCm: 12.0 },
     },
     fastDeepForehand: {
       label: "Fast deep to forehand",
+      variationProfile: "fast",
       params: { speedMps: 8.58, spinRps: 15, elevationDeg: 7.1, aimDeg: 12.3 },
       target: { xM: 2.450, yM: 0.480, netClearanceCm: 10.0 },
     },
     fastDeepBackhand: {
       label: "Fast deep to backhand",
+      variationProfile: "fast",
       params: { speedMps: 8.58, spinRps: 15, elevationDeg: 7.1, aimDeg: -12.3 },
       target: { xM: 2.450, yM: -0.480, netClearanceCm: 10.0 },
     },
     fastDeepCenter: {
       label: "Fast deep center",
+      variationProfile: "fast",
       params: { speedMps: 8.31, spinRps: 15, elevationDeg: 7.2, aimDeg: 0 },
       target: { xM: 2.450, yM: 0, netClearanceCm: 10.0 },
     },
     middleForehandTopspin: {
       label: "Topspin to forehand-middle",
+      variationProfile: "rally",
       params: { speedMps: 7.28, spinRps: 22, elevationDeg: 9.1, aimDeg: 5.7 },
       target: { xM: 2.249, yM: 0.200, netClearanceCm: 10.0 },
     },
     middleBackhandTopspin: {
       label: "Topspin to backhand-middle",
+      variationProfile: "rally",
       params: { speedMps: 7.28, spinRps: 22, elevationDeg: 9.1, aimDeg: -5.7 },
       target: { xM: 2.249, yM: -0.200, netClearanceCm: 10.0 },
     },
   });
+
+  function variationForPreset(preset) {
+    const profile = DEFAULT_VARIATION_PROFILES[preset.variationProfile];
+    if (!profile) return null;
+    const rounded = value => Number(value.toFixed(2));
+    return {
+      enabled: true,
+      placement: { depthCm: profile.depthCm, lateralCm: profile.lateralCm },
+      clearance: {
+        minCm: rounded(Math.max(.2, preset.target.netClearanceCm - profile.clearanceDeltaCm)),
+        maxCm: rounded(preset.target.netClearanceCm + profile.clearanceDeltaCm),
+      },
+      speed: {
+        minMps: rounded(preset.params.speedMps - profile.speedDeltaMps),
+        maxMps: rounded(preset.params.speedMps + profile.speedDeltaMps),
+      },
+      spin: {
+        minRps: rounded(preset.params.spinRps - profile.spinDeltaRps),
+        maxRps: rounded(preset.params.spinRps + profile.spinDeltaRps),
+      },
+    };
+  }
 
   function presetShot(drill, key, label = null) {
     const preset = DEFAULT_SHOT_PRESETS[key];
     if (!preset) throw new Error(`Unknown built-in shot preset ${key}`);
     const shot = makeShot(drill, label || preset.label);
     shot.params = { ...preset.params };
+    return shot;
+  }
+
+  function variedPresetShot(drill, key, label = null) {
+    const shot = presetShot(drill, key, label);
+    shot.variation = variationForPreset(DEFAULT_SHOT_PRESETS[key]);
     return shot;
   }
 
@@ -740,10 +781,12 @@
     repetitions = 12,
     intervalSeconds = .78,
     labels = [],
+    varied = false,
   } = {}) {
     const drill = defaultDrill(name);
     drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
-    const nodes = steps.map((key, index) => presetShot(drill, key, labels[index] || null));
+    const shotFactory = varied ? variedPresetShot : presetShot;
+    const nodes = steps.map((key, index) => shotFactory(drill, key, labels[index] || null));
     layoutSequence(nodes);
     drill.nodes.push(...nodes);
     drill.startNodeId = nodes[0]?.id ?? null;
@@ -772,7 +815,7 @@
     drill.nodes.push(random);
     drill.startNodeId = random.id;
     choices.forEach((choice, index) => {
-      const shot = presetShot(drill, choice.key, choice.label || null);
+      const shot = variedPresetShot(drill, choice.key, choice.label || null);
       shot.x = 560;
       shot.y = 130 + index * 210;
       drill.nodes.push(shot);
@@ -791,9 +834,9 @@
     bh.x = 150; bh.y = 330;
     const random = makeRandom("Middle or wide forehand");
     random.x = 475; random.y = 330;
-    const middle = presetShot(drill, "middleForehandTopspin", "Forehand from middle");
+    const middle = variedPresetShot(drill, "middleForehandTopspin", "Forehand from middle");
     middle.x = 820; middle.y = 180;
-    const wide = presetShot(drill, "topspinForehand", "Wide forehand");
+    const wide = variedPresetShot(drill, "topspinForehand", "Wide forehand");
     wide.x = 820; wide.y = 480;
     drill.nodes.push(bh, random, middle, wide);
     drill.startNodeId = bh.id;
@@ -815,9 +858,9 @@
     bh.x = 445; bh.y = 330;
     random.x = 750; random.y = 330;
     const options = [
-      presetShot(drill, "topspinBackhand", "Random · backhand"),
-      presetShot(drill, "topspinElbow", "Random · elbow"),
-      presetShot(drill, "topspinForehand", "Random · forehand"),
+      variedPresetShot(drill, "topspinBackhand", "Random · backhand"),
+      variedPresetShot(drill, "topspinElbow", "Random · elbow"),
+      variedPresetShot(drill, "topspinForehand", "Random · forehand"),
     ];
     options.forEach((shot, index) => { shot.x = 1080; shot.y = 100 + index * 230; });
     drill.nodes.push(fh, bh, random, ...options);
@@ -837,7 +880,7 @@
   } = {}) {
     const drill = defaultDrill(name);
     drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
-    const opening = presetShot(drill, openingPresetKey, "Short underspin");
+    const opening = variedPresetShot(drill, openingPresetKey, "Short underspin");
     opening.x = 150; opening.y = 330;
     const random = makeRandom(randomLabel);
     random.x = 500; random.y = 330;
@@ -845,7 +888,7 @@
     drill.startNodeId = opening.id;
     drill.edges.push({ id: makeId("edge"), source: opening.id, sourceSlot: "next", target: random.id, weight: 1, delaySeconds: intervalSeconds });
     choices.forEach((choice, index) => {
-      const shot = presetShot(drill, choice.key, choice.label || null);
+      const shot = variedPresetShot(drill, choice.key, choice.label || null);
       shot.x = 860; shot.y = 120 + index * 250;
       drill.nodes.push(shot);
       drill.edges.push({
@@ -861,15 +904,15 @@
     drill.settings = { repetitions: 14, delayBetweenSets: .88 };
     const side = makeRandom("Short receive side");
     side.x = 120; side.y = 330;
-    const shortBh = presetShot(drill, "shortBackspinBackhand", "Short underspin · backhand");
-    const shortFh = presetShot(drill, "shortBackspinForehand", "Short underspin · forehand");
+    const shortBh = variedPresetShot(drill, "shortBackspinBackhand", "Short underspin · backhand");
+    const shortFh = variedPresetShot(drill, "shortBackspinForehand", "Short underspin · forehand");
     shortBh.x = 430; shortBh.y = 190;
     shortFh.x = 430; shortFh.y = 470;
     const longRandom = makeRandom("Next attack");
     longRandom.x = 760; longRandom.y = 330;
-    const longBh = presetShot(drill, "deepTopspinBackhand", "Long topspin · backhand");
-    const longElbow = presetShot(drill, "topspinElbow", "Long topspin · elbow");
-    const longFh = presetShot(drill, "deepTopspinForehand", "Long topspin · forehand");
+    const longBh = variedPresetShot(drill, "deepTopspinBackhand", "Long topspin · backhand");
+    const longElbow = variedPresetShot(drill, "topspinElbow", "Long topspin · elbow");
+    const longFh = variedPresetShot(drill, "deepTopspinForehand", "Long topspin · forehand");
     [longBh, longElbow, longFh].forEach((shot, index) => { shot.x = 1100; shot.y = 90 + index * 240; });
     drill.nodes.push(side, shortBh, shortFh, longRandom, longBh, longElbow, longFh);
     drill.startNodeId = side.id;
@@ -892,9 +935,9 @@
     const bh2 = presetShot(drill, "topspinBackhand", "Backhand exchange 2");
     const random = makeRandom("Stay or switch");
     bh1.x = 120; bh1.y = 330; bh2.x = 430; bh2.y = 330; random.x = 740; random.y = 330;
-    const stay = presetShot(drill, "topspinBackhand", "Stay backhand");
-    const elbow = presetShot(drill, "topspinElbow", "Switch to elbow");
-    const wideFh = presetShot(drill, "deepTopspinForehand", "Switch wide forehand");
+    const stay = variedPresetShot(drill, "topspinBackhand", "Stay backhand");
+    const elbow = variedPresetShot(drill, "topspinElbow", "Switch to elbow");
+    const wideFh = variedPresetShot(drill, "deepTopspinForehand", "Switch wide forehand");
     [stay, elbow, wideFh].forEach((shot, index) => { shot.x = 1080; shot.y = 90 + index * 240; });
     drill.nodes.push(bh1, bh2, random, stay, elbow, wideFh);
     drill.startNodeId = bh1.id;
@@ -916,9 +959,9 @@
     repeater.x = 120; repeater.y = 330;
     const random = makeRandom("Match placement");
     random.x = 430; random.y = 330;
-    const bh = presetShot(drill, "topspinBackhand", "Backhand pressure");
-    const elbow = presetShot(drill, "topspinElbow", "Elbow pressure");
-    const fh = presetShot(drill, "topspinForehand", "Forehand pressure");
+    const bh = variedPresetShot(drill, "topspinBackhand", "Backhand pressure");
+    const elbow = variedPresetShot(drill, "topspinElbow", "Elbow pressure");
+    const fh = variedPresetShot(drill, "topspinForehand", "Forehand pressure");
     [bh, elbow, fh].forEach((shot, index) => { shot.x = 780; shot.y = 90 + index * 240; });
     drill.nodes.push(repeater, random, bh, elbow, fh);
     drill.startNodeId = repeater.id;
@@ -997,18 +1040,27 @@
     const spinSwitch = sequenceDrill(
       "Drill: Topspin / backspin switching",
       ["heavyTopspin", "backspinCenter"],
-      { repetitions: 16, intervalSeconds: .9, labels: ["Heavy topspin", "Backspin"] }
+      { repetitions: 16, intervalSeconds: .9, labels: ["Heavy topspin", "Backspin"], varied: true }
     );
     const backspinCorners = sequenceDrill(
       "Drill: Backspin corners",
       ["backspinBackhand", "backspinForehand"],
-      { repetitions: 18, intervalSeconds: .92, labels: ["Backspin · backhand", "Backspin · forehand"] }
+      { repetitions: 18, intervalSeconds: .92, labels: ["Backspin · backhand", "Backspin · forehand"], varied: true }
     );
     const fastDeepRandom = randomDrill("Drill: Fast deep random", [
       { key: "fastDeepBackhand", label: "Deep backhand" },
       { key: "fastDeepCenter", label: "Deep elbow" },
       { key: "fastDeepForehand", label: "Deep forehand" },
     ], { repetitions: 30, intervalSeconds: .72, randomLabel: "Fast deep · three spots" });
+    const variableTopspin = sequenceDrill(
+      "Drill: Variable topspin rally",
+      ["topspinElbow"],
+      { repetitions: 36, intervalSeconds: .8, labels: ["Variable topspin"], varied: true }
+    );
+    const variableShortReceive = randomDrill("Drill: Variable short receive", [
+      { key: "shortBackspinBackhand", label: "Variable short · backhand" },
+      { key: "shortBackspinForehand", label: "Variable short · forehand" },
+    ], { repetitions: 30, intervalSeconds: .95, randomLabel: "Variable short underspin" });
 
     const forehandFlickRecovery = openingToRandomRecoveryDrill(
       "Match: Short forehand underspin → wide recovery",
@@ -1022,7 +1074,7 @@
     const backhandFlickForehandRecovery = sequenceDrill(
       "Match: Short backhand underspin → forehand recovery",
       ["shortBackspinBackhand", "deepTopspinForehand", "deepTopspinForehand"],
-      { repetitions: 12, intervalSeconds: .86, labels: ["Short backhand underspin", "Wide forehand recovery 1", "Wide forehand recovery 2"] }
+      { repetitions: 12, intervalSeconds: .86, labels: ["Short backhand underspin", "Wide forehand recovery 1", "Wide forehand recovery 2"], varied: true }
     );
     const shortReceiveRandom = shortReceiveRandomAttackDrill();
     const backhandSwitch = backhandExchangeSwitchDrill();
@@ -1051,10 +1103,6 @@
     ];
 
     return {
-      schemaVersion: SCHEMA_VERSION,
-      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
-      activeDrillId: alternating.id,
-      calibration: defaultCalibration(),
       drills: [
         alternating,
         twoTwo,
@@ -1068,6 +1116,8 @@
         spinSwitch,
         backspinCorners,
         fastDeepRandom,
+        variableTopspin,
+        variableShortReceive,
         forehandFlickRecovery,
         backhandFlickForehandRecovery,
         shortReceiveRandom,
@@ -1101,6 +1151,8 @@
     "Drill: Topspin / backspin switching": "builtin-spin",
     "Drill: Backspin corners": "builtin-spin",
     "Drill: Fast deep random": "builtin-random",
+    "Drill: Variable topspin rally": "builtin-random",
+    "Drill: Variable short receive": "builtin-random",
     "Match: Short forehand underspin → wide recovery": "builtin-random",
     "Match: Short backhand underspin → forehand recovery": "builtin-random",
     "Match: Short receive → random long attack": "builtin-random",
@@ -1142,12 +1194,15 @@
       drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name] || "builtin-random";
       drill.builtIn = true;
       const folderName = BUILT_IN_FOLDER_DEFS.find(folder => folder.id === drill.libraryFolderId)?.name || "Training";
+      const hasShotVariation = drill.nodes.some(node => node.type === "shot" && node.variation?.enabled);
       drill.tags = [...new Set([folderName.toLowerCase(), drill.name.startsWith("Match:") ? "match-like" : "training"].filter(Boolean))];
       drill.description = drill.description || (drill.name.startsWith("Match:")
-        ? "Match-like robot pattern with realistic placement and timing variation."
+        ? "Match-like robot pattern with realistic placement, shot and timing variation."
         : folderName === "Shots"
           ? "Repeatable single-shot feed for technique and calibration-aware practice."
-          : `${folderName} training pattern from the built-in library.`);
+          : hasShotVariation
+            ? `${folderName} training pattern with controlled physical shot variation.`
+            : `${folderName} training pattern from the built-in library.`);
       for (const node of drill.nodes || []) {
         if (node.type === "drill" && stableIds.has(node.referencedDrillId)) node.referencedDrillId = stableIds.get(node.referencedDrillId);
       }
@@ -1184,49 +1239,6 @@
     library.activeDrillId = drill.id;
     if (save) saveLibrary();
     return true;
-  }
-
-  function builtInDrillByName(name) {
-    return builtInCatalog?.drills.find(drill => drill.name === name) ?? null;
-  }
-
-  function normalizedDrillSignature(drill) {
-    const nodeIndex = new Map((drill.nodes || []).map((node, index) => [node.id, index]));
-    const nodes = (drill.nodes || []).map(node => ({
-      type: node.type,
-      label: node.label,
-      params: node.params ? {
-        speedMps: finite(node.params.speedMps, 0),
-        spinRps: finite(node.params.spinRps, 0),
-        elevationDeg: finite(node.params.elevationDeg, 0),
-        aimDeg: finite(node.params.aimDeg, 0),
-      } : null,
-      referencedDrillId: node.type === "drill" ? String(node.referencedDrillId || "") : undefined,
-      startCount: node.type === "counter" ? finite(node.startCount, 0) : undefined,
-      clearOnNodeIndexes: node.type === "counter"
-        ? (node.clearOnNodeIds || []).map(id => nodeIndex.get(id)).filter(Number.isInteger)
-        : undefined,
-    }));
-    const edges = (drill.edges || []).map(edge => ({
-      source: nodeIndex.get(edge.source),
-      sourceSlot: edge.sourceSlot,
-      target: nodeIndex.get(edge.target),
-      weight: finite(edge.weight, 1),
-      delaySeconds: finite(edge.delaySeconds, 0),
-    }));
-    return JSON.stringify({
-      name: drill.name,
-      settings: drill.settings,
-      startNodeIndex: nodeIndex.get(drill.startNodeId),
-      nodes,
-      edges,
-    });
-  }
-
-  function isLegacyBuiltInLibrary(raw) {
-    if (!raw || !Array.isArray(raw.drills) || raw.drills.length !== LEGACY_BUILT_IN_DRILL_NAMES.length) return false;
-    const names = raw.drills.map(drill => String(drill?.name || "")).sort();
-    return LEGACY_BUILT_IN_DRILL_NAMES.slice().sort().every((name, index) => names[index] === name);
   }
 
   function activeDrill() {
@@ -1279,11 +1291,6 @@
     const speedModel = LaunchModel
       ? LaunchModel.sanitizeLinearModel(novaRaw.speedModel || novaBase.speedModel)
       : { ...novaBase.speedModel, ...(novaRaw.speedModel || {}) };
-    const geometryAlreadyBaseBack = raw.geometryReference === ROBOT_GEOMETRY_REFERENCE;
-    const migratedPoseX = geometryAlreadyBaseBack ? finite(pose.x, base.pose.x) : finite(pose.x, 0.265) - 0.265;
-    const migratedGuidedBaseBackXcm = Number.isFinite(Number(guidedRaw.baseBackXcm))
-      ? finite(guidedRaw.baseBackXcm, 0)
-      : guidedRaw.placement === "ground" ? 0 : finite(guidedRaw.nozzleXcm, 26.5) - 26.5;
     const guidedShots = Array.isArray(guidedRaw.shots) ? guidedRaw.shots.map((shot, index) => ({
       id: String(shot?.id || `cal-${index + 1}`),
       index,
@@ -1296,7 +1303,7 @@
     return {
       geometryReference: ROBOT_GEOMETRY_REFERENCE,
       pose: {
-        x: clamp(migratedPoseX, -3, 10, base.pose.x),
+        x: clamp(pose.x, -3, 10, base.pose.x),
         y: clamp(pose.y, -5, 5, base.pose.y),
         yawDeg: clamp(pose.yawDeg, -180, 180, base.pose.yawDeg),
       },
@@ -1334,9 +1341,9 @@
         },
       },
       nova: {
-        rawAtZeroSpeedLevel: clamp(novaRaw.rawAtZeroSpeedLevel ?? novaRaw.wheelBaseRpm, 0, 20000, novaBase.rawAtZeroSpeedLevel),
-        rawPerSpeedLevel: clamp(novaRaw.rawPerSpeedLevel ?? novaRaw.wheelRpmPerSpeed, .0001, 5000, novaBase.rawPerSpeedLevel),
-        rawDeltaPerSpinLevel: clamp(novaRaw.rawDeltaPerSpinLevel ?? novaRaw.wheelRpmPerSpin, .0001, 5000, novaBase.rawDeltaPerSpinLevel),
+        rawAtZeroSpeedLevel: clamp(novaRaw.rawAtZeroSpeedLevel, 0, 20000, novaBase.rawAtZeroSpeedLevel),
+        rawPerSpeedLevel: clamp(novaRaw.rawPerSpeedLevel, .0001, 5000, novaBase.rawPerSpeedLevel),
+        rawDeltaPerSpinLevel: clamp(novaRaw.rawDeltaPerSpinLevel, .0001, 5000, novaBase.rawDeltaPerSpinLevel),
         upDownAtZeroDeg: clamp(novaRaw.upDownAtZeroDeg, -100, 200, novaBase.upDownAtZeroDeg),
         upDownPerDegree: clamp(novaRaw.upDownPerDegree, .01, 30, novaBase.upDownPerDegree),
         yawDegreesPerPlacement: clamp(novaRaw.yawDegreesPerPlacement, .01, 30, novaBase.yawDegreesPerPlacement),
@@ -1348,7 +1355,7 @@
         distanceReference: guidedRaw.placement === "table"
           ? (["net","near_edge","nozzle","base_back"].includes(guidedRaw.distanceReference) ? guidedRaw.distanceReference : guidedBase.distanceReference)
           : "base_back",
-        baseBackXcm: guidedRaw.placement === "table" ? clamp(migratedGuidedBaseBackXcm, -300, 300, 0) : 0,
+        baseBackXcm: guidedRaw.placement === "table" ? clamp(guidedRaw.baseBackXcm, -300, 300, 0) : 0,
         measurementOffsetCm: clamp(guidedRaw.measurementOffsetCm, -200, 200, guidedBase.measurementOffsetCm),
         tableHeightCm: clamp(guidedRaw.tableHeightCm, 40, 120, guidedBase.tableHeightCm),
         repeatCount: Math.round(clamp(guidedRaw.repeatCount, 1, 12, guidedBase.repeatCount)),
@@ -1361,9 +1368,6 @@
         currentIndex: Math.max(0, Math.round(finite(guidedRaw.currentIndex, 0))),
         shots: guidedShots,
         planSignature: typeof guidedRaw.planSignature === "string" ? guidedRaw.planSignature : "",
-        // Results from the old nozzle-height/speed-map solver are deliberately discarded.
-        // They are review artifacts, not calibration state, and cannot be rendered safely
-        // as a two-parameter affine fit.
         lastResult: guidedRaw.lastResult?.modelKind === "affine-raw-speed-v1" ? guidedRaw.lastResult : null,
       },
       testShot: {
@@ -1397,6 +1401,9 @@
             elevationDeg: clamp(p.elevationDeg, -20, 45, 4),
             aimDeg: clamp(p.aimDeg, -60, 60, 0),
           };
+          common.variation = n.variation?.enabled
+            ? ShotVariation.normalizeVariation(n.variation, common.params)
+            : null;
         } else if (n.type === "drill") {
           common.referencedDrillId = allIds.has(String(n.referencedDrillId)) ? String(n.referencedDrillId) : null;
         } else if (n.type === "counter") {
@@ -1427,10 +1434,9 @@
       ? [...new Set(raw.tags.map(tag => String(tag).trim()).filter(Boolean))].slice(0, 20)
       : String(raw?.tags || "").split(",").map(tag => tag.trim()).filter(Boolean).slice(0, 20);
     const rawPose = raw?.robotPose || {};
-    const poseAlreadyBaseBack = raw?.robotPoseReference === "base_back";
     drill.robotPoseReference = "base_back";
     drill.robotPose = {
-      x: clamp(poseAlreadyBaseBack ? rawPose.x : finite(rawPose.x, 0.265) - 0.265, -1.5, 4.2, 0),
+      x: clamp(rawPose.x, -1.5, 4.2, 0),
       y: clamp(rawPose.y, -2, 2, 0),
       yawDeg: clamp(rawPose.yawDeg, -180, 180, 0),
     };
@@ -1456,7 +1462,7 @@
     };
   }
 
-  function sanitizeNewLibrary(raw) {
+  function sanitizeLibrary(raw) {
     if (raw?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(raw.drills)) {
       throw new Error(`Unsupported drill file. Expected schemaVersion ${SCHEMA_VERSION}.`);
     }
@@ -1481,70 +1487,12 @@
     const activeId = source === "user" ? (userExists ? desiredId : drills[0]?.id ?? null) : (builtInExists ? desiredId : builtInCatalog.defaultDrillId);
     return {
       schemaVersion: SCHEMA_VERSION,
-      libraryStructureVersion: LIBRARY_STRUCTURE_VERSION,
-      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
       activeDrillSource: source,
       activeDrillId: activeId,
       calibration: sanitizeCalibration(raw.calibration),
       folders,
       drills,
     };
-  }
-
-  function migrateLegacyLibrary(raw) {
-    if (raw?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(raw.drills)) {
-      throw new Error(`Unsupported drill file. Expected schemaVersion ${SCHEMA_VERSION}.`);
-    }
-    if (isLegacyBuiltInLibrary(raw)) {
-      startupNotice = "The old built-in examples were replaced by the read-only Built-in library; calibration settings were preserved.";
-      return makeUserLibrary(sanitizeCalibration(raw.calibration));
-    }
-
-    const preliminaryIds = new Set(raw.drills.map(d => String(d.id || makeId("drill"))));
-    const legacyDrills = raw.drills.map(d => sanitizeDrill(d, preliminaryIds));
-    const matchedBuiltInIds = new Map();
-    const userDrills = [];
-    for (const drill of legacyDrills) {
-      const candidate = builtInDrillByName(drill.name);
-      if (candidate && normalizedDrillSignature(drill) === normalizedDrillSignature(candidate)) {
-        matchedBuiltInIds.set(drill.id, candidate.id);
-      } else {
-        drill.folderId = null;
-        userDrills.push(drill);
-      }
-    }
-    for (const drill of userDrills) {
-      for (const node of drill.nodes) {
-        if (node.type === "drill" && matchedBuiltInIds.has(node.referencedDrillId)) {
-          node.referencedDrillId = matchedBuiltInIds.get(node.referencedDrillId);
-        }
-      }
-    }
-
-    const oldActive = String(raw.activeDrillId || "");
-    const mappedActive = matchedBuiltInIds.get(oldActive);
-    const activeUser = userDrills.find(drill => drill.id === oldActive);
-    const result = {
-      schemaVersion: SCHEMA_VERSION,
-      libraryStructureVersion: LIBRARY_STRUCTURE_VERSION,
-      builtInLibraryVersion: DEFAULT_LIBRARY_VERSION,
-      activeDrillSource: mappedActive ? "builtin" : activeUser ? "user" : "builtin",
-      activeDrillId: mappedActive || activeUser?.id || builtInCatalog.defaultDrillId,
-      calibration: sanitizeCalibration(raw.calibration),
-      folders: [],
-      drills: userDrills,
-    };
-    const removed = matchedBuiltInIds.size;
-    startupNotice = removed
-      ? `${removed} old built-in preset${removed === 1 ? " was" : "s were"} moved to the automatically updated Built-in library. Custom drills were kept under My drills.`
-      : "Existing drills were moved under My drills; the new Built-in library is maintained separately.";
-    return result;
-  }
-
-  function sanitizeLibrary(raw) {
-    return Number(raw?.libraryStructureVersion) >= LIBRARY_STRUCTURE_VERSION
-      ? sanitizeNewLibrary(raw)
-      : migrateLegacyLibrary(raw);
   }
 
   function saveLibrary() {
@@ -1574,7 +1522,6 @@
   }
 
   function saveLiveTuningPreference() {
-    if (!DrillAdjustments) return;
     try {
       localStorage.setItem(LIVE_TUNING_STORAGE_KEY, JSON.stringify(DrillAdjustments.normalizeTuning(liveTuning)));
     } catch (error) {
@@ -1583,7 +1530,6 @@
   }
 
   function loadLiveTuningPreference() {
-    if (!DrillAdjustments) return { pacePct: 0, clearancePct: 0, spinPct: 0, speedPct: 0 };
     try {
       const raw = localStorage.getItem(LIVE_TUNING_STORAGE_KEY);
       if (!raw) return { ...DrillAdjustments.DEFAULT_TUNING };
@@ -2005,23 +1951,6 @@
 
   function mobileGraphLayoutEnabled() {
     return Boolean(globalThis.matchMedia?.("(max-width: 760px)")?.matches);
-  }
-
-  function orderedGraphNodes(drill) {
-    if (!drill?.nodes?.length) return [];
-    const result = [];
-    const seen = new Set();
-    const queue = [];
-    const start = getNode(drill, drill.startNodeId);
-    if (start) queue.push(start);
-    while (queue.length) {
-      const node = queue.shift();
-      if (!node || seen.has(node.id)) continue;
-      seen.add(node.id); result.push(node);
-      outgoing(drill, node.id).forEach(edge => { const target = getNode(drill, edge.target); if (target && !seen.has(target.id)) queue.push(target); });
-    }
-    drill.nodes.forEach(node => { if (!seen.has(node.id)) result.push(node); });
-    return result;
   }
 
   function mobileLayoutMap(drill) {
@@ -2627,10 +2556,6 @@
     applyGraphZoom(graphZoom * factor, event.clientX, event.clientY);
   }
 
-  function resetGraphZoom() {
-    applyGraphZoom(1);
-  }
-
   function isCanvasBackgroundTarget(target) {
     if (!(target instanceof Element)) return false;
     return !target.closest(".flow-node, .edge-group, .output-port");
@@ -3119,6 +3044,8 @@
   function shotInspectorHtml(node) {
     const p = node.params;
     const prediction = predictTrajectory(p);
+    const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM) : null;
+    const nominalClearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
     return `
       <p class="spin-explainer"><strong>Spin:</strong> negative values mean underspin; positive values mean topspin. Rotations per second describe the ball directly.</p>
       ${liveTuningInlineHtml(p)}
@@ -3134,6 +3061,24 @@
       </div>
       <div class="landing-card">${landingDescription(prediction)}</div>
       ${novaEstimateHtml(p)}
+      <details class="shot-variation-section"${variation ? " open" : ""}>
+        <summary><span><strong>Shot variation</strong><small>Sample only physically solved shots</small></span><input id="shotVariationEnabled" type="checkbox"${variation ? " checked" : ""} aria-label="Enable shot variation"></summary>
+        <div class="shot-variation-body">
+          <p class="helper">Landing position and net clearance are sampled as outcomes. Speed, spin, elevation and aim are solved together on the feasible shot manifold. Invalid targets are rejected, never clamped.</p>
+          <div class="field-grid two">
+            <label class="field"><span>Landing depth spread</span><span class="input-with-unit"><input id="variationDepthField" type="number" min="0" max="120" step="1" value="${variation?.placement.depthCm ?? 15}"><small>± cm</small></span></label>
+            <label class="field"><span>Lateral spread</span><span class="input-with-unit"><input id="variationLateralField" type="number" min="0" max="120" step="1" value="${variation?.placement.lateralCm ?? 20}"><small>± cm</small></span></label>
+            <label class="field"><span>Min net clearance</span><span class="input-with-unit"><input id="variationClearanceMinField" type="number" min="0.2" max="80" step="0.1" value="${variation?.clearance.minCm ?? fmt(nominalClearanceCm,1)}"><small>cm</small></span></label>
+            <label class="field"><span>Max net clearance</span><span class="input-with-unit"><input id="variationClearanceMaxField" type="number" min="0.2" max="80" step="0.1" value="${variation?.clearance.maxCm ?? fmt(nominalClearanceCm,1)}"><small>cm</small></span></label>
+            <label class="field"><span>Min speed</span><span class="input-with-unit"><input id="variationSpeedMinField" type="number" min="1" max="20" step="0.1" value="${variation?.speed.minMps ?? fmt(Math.max(1,p.speedMps-.6),1)}"><small>m/s</small></span></label>
+            <label class="field"><span>Max speed</span><span class="input-with-unit"><input id="variationSpeedMaxField" type="number" min="1" max="20" step="0.1" value="${variation?.speed.maxMps ?? fmt(Math.min(20,p.speedMps+.6),1)}"><small>m/s</small></span></label>
+            <label class="field"><span>Min spin</span><span class="input-with-unit"><input id="variationSpinMinField" type="number" min="-120" max="120" step="1" value="${variation?.spin.minRps ?? fmt(Math.max(-120,p.spinRps-5),0)}"><small>rps</small></span></label>
+            <label class="field"><span>Max spin</span><span class="input-with-unit"><input id="variationSpinMaxField" type="number" min="-120" max="120" step="1" value="${variation?.spin.maxRps ?? fmt(Math.min(120,p.spinRps+5),0)}"><small>rps</small></span></label>
+          </div>
+          <button id="testShotVariationBtn" class="button ghost wide" type="button"${variation ? "" : " disabled"}>Test 12 varied shots</button>
+          <p id="shotVariationTestResult" class="helper" aria-live="polite">${variation ? "Tap Test to measure feasibility and solve time on this device." : "Enable variation to configure and test this shot family."}</p>
+        </div>
+      </details>
       <section class="connection-section">
         <h3>Then…</h3>
         ${singleConnectionRowHtml(activeDrill(), node, outgoing(activeDrill(), node.id)[0] ?? null, "next")}
@@ -3262,6 +3207,51 @@
     bindNumberField("shotSpinField", value => node.params.spinRps = clamp(value, -120, 120, 0));
     bindNumberField("shotElevationField", value => node.params.elevationDeg = clamp(value, -20, 45, 4));
     bindNumberField("shotAimField", value => node.params.aimDeg = clamp(value, -60, 60, 0));
+    $("shotVariationEnabled")?.addEventListener("change", event => {
+      if (!event.target.checked) {
+        node.variation = null;
+      } else {
+        const prediction = predictTrajectory(node.params);
+        const clearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
+        node.variation = ShotVariation.normalizeVariation({
+          enabled: true,
+          placement: { depthCm: 15, lateralCm: 20 },
+          clearance: { minCm: clearanceCm, maxCm: clearanceCm },
+          speed: { minMps: node.params.speedMps - .6, maxMps: node.params.speedMps + .6 },
+          spin: { minRps: node.params.spinRps - 5, maxRps: node.params.spinRps + 5 },
+        }, node.params, prediction.net?.clearanceM);
+      }
+      shotVariationCache.clear();
+      commit();
+    });
+    const variationFields = [
+      ["variationDepthField", ["placement", "depthCm"]],
+      ["variationLateralField", ["placement", "lateralCm"]],
+      ["variationClearanceMinField", ["clearance", "minCm"]],
+      ["variationClearanceMaxField", ["clearance", "maxCm"]],
+      ["variationSpeedMinField", ["speed", "minMps"]],
+      ["variationSpeedMaxField", ["speed", "maxMps"]],
+      ["variationSpinMinField", ["spin", "minRps"]],
+      ["variationSpinMaxField", ["spin", "maxRps"]],
+    ];
+    variationFields.forEach(([id, path]) => $(id)?.addEventListener("change", event => {
+      if (!node.variation?.enabled) return;
+      node.variation[path[0]][path[1]] = finite(event.target.value, node.variation[path[0]][path[1]]);
+      node.variation = ShotVariation.normalizeVariation(node.variation, node.params);
+      shotVariationCache.clear();
+      commit();
+    }));
+    $("testShotVariationBtn")?.addEventListener("click", () => {
+      const output = $("shotVariationTestResult");
+      if (!output) return;
+      output.textContent = "Solving 12 varied shots…";
+      setTimeout(() => {
+        const profile = profileShotVariation(node, 12);
+        output.textContent = profile.ok
+          ? `${profile.accepted}/12 feasible · ${fmt(profile.elapsedMs,1)} ms total · ${fmt(profile.elapsedMs / Math.max(1, profile.accepted),1)} ms/shot · ${fmt(profile.evaluationsPerShot,1)} trajectory evaluations/shot.`
+          : profile.reason;
+      }, 0);
+    });
     els.inspectorContent.querySelectorAll("[data-step-target][data-step-delta]").forEach(button => button.addEventListener("click", () => {
       const input = $(button.dataset.stepTarget);
       if (!input) return;
@@ -3479,49 +3469,17 @@
     return `${number > 0 ? "+" : ""}${fmt(number, digits)}`;
   }
 
-  function interpolateNovaCurve(level, field, calibration = library.calibration) {
-    const curve = calibration.nova.spinsightCurve;
-    if (level <= curve[0].level) return curve[0][field];
-    if (level >= curve.at(-1).level) return curve.at(-1)[field];
-    for (let index = 1; index < curve.length; index += 1) {
-      const right = curve[index];
-      const left = curve[index - 1];
-      if (level <= right.level) {
-        const ratio = (level - left.level) / (right.level - left.level || 1);
-        return left[field] + ratio * (right[field] - left[field]);
-      }
-    }
-    return curve.at(-1)[field];
-  }
-
-  function novaSpeedLevelFromMps(speedMps, calibration = library.calibration) {
-    const nova = calibration.nova;
-    const model = nova.speedModel || defaultNovaCalibration().speedModel;
-    const raw = LaunchModel
-      ? LaunchModel.rawFromExitSpeed(speedMps, model)
-      : (finite(speedMps, 5) - finite(model?.interceptMps, 0)) / Math.max(1e-9, finite(model?.slopeMpsPerRaw, .0024));
-    return LaunchModel
-      ? LaunchModel.levelFromRaw(raw, nova)
-      : (raw - finite(nova.rawAtZeroSpeedLevel, 969.9321047526674)) / Math.max(1e-9, finite(nova.rawPerSpeedLevel, 630.455868089234));
-  }
   function estimatedNovaSettings(params, calibration = library.calibration) {
     const nova = calibration.nova;
-    const speedModel = LaunchModel ? LaunchModel.sanitizeLinearModel(nova.speedModel) : nova.speedModel;
-    const requestedRaw = LaunchModel
-      ? LaunchModel.rawFromExitSpeed(params.speedMps, speedModel)
-      : (params.speedMps - finite(speedModel?.interceptMps, 0)) / Math.max(1e-9, finite(speedModel?.slopeMpsPerRaw, .0024));
-    const baseRaw = LaunchModel ? LaunchModel.clampRawToHardware(requestedRaw) : clamp(requestedRaw, 400, 7500, 2000);
-    const speedLevel = LaunchModel ? LaunchModel.levelFromRaw(baseRaw, nova) : (baseRaw - nova.rawAtZeroSpeedLevel) / nova.rawPerSpeedLevel;
-    const cap = LaunchModel ? LaunchModel.spinCapacityAtLevel(speedLevel, nova.spinsightCurve) : {
-      maxSpinSetting: Math.max(0, interpolateNovaCurve(speedLevel, "maxSpinSetting", calibration)),
-      maxSpinRps: Math.max(0, interpolateNovaCurve(speedLevel, "maxSpinRps", calibration)),
-    };
+    const speedModel = LaunchModel.sanitizeLinearModel(nova.speedModel);
+    const requestedRaw = LaunchModel.rawFromExitSpeed(params.speedMps, speedModel);
+    const baseRaw = LaunchModel.clampRawToHardware(requestedRaw);
+    const speedLevel = LaunchModel.levelFromRaw(baseRaw, nova);
+    const cap = LaunchModel.spinCapacityAtLevel(speedLevel, nova.spinsightCurve);
     const maxSpinSetting = cap.maxSpinSetting;
     const maxSpinRps = cap.maxSpinRps;
     const requestedSpinRps = Math.abs(params.spinRps);
-    const spinLevel = LaunchModel
-      ? LaunchModel.spinSettingFromRps(speedLevel, params.spinRps, { clampToMeasuredCapacity: true, curve: nova.spinsightCurve })
-      : Math.sign(params.spinRps) * clamp(maxSpinRps > .001 ? requestedSpinRps / maxSpinRps * maxSpinSetting : 0, 0, maxSpinSetting, 0);
+    const spinLevel = LaunchModel.spinSettingFromRps(speedLevel, params.spinRps, { clampToMeasuredCapacity: true, curve: nova.spinsightCurve });
     const spinLimited = requestedSpinRps > maxSpinRps + .05;
     const delta = nova.rawDeltaPerSpinLevel * spinLevel;
     const swapped = calibration.rotationType >= 4;
@@ -3532,16 +3490,16 @@
     const baseRawLimited = Math.abs(baseRaw - requestedRaw) > .01;
     const wheelRawLimited = Math.abs(wheelA - desiredWheelA) > 1.01 || Math.abs(wheelB - desiredWheelB) > 1.01;
     const hardwareLimited = baseRawLimited || wheelRawLimited;
-    const speedExtrapolated = LaunchModel ? !LaunchModel.isRawCalibrated(requestedRaw, speedModel) : false;
+    const speedExtrapolated = !LaunchModel.isRawCalibrated(requestedRaw, speedModel);
     const modeledBaseRaw = (wheelA + wheelB) / 2;
-    const modeledExitSpeedMps = LaunchModel ? LaunchModel.exitSpeedFromRaw(modeledBaseRaw, speedModel) : params.speedMps;
-    const modeledSpinRps = LaunchModel ? LaunchModel.spinRpsFromRawWheels(swapped ? wheelB : wheelA, swapped ? wheelA : wheelB, nova) : params.spinRps;
+    const modeledExitSpeedMps = LaunchModel.exitSpeedFromRaw(modeledBaseRaw, speedModel);
+    const modeledSpinRps = LaunchModel.spinRpsFromRawWheels(swapped ? wheelB : wheelA, swapped ? wheelA : wheelB, nova);
     const upDown = Math.round(clamp(nova.upDownAtZeroDeg + nova.upDownPerDegree * params.elevationDeg, -50, 100, 0));
     const placement = clamp(params.aimDeg / nova.yawDegreesPerPlacement, -10, 10, 0);
     return { wheelA, wheelB, upDown, placement, speedLevel, spinLevel, maxSpinSetting, maxSpinRps,
       limited: spinLimited, spinLimited, speedExtrapolated, hardwareLimited, baseRawLimited, wheelRawLimited,
       requestedRaw, baseRaw, modeledBaseRaw, modeledExitSpeedMps, modeledSpinRps,
-      calibratedRange: LaunchModel?.calibratedSpeedRange(speedModel) || null };
+      calibratedRange: LaunchModel.calibratedSpeedRange(speedModel) };
   }
   function novaEstimateHtml(params) {
     const estimate = estimatedNovaSettings(params);
@@ -3565,11 +3523,6 @@
       <p>${warnings.length ? warnings.join(" ") : `Exit speed is one affine raw-wheel-input model (intercept + slope × raw). Spinsight data are used only for speed-dependent spin capacity.`}</p>
     </div>`;
   }
-  function aimWords(angle) {
-    if (Math.abs(angle) < .05) return "straight";
-    return `${fmt(Math.abs(angle),1)}° ${angle < 0 ? "right" : "left"}`;
-  }
-
   function airProperties(calibration = library.calibration) {
     const p = calibration.physics;
     const temperatureK = p.airTemperatureC + 273.15;
@@ -4008,10 +3961,6 @@
     </svg>`;
   }
 
-  function mapX(value, min, max, outMin, outMax) {
-    return outMin + (value - min) / (max - min) * (outMax - outMin);
-  }
-
   function radians(deg) { return deg * Math.PI / 180; }
   function degrees(rad) { return rad * 180 / Math.PI; }
 
@@ -4127,15 +4076,15 @@
 
   function renderNovaScaleTable() {
     const nova = library.calibration.nova;
-    const speedModel = LaunchModel ? LaunchModel.sanitizeLinearModel(nova.speedModel) : nova.speedModel;
+    const speedModel = LaunchModel.sanitizeLinearModel(nova.speedModel);
     if (els.linearSpeedModelReadout) {
-      const range = LaunchModel?.calibratedSpeedRange(speedModel);
+      const range = LaunchModel.calibratedSpeedRange(speedModel);
       els.linearSpeedModelReadout.innerHTML = `<strong>Global speed line:</strong> v = ${fmt(speedModel.interceptMps,6)} + ${fmt(speedModel.slopeMpsPerRaw,9)} × raw m/s. ${range ? `Measured calibration range ${Math.round(speedModel.calibratedRawMin)}–${Math.round(speedModel.calibratedRawMax)} raw (${fmt(range.minMps,2)}–${fmt(range.maxMps,2)} m/s); outside it the same line is extrapolated.` : ""}`;
     }
     els.novaScaleTableBody.replaceChildren();
     nova.spinsightCurve.forEach((point, index) => {
-      const raw = LaunchModel ? LaunchModel.rawFromLevel(point.level, nova) : nova.rawAtZeroSpeedLevel + nova.rawPerSpeedLevel * point.level;
-      const speedMps = LaunchModel ? LaunchModel.exitSpeedFromRaw(raw, speedModel) : speedModel.interceptMps + speedModel.slopeMpsPerRaw * raw;
+      const raw = LaunchModel.rawFromLevel(point.level, nova);
+      const speedMps = LaunchModel.exitSpeedFromRaw(raw, speedModel);
       const row = document.createElement("tr");
       if (point.estimated) row.classList.add("estimated-row");
       row.innerHTML = `
@@ -4252,11 +4201,10 @@
   }
   function guidedSpeedEstimate(raw) {
     const model = library.calibration.nova.speedModel;
-    if (LaunchModel) return LaunchModel.exitSpeedFromRaw(raw, model);
-    return GuidedCalibration ? GuidedCalibration.speedMpsFromRaw(raw, model) : 5;
+    return LaunchModel.exitSpeedFromRaw(raw, model);
   }
   function guidedPlanSignature(g = guidedState()) {
-    const model = LaunchModel ? LaunchModel.sanitizeLinearModel(library.calibration.nova.speedModel) : library.calibration.nova.speedModel;
+    const model = LaunchModel.sanitizeLinearModel(library.calibration.nova.speedModel);
     const table = library.calibration.table;
     return JSON.stringify([
       ROBOT_GEOMETRY_REFERENCE,
@@ -4285,7 +4233,6 @@
     return g;
   }
   function rebuildGuidedPlan(preserve = true) {
-    if (!GuidedCalibration) return;
     const g = library.calibration.guided || defaultGuidedCalibration();
     const previous = preserve && Array.isArray(g.shots) ? g.shots : [];
     const previousCurrent = previous[g.currentIndex || 0] || null;
@@ -4347,7 +4294,6 @@
     renderGuidedCalibration();
   }
   function renderGuidedCalibration() {
-    if (!GuidedCalibration || !els.guidedPlacementTable) return;
     const g = guidedState();
     if (g.planSignature !== guidedPlanSignature(g)) rebuildGuidedPlan(true);
     const ground = g.placement === "ground";
@@ -4549,7 +4495,6 @@
     };
   }
   function computeGuidedCalibration() {
-    if (!GuidedCalibration) { toast("Guided calibration solver did not load."); return; }
     syncGuidedConfigFromInputs();
     saveGuidedCurrentInputs();
     els.guidedComputeBtn.disabled = true;
@@ -4631,7 +4576,7 @@
     if (!rows.length) return "";
     const included = rows.filter(row => row.included !== false);
     const rejected = rows.filter(row => row.included === false);
-    const diagnostics = result.distanceDiagnostics || GuidedCalibration?.summarizeDistanceResiduals?.(included) || null;
+    const diagnostics = result.distanceDiagnostics || GuidedCalibration.summarizeDistanceResiduals(included);
     const biasCm = diagnostics?.meanErrorM == null ? null : diagnostics.meanErrorM * 100;
     const elevTrendCmPer10 = diagnostics?.elevationTrendMPerDeg == null ? null : diagnostics.elevationTrendMPerDeg * 1000;
     const speedTrendCmPer100 = diagnostics?.speedTrendMPerRaw == null ? null : diagnostics.speedTrendMPerRaw * 10000;
@@ -4705,7 +4650,7 @@
     const sampleRaws = [result.speedModel.calibratedRawMin, 2200, 2400, 2600, 2800, result.speedModel.calibratedRawMax]
       .filter((raw, index, values) => Number.isFinite(raw) && values.indexOf(raw) === index)
       .sort((a, b) => a - b);
-    const samples = sampleRaws.map(raw => ({ raw, speedMps: LaunchModel ? LaunchModel.exitSpeedFromRaw(raw, result.speedModel) : GuidedCalibration.speedMpsFromRaw(raw, result.speedModel) }));
+    const samples = sampleRaws.map(raw => ({ raw, speedMps: LaunchModel.exitSpeedFromRaw(raw, result.speedModel) }));
     const clearanceLine = result.placement === "ground" ? "Not used in flat-ground mode" : (result.clearanceRmseM == null ? "No net-height measurements used" : `Net-height RMSE ${fmt(result.clearanceRmseM * 100,2)} cm (${result.clearanceCount} values)`);
     els.guidedResults.innerHTML = `
       <div class="fit-summary-grid">
@@ -4729,7 +4674,7 @@
     const result = guidedState().lastResult;
     if (!result) return;
     library.calibration.geometryReference = ROBOT_GEOMETRY_REFERENCE;
-    library.calibration.nova.speedModel = LaunchModel ? LaunchModel.sanitizeLinearModel(result.speedModel) : { ...result.speedModel };
+    library.calibration.nova.speedModel = LaunchModel.sanitizeLinearModel(result.speedModel);
     saveLibrary();
     renderAll();
     renderCalibration();
@@ -4857,12 +4802,8 @@
     return Boolean(robot?.connected && [4, 5, 6, 7].includes(robot.wireState));
   }
 
-  function liveTuningIsActive() {
-    return Boolean(DrillAdjustments?.hasActiveTuning(liveTuning));
-  }
-
   function liveTrajectoryTuningIsActive() {
-    return Boolean(DrillAdjustments?.hasActiveTuning({ ...liveTuning, pacePct: 0 }));
+    return DrillAdjustments.hasActiveTuning({ ...liveTuning, pacePct: 0 });
   }
 
   function formatTuningPercent(value) {
@@ -4871,7 +4812,7 @@
   }
 
   function tunedDelaySeconds(seconds) {
-    return DrillAdjustments ? DrillAdjustments.delayWithPace(seconds, liveTuning) : Math.max(0, finite(seconds, 0));
+    return DrillAdjustments.delayWithPace(seconds, liveTuning);
   }
 
   function tuningElevationBounds() {
@@ -4889,11 +4830,11 @@
   }
 
   function liveTuningOptions() {
-    const range = LaunchModel?.hardwareSpeedRange(library.calibration.nova.speedModel);
+    const range = LaunchModel.hardwareSpeedRange(library.calibration.nova.speedModel);
     return {
       ...tuningElevationBounds(),
-      minSpeedMps: range?.minMps ?? 1,
-      maxSpeedMps: range?.maxMps ?? 20,
+      minSpeedMps: range.minMps,
+      maxSpeedMps: range.maxMps,
       landingToleranceM: .04,
       clearanceToleranceM: .01,
       minNetClearanceM: .002,
@@ -4906,7 +4847,7 @@
       elevationDeg: finite(baseParams?.elevationDeg, 4),
       aimDeg: finite(baseParams?.aimDeg, 0),
     };
-    if (!DrillAdjustments || !liveTrajectoryTuningIsActive()) {
+    if (!liveTrajectoryTuningIsActive()) {
       const prediction = predictTrajectory(params);
       return { params, basePrediction: prediction, prediction, landingErrorM: 0, clearanceErrorM: 0, targetClearanceM: prediction?.net?.clearanceM ?? null, warnings: [], changed: false };
     }
@@ -4935,7 +4876,6 @@
   }
 
   function renderLiveTuning() {
-    if (!DrillAdjustments) return;
     liveTuning = DrillAdjustments.normalizeTuning(liveTuning);
     const values = [
       [els.tuningPaceValue, "pacePct"],
@@ -4995,7 +4935,7 @@
     els.runStatus.textContent = "Tuning queued for the next sequence buffer…";
   }
   function stepLiveTuning(key, delta) {
-    if (!DrillAdjustments || !(key in liveTuning)) return;
+    if (!(key in liveTuning)) return;
     liveTuning = DrillAdjustments.normalizeTuning({ ...liveTuning, [key]: liveTuning[key] + delta });
     liveTuningCache.clear();
     saveLiveTuningPreference();
@@ -5018,6 +4958,70 @@
     const result = adjustedShotForLiveTuning(baseParams);
     const shift = Number.isFinite(result.landingErrorM) ? `${fmt(result.landingErrorM * 100,1)} cm` : "unknown";
     return `<div class="live-tuning-inline"><strong>Live tuning is active.</strong> Effective shot: ${fmt(result.params.speedMps,2)} m/s · ${signed(result.params.spinRps,1)} rps · ${signed(result.params.elevationDeg,1)}°. Modeled landing shift: ${shift}. Stored values below are unchanged.</div>`;
+  }
+
+  function variationEnvironment(drillId) {
+    const drill = getDrill(drillId) || activeDrill();
+    const calibration = { ...library.calibration, pose: { ...drillPose(drill) } };
+    return {
+      calibration,
+      evaluate: params => predictTrajectory(params, calibration),
+    };
+  }
+
+  function variationCacheEntry(shot, baseParams) {
+    if (!shot.variation?.enabled) return null;
+    const environment = variationEnvironment(shot.drillId);
+    const cacheKey = JSON.stringify([shot.drillId, shot.nodeId, baseParams, shot.variation, environment.calibration]);
+    let entry = shotVariationCache.get(cacheKey);
+    if (entry) return entry;
+    const prepared = ShotVariation.prepare(baseParams, shot.variation, environment.evaluate);
+    entry = { prepared, evaluate: environment.evaluate };
+    if (shotVariationCache.size >= 48) shotVariationCache.clear();
+    shotVariationCache.set(cacheKey, entry);
+    return entry;
+  }
+
+  function variedShotParams(shot, baseParams) {
+    if (!shot.variation?.enabled) return { params: baseParams, result: null };
+    const entry = variationCacheEntry(shot, baseParams);
+    if (!entry?.prepared?.ok) return { params: null, error: entry?.prepared?.reason || "Variation preparation failed." };
+    const result = ShotVariation.sample(entry.prepared, entry.evaluate, shotVariationRng, {
+      attempts: 5,
+      maxIterations: 7,
+      landingToleranceM: .012,
+      clearanceToleranceM: .004,
+    });
+    return result
+      ? { params: result.params, result }
+      : { params: null, error: "No feasible varied shot was found after five bounded attempts. Reduce the requested position, clearance, speed, or spin range." };
+  }
+
+  function profileShotVariation(node, count = 12) {
+    if (!node?.variation?.enabled) return { ok: false, reason: "Shot variation is not enabled." };
+    const owner = allDrills().find(drill => drill.nodes.some(candidate => candidate.id === node.id)) || activeDrill();
+    const environment = variationEnvironment(owner?.id);
+    const started = performance.now();
+    const prepared = ShotVariation.prepare(node.params, node.variation, environment.evaluate);
+    if (!prepared.ok) return { ok: false, reason: prepared.reason };
+    const batch = ShotVariation.sampleMany(prepared, Math.max(1, Math.min(100, Math.round(count))), environment.evaluate, ShotVariation.createRng(0x51f15e), {
+      attempts: 5,
+      maxIterations: 7,
+      landingToleranceM: .012,
+      clearanceToleranceM: .004,
+    });
+    const elapsedMs = performance.now() - started;
+    return {
+      ok: batch.results.length > 0,
+      reason: batch.results.length ? "" : "No feasible samples were found. Reduce the requested variation ranges.",
+      accepted: batch.results.length,
+      failed: batch.failures.length,
+      elapsedMs,
+      preparationMs: prepared.preparedMs,
+      evaluations: prepared.evaluations,
+      evaluationsPerShot: (prepared.evaluations - 5) / Math.max(1, batch.results.length),
+      results: batch.results,
+    };
   }
 
   function compileRobotSet(drillId) {
@@ -5069,6 +5073,7 @@
           label: node.label,
           params: { ...node.params },
           baseParams: { ...node.params },
+          variation: node.variation?.enabled ? structuredClone(node.variation) : null,
           tuningApplied: false,
           delayBefore: pendingDelay,
         });
@@ -5111,7 +5116,7 @@
     const warnings = [];
     const upDown = c.nova.upDownAtZeroDeg + c.nova.upDownPerDegree * shot.params.elevationDeg;
     const placement = shot.params.aimDeg / c.nova.yawDegreesPerPlacement;
-    const hardwareRange = LaunchModel ? LaunchModel.hardwareSpeedRange(c.nova.speedModel) : null;
+    const hardwareRange = LaunchModel.hardwareSpeedRange(c.nova.speedModel);
     if (upDown < -50 - 1e-6 || upDown > 100 + 1e-6) {
       errors.push(`“${shot.label}”: elevation ${fmt(shot.params.elevationDeg,1)}° maps to Nova Up/down ${fmt(upDown,1)}, outside -50…100.`);
     }
@@ -5121,7 +5126,7 @@
     if (estimate.speedExtrapolated && estimate.calibratedRange) {
       warnings.push(`“${shot.label}”: ${fmt(shot.params.speedMps,1)} m/s is outside the measured calibration range (${fmt(estimate.calibratedRange.minMps,1)}…${fmt(estimate.calibratedRange.maxMps,1)} m/s); the same affine line is extrapolated.`);
     }
-    if (estimate.baseRawLimited && hardwareRange) {
+    if (estimate.baseRawLimited) {
       warnings.push(`“${shot.label}”: requested speed needs a base raw input outside ${hardwareRange.minRaw}…${hardwareRange.maxRaw}; the base command is clipped at the boundary.`);
     }
     if (estimate.wheelRawLimited) {
@@ -5168,13 +5173,17 @@
     for (let index = 0; index < compiled.shots.length; index += 1) {
       const baseShot = compiled.shots[index];
       const adjusted = tunedShots[index].adjustment;
+      const variation = variedShotParams(baseShot, adjusted.params);
       const shot = {
         ...baseShot,
-        params: { ...adjusted.params },
+        params: { ...(variation.params || adjusted.params) },
         baseParams: { ...baseShot.params },
         tuningApplied: adjusted.changed,
+        variationApplied: Boolean(variation.result),
+        variationResult: variation.result || null,
       };
       if (adjusted.warnings?.length) warnings.push(...adjusted.warnings.map(message => `“${shot.label}”: ${message}`));
+      if (variation.error) errors.push(`“${shot.label}”: ${variation.error}`);
       const preflight = robotShotPreflight(shot);
       errors.push(...preflight.errors);
       warnings.push(...preflight.warnings);
@@ -5589,22 +5598,6 @@
     if (duration <= 0) return;
     const start = performance.now();
     while (playbackRunning && token === playbackToken) {
-      const elapsed = (performance.now() - start) / 1000;
-      const remaining = duration - elapsed;
-      if (remaining <= 0) return;
-      els.runStatus.textContent = `${prefix} ${fmt(remaining,1)}s`;
-      await sleep(Math.min(100, remaining * 1000), token);
-    }
-  }
-
-  async function waitWithLivePace(baseSeconds, token, prefix) {
-    const base = Math.max(0, finite(baseSeconds, 0));
-    if (base <= 0) return;
-    const start = performance.now();
-    while (playbackRunning && token === playbackToken) {
-      // Re-evaluate the pace multiplier every ~100 ms so pace buttons are
-      // genuinely live even during a between-set wait.
-      const duration = tunedDelaySeconds(base);
       const elapsed = (performance.now() - start) / 1000;
       const remaining = duration - elapsed;
       if (remaining <= 0) return;
@@ -6524,22 +6517,6 @@ STATUS
     document.body.appendChild(banner);
   }
 
-  function setMobileWorkspace(mode) {
-    const normalized = mode === "drills" ? "drills" : mode === "calibrate" ? "calibrate" : "graph";
-    document.body.classList.toggle("mobile-drills-open", normalized === "drills");
-    const tabs = [
-      [els.mobileGraphNavBtn, normalized === "graph"],
-      [els.mobileDrillsNavBtn, normalized === "drills"],
-      [els.mobileCalibrationNavBtn, normalized === "calibrate"],
-    ];
-    for (const [button, active] of tabs) {
-      if (!button) continue;
-      button.classList.toggle("active", active);
-      if (active) button.setAttribute("aria-current", "page");
-      else button.removeAttribute("aria-current");
-    }
-  }
-
   function openCalibrationWorkspace(tab = "guided") {
     setCalibrationTab(tab);
     renderCalibration();
@@ -6769,6 +6746,25 @@ STATUS
     buildRobotExecutionPlan,
     predictTrajectory,
     estimatedNovaSettings,
+    profileShotVariation,
+    benchmarkShotVariation(count = 24) {
+      const drill = activeDrill();
+      const node = drill?.nodes.find(candidate => candidate.type === "shot");
+      if (!node) return { ok: false, reason: "The active drill has no shot." };
+      const prediction = predictTrajectory(node.params);
+      const clearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
+      const benchmarkNode = {
+        ...node,
+        variation: ShotVariation.normalizeVariation({
+          enabled: true,
+          placement: { depthCm: 12, lateralCm: 15 },
+          clearance: { minCm: Math.max(.2, clearanceCm - 2), maxCm: clearanceCm + 2 },
+          speed: { minMps: node.params.speedMps - .7, maxMps: node.params.speedMps + .7 },
+          spin: { minRps: node.params.spinRps - 6, maxRps: node.params.spinRps + 6 },
+        }, node.params, prediction.net?.clearanceM),
+      };
+      return profileShotVariation(benchmarkNode, count);
+    },
     exportGuidedMeasurements,
     addUserDrill(drill) {
       const allIds = new Set([...(builtInCatalog?.drills || []).map(item => item.id), ...library.drills.map(item => item.id), String(drill?.id || "")]);
@@ -6804,6 +6800,7 @@ STATUS
       ["guided calibration", GuidedCalibration],
       ["launch model", LaunchModel],
       ["drill adjustments", DrillAdjustments],
+      ["shot variation", ShotVariation],
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missingRuntimeModules.length) {
       throw new Error(`runtime deployment is incomplete; missing ${missingRuntimeModules.join(", ")}`);

@@ -10,7 +10,7 @@ for file in \
   app.js pongbot-protocol.js pongbot-ble.js selftest.js emergency-shutdown-selftest.js \
   robot-geometry.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
-  drill-adjustments.js drill-adjustments-selftest.js protocol-debug.js protocol-debug-selftest.js \
+  drill-adjustments.js drill-adjustments-selftest.js shot-variation.js shot-variation-selftest.js protocol-debug.js protocol-debug-selftest.js \
   studio-features-core.js studio-features-selftest.js debug-advisor.js studio-features.js \
   continuous-runtime-selftest.js vendor/qrcode.min.js tools/openai-companion.mjs; do
   node --check "$file"
@@ -35,6 +35,7 @@ node linear-model-selftest.js
 
 echo "[8/14] Live drill-adjustment solver self-test"
 node drill-adjustments-selftest.js
+node shot-variation-selftest.js
 
 echo "[9/14] Sharing / AI / debugger / continuous-runtime logic"
 node studio-features-selftest.js
@@ -57,7 +58,7 @@ for path in Path('debug-packs').glob('*.json'):
     json.loads(path.read_text())
 for required in [
     'docs/guided-debugger.md','docs/drill-file-format.md','docs/ai-drill-assistant.md',
-    'docs/continuous-playback.md','docs/deployment.md','vendor/QRCode-LICENSE.txt'
+    'docs/continuous-playback.md','docs/deployment.md','docs/shot-variation.md','vendor/QRCode-LICENSE.txt'
 ]:
     if not Path(required).is_file(): raise SystemExit(f'Missing {required}')
 print('Example/documentation check: PASS')

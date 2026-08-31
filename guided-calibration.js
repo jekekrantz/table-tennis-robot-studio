@@ -12,6 +12,7 @@
   "use strict";
 
   if (!RobotGeometry) throw new Error("robot-geometry.js must load before guided-calibration.js");
+  if (!LaunchModel) throw new Error("launch-model.js must load before guided-calibration.js");
 
   const BALL_DIAMETER_M = 0.04;
   const BALL_RADIUS_M = BALL_DIAMETER_M / 2;
@@ -32,14 +33,7 @@
   const DEFAULT_MAX_MAD_ITERATIONS = 8;
   const MIN_SIN_INCIDENCE = 0.15;
 
-  // Production uses launch-model.js as the single source of truth. The literal fallback
-  // exists only so this module can still be unit-tested standalone.
-  const USER_SEED_SPEED_MODEL = Object.freeze(LaunchModel?.constants?.DEFAULT_LINEAR_EXIT_MODEL || {
-    interceptMps: -0.2758895085,
-    slopeMpsPerRaw: 0.0023936604543,
-    calibratedRawMin: 2000,
-    calibratedRawMax: 3000,
-  });
+  const USER_SEED_SPEED_MODEL = LaunchModel.constants.DEFAULT_LINEAR_EXIT_MODEL;
 
   function finite(value, fallback = 0) {
     const n = Number(value);
@@ -53,29 +47,15 @@
   function radians(deg) { return finite(deg, 0) * Math.PI / 180; }
 
   function normalizeSpeedModel(model = USER_SEED_SPEED_MODEL) {
-    if (LaunchModel?.sanitizeLinearModel) return LaunchModel.sanitizeLinearModel(model || USER_SEED_SPEED_MODEL);
-    const source = model && typeof model === "object" ? model : USER_SEED_SPEED_MODEL;
-    let slopeMpsPerRaw = finite(source.slopeMpsPerRaw, USER_SEED_SPEED_MODEL.slopeMpsPerRaw);
-    if (!(slopeMpsPerRaw > 1e-9)) slopeMpsPerRaw = USER_SEED_SPEED_MODEL.slopeMpsPerRaw;
-    let calibratedRawMin = finite(source.calibratedRawMin ?? source.minRaw, USER_SEED_SPEED_MODEL.calibratedRawMin);
-    let calibratedRawMax = finite(source.calibratedRawMax ?? source.maxRaw, USER_SEED_SPEED_MODEL.calibratedRawMax);
-    if (calibratedRawMax < calibratedRawMin) [calibratedRawMin, calibratedRawMax] = [calibratedRawMax, calibratedRawMin];
-    return {
-      interceptMps: finite(source.interceptMps, USER_SEED_SPEED_MODEL.interceptMps),
-      slopeMpsPerRaw, calibratedRawMin, calibratedRawMax,
-    };
+    return LaunchModel.sanitizeLinearModel(model || USER_SEED_SPEED_MODEL);
   }
 
   function speedMpsFromRaw(raw, model = USER_SEED_SPEED_MODEL) {
-    if (LaunchModel?.exitSpeedFromRaw) return LaunchModel.exitSpeedFromRaw(raw, model);
-    const m = normalizeSpeedModel(model);
-    return m.interceptMps + m.slopeMpsPerRaw * finite(raw, m.calibratedRawMin);
+    return LaunchModel.exitSpeedFromRaw(raw, model);
   }
 
   function rawFromSpeedMps(speedMps, model = USER_SEED_SPEED_MODEL) {
-    if (LaunchModel?.rawFromExitSpeed) return LaunchModel.rawFromExitSpeed(speedMps, model);
-    const m = normalizeSpeedModel(model);
-    return (finite(speedMps, speedMpsFromRaw(m.calibratedRawMin, m)) - m.interceptMps) / m.slopeMpsPerRaw;
+    return LaunchModel.rawFromExitSpeed(speedMps, model);
   }
 
   function interpolate(xs, ys, x) {

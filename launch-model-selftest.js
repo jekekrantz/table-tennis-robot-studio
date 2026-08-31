@@ -28,31 +28,11 @@ assert.strictEqual(LaunchModel.isRawCalibrated(3001, model), false);
 assert.strictEqual(LaunchModel.clampRawToHardware(200), 400);
 assert.strictEqual(LaunchModel.clampRawToHardware(9000), 7500);
 
-// Legacy sample arrays may be imported once, but must collapse to one least-squares line.
-const legacy = [
-  { raw: 1000, speedMps: 2.1 },
-  { raw: 1500, speedMps: 3.3 },
-  { raw: 2100, speedMps: 4.2 },
-  { raw: 3000, speedMps: 6.6 },
-];
-const imported = LaunchModel.fitLinearExitModel(legacy, { source: 'test-import' });
-assert(Number.isFinite(imported.interceptMps));
-assert(Number.isFinite(imported.slopeMpsPerRaw));
-assert(!('speedMap' in imported));
-for (const raw of [1100, 1700, 2600, 3400]) {
-  close(
-    LaunchModel.exitSpeedFromRaw(raw, imported),
-    imported.interceptMps + imported.slopeMpsPerRaw * raw,
-    1e-12,
-    `imported affine raw=${raw}`
-  );
-}
-
 // Nova speed-level scaling is a separate coordinate transform and must honor app settings.
 const scaling = {
-  wheelBaseRpm: 1000,
-  wheelRpmPerSpeed: 500,
-  wheelRpmPerSpin: 250,
+  rawAtZeroSpeedLevel: 1000,
+  rawPerSpeedLevel: 500,
+  rawDeltaPerSpinLevel: 250,
 };
 for (const level of [-1, 0, 1.5, 4, 9.25]) {
   const raw = LaunchModel.rawFromLevel(level, scaling);
@@ -62,8 +42,8 @@ for (const level of [-1, 0, 1.5, 4, 9.25]) {
 const level = 4;
 const spinSetting = 2;
 const baseRaw = LaunchModel.rawFromLevel(level, scaling);
-const wheelA = baseRaw + scaling.wheelRpmPerSpin * spinSetting;
-const wheelB = baseRaw - scaling.wheelRpmPerSpin * spinSetting;
+const wheelA = baseRaw + scaling.rawDeltaPerSpinLevel * spinSetting;
+const wheelB = baseRaw - scaling.rawDeltaPerSpinLevel * spinSetting;
 close(
   LaunchModel.spinRpsFromRawWheels(wheelA, wheelB, scaling),
   LaunchModel.spinRpsFromSpinSetting(level, spinSetting, { clampToMeasuredCapacity: false }),

@@ -18,6 +18,7 @@ SOURCES = [
     "launch-model.js",
     "guided-calibration.js",
     "drill-adjustments.js",
+    "shot-variation.js",
     "protocol-debug.js",
     "studio-features-core.js",
     "debug-advisor.js",

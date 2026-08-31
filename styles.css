@@ -64,6 +64,14 @@ button { color: inherit; }
 .numeric-stepper { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:6px; align-items:stretch; min-width:0; }
 .numeric-stepper .input-with-unit { min-width:0; }
 .shot-parameter-stack { display:grid; gap:9px; margin:10px 0 12px; }
+.shot-variation-section { margin:14px 0; border:1px solid var(--border); border-radius:11px; background:#111923; overflow:hidden; }
+.shot-variation-section summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px; cursor:pointer; list-style:none; }
+.shot-variation-section summary::-webkit-details-marker { display:none; }
+.shot-variation-section summary span { display:grid; gap:2px; }
+.shot-variation-section summary small { color:var(--muted); font-size:.72rem; font-weight:500; }
+.shot-variation-section summary input { width:20px; height:20px; accent-color:var(--accent); }
+.shot-variation-body { border-top:1px solid var(--border); padding:12px; }
+.shot-variation-body .field-grid { margin:10px 0 12px; }
 .shot-parameter-row { display:grid; grid-template-columns:minmax(118px,.42fr) minmax(0,1fr); gap:12px; align-items:center; }
 .shot-parameter-row > span:first-child { margin:0; }
 .shot-parameter-row .numeric-stepper,.shot-parameter-row > .input-with-unit { width:100%; }
@@ -1873,8 +1881,7 @@ textarea { font:inherit; color:inherit; }
 
 /* v11 navigation polish: per-screen back controls own navigation; avoid duplicate arrows. */
 .app-topbar .app-back-button { display:none !important; }
-/* Keep the global connection control compact on desktop; the hidden legacy back
-   slot is no longer part of the top-bar grid. */
+/* Keep the global connection control compact on desktop. */
 .app-topbar { grid-template-columns:minmax(0,1fr) auto; }
 .global-robot-status { justify-self:end; width:auto; }
 

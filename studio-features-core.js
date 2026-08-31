@@ -14,6 +14,19 @@
     if(!drill||typeof drill!=='object')throw new Error('A drill is required.');
     return {format:DRILL_FORMAT,formatVersion:DRILL_VERSION,name:String(drill.name||'Shared drill').slice(0,90),description:String(drill.description||'').slice(0,600),createdWith:'Table Tennis Robot Studio',createdAt:meta.createdAt||new Date().toISOString(),trainingGoal:meta.trainingGoal||drill.trainingGoal||'',level:meta.level||drill.level||'',instructions:meta.instructions||drill.instructions||'',drill:clone(drill)};
   }
+  function validateShotVariation(variation,errors){
+    if(!variation?.enabled)return;
+    const checks=[
+      ['placement.depthCm',variation.placement?.depthCm,0,120],['placement.lateralCm',variation.placement?.lateralCm,0,120],
+      ['clearance.minCm',variation.clearance?.minCm,.2,80],['clearance.maxCm',variation.clearance?.maxCm,.2,80],
+      ['speed.minMps',variation.speed?.minMps,1,20],['speed.maxMps',variation.speed?.maxMps,1,20],
+      ['spin.minRps',variation.spin?.minRps,-120,120],['spin.maxRps',variation.spin?.maxRps,-120,120],
+    ];
+    for(const [name,value,min,max]of checks){const number=Number(value);if(!Number.isFinite(number)||number<min||number>max)errors.push(`Shot variation ${name} must be ${min}…${max}.`);}
+    if(Number(variation.clearance?.minCm)>Number(variation.clearance?.maxCm))errors.push('Shot variation clearance minimum exceeds maximum.');
+    if(Number(variation.speed?.minMps)>Number(variation.speed?.maxMps))errors.push('Shot variation speed minimum exceeds maximum.');
+    if(Number(variation.spin?.minRps)>Number(variation.spin?.maxRps))errors.push('Shot variation spin minimum exceeds maximum.');
+  }
   function validatePortableDrill(data){
     const errors=[];
     if(!data||typeof data!=='object'||Array.isArray(data))errors.push('The file must contain an object.');
@@ -33,6 +46,7 @@
         for(const [key,min,max] of [['speedMps',1,20],['spinRps',-120,120],['elevationDeg',-20,45],['aimDeg',-60,60]]){
           const x=Number(p[key]); if(!Number.isFinite(x)||x<min||x>max)errors.push(`Shot ${key} must be ${min}…${max}.`);
         }
+        validateShotVariation(n.variation,errors);
       }
     }
     return {valid:errors.length===0,errors:[...new Set(errors)].slice(0,20)};

@@ -104,7 +104,9 @@ for token in (
 for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.1"',
               'data-step-target="shotSpinField"', 'data-step-delta="1"',
               'Predicted top view', 'topTrajectorySvg(prediction, 600, 280)',
-              'class="shot-parameter-stack"', 'class="field shot-parameter-row"'):
+              'class="shot-parameter-stack"', 'class="field shot-parameter-row"',
+              'Shot variation', 'testShotVariationBtn', 'variationDepthField',
+              'variationClearanceMinField', 'variationSpeedMinField', 'variationSpinMinField'):
     if token not in app:
         raise SystemExit(f"Missing shot-editor behavior: {token}")
 if 'distanceTrajectorySvg(' in app:
@@ -168,20 +170,35 @@ for name in (
     "Shot: Long wide topspin to backhand", "Match: Short forehand underspin → wide recovery",
     "Match: Short backhand underspin → forehand recovery", "Match: Short receive → random long attack",
     "Match: Backhand exchange → switch", "Match: Weighted rally", "Match: Random pattern mix",
+    "Drill: Variable topspin rally", "Drill: Variable short receive",
 ):
     if name not in app:
         raise SystemExit(f"Missing built-in training preset: {name}")
-for legacy in ("Serve + third ball", "Two forehands then backhand", "Match-play mix"):
-    if f'defaultDrill("{legacy}")' in app:
-        raise SystemExit(f"Legacy built-in drill is still created: {legacy}")
+for removed_preset in ("Serve + third ball", "Two forehands then backhand", "Match-play mix"):
+    if f'defaultDrill("{removed_preset}")' in app:
+        raise SystemExit(f"Removed built-in drill was recreated: {removed_preset}")
 if '>Restore defaults</button>' in html:
     raise SystemExit("Built-in drills must not rely on a destructive Restore defaults action")
 for token in ("Built-in", "My drills", "Copy to My drills", "New folder"):
     if token not in html:
         raise SystemExit(f"Missing separated-library UI: {token}")
-for token in ("LIBRARY_STRUCTURE_VERSION = 2", "makeBuiltInCatalog", "migrateLegacyLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
+for token in ("makeBuiltInCatalog", "sanitizeLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
     if token not in app:
         raise SystemExit(f"Missing separated-library model: {token}")
+for token in ('const DEFAULT_LIBRARY_VERSION = 6;', 'DEFAULT_VARIATION_PROFILES',
+              'variationProfile: "shortNeutral"', 'variationProfile: "short"', 'variationProfile: "rally"',
+              'variationProfile: "deep"', 'variationProfile: "spin"',
+              'variationProfile: "fast"', 'function variedPresetShot',
+              'shot.variation = variationForPreset(DEFAULT_SHOT_PRESETS[key]);'):
+    if token not in app:
+        raise SystemExit(f"Built-in library variation integration missing: {token}")
+if app.count('variationProfile:') != 18:
+    raise SystemExit("Every built-in shot preset must select exactly one variation profile")
+for token in ('labels: ["Variable topspin"], varied: true',
+              'randomLabel: "Variable short underspin"',
+              'const shotFactory = varied ? variedPresetShot : presetShot;'):
+    if token not in app:
+        raise SystemExit(f"Selective built-in variation behavior missing: {token}")
 
 # Responsive structure.
 for token in (".mobile-primary-nav", ".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell",

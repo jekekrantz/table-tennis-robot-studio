@@ -25,7 +25,14 @@ Portable drills use human-readable JSON and are shared by file import/export, UR
     "settings": {"repetitions": 0, "delayBetweenSets": 1},
     "nodes": [
       {"id": "shot-1", "type": "shot", "label": "Backhand", "x": 300, "y": 260,
-       "params": {"speedMps": 5.8, "spinRps": 8, "elevationDeg": 10.5, "aimDeg": -8}}
+       "params": {"speedMps": 5.8, "spinRps": 8, "elevationDeg": 10.5, "aimDeg": -8},
+       "variation": {
+         "enabled": true,
+         "placement": {"depthCm": 15, "lateralCm": 20},
+         "clearance": {"minCm": 8, "maxCm": 12},
+         "speed": {"minMps": 5.2, "maxMps": 6.4},
+         "spin": {"minRps": 3, "maxRps": 13}
+       }}
     ],
     "edges": []
   }
@@ -42,6 +49,8 @@ Current shot ranges exposed to portable/AI data are:
 - `aimDeg`: -60..60
 
 Version 1 allows the same current graph node types as the app (`shot`, `random`, `drill`, `counter`) and caps payload/node/edge sizes to avoid pathological imports. Unknown optional wrapper metadata can be ignored, but unsupported `formatVersion` values fail with a controlled error.
+
+Shot `variation` is optional. Placement values are half-widths around the nominal modeled landing point. Clearance is measured from the top of the physical net to the bottom of the ball. Speed and spin ranges are physical launch values. Imported variation ranges are validated before the drill preview is shown.
 
 ## Links and QR
 

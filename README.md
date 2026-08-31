@@ -36,6 +36,7 @@ Back arrows pop navigation history; close buttons dismiss only the current dialo
 - Real Start/Stop execution with Ready-state gating and heartbeat handling.
 - Small Start batches for BLE/robot stability.
 - Physical shot inputs in m/s, rps and degrees, converted to Nova parameters.
+- Physically constrained per-shot variation in landing position, net clearance, speed and spin, used selectively by random, match-like and variable-practice drills.
 - Trajectory preview using a published aerodynamic free-flight model with ITTF ball parameters.
 - Editable robot/table calibration, including a one-ball physical calibration test.
 - Protocol diagnostics and an offline protocol/BLE mock self-test.
@@ -242,9 +243,10 @@ The current JSON format uses:
 ```json
 {
   "schemaVersion": 1,
-  "builtInLibraryVersion": 2,
+  "activeDrillSource": "builtin",
   "activeDrillId": "...",
   "calibration": {},
+  "folders": [],
   "drills": []
 }
 ```

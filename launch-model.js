@@ -78,15 +78,15 @@
   function normalizeMotorScaling(scaling = DEFAULT_MOTOR_SCALING) {
     const source = scaling && typeof scaling === "object" ? scaling : DEFAULT_MOTOR_SCALING;
     const rawAtZeroSpeedLevel = finite(
-      source.rawAtZeroSpeedLevel ?? source.wheelBaseRpm,
+      source.rawAtZeroSpeedLevel,
       DEFAULT_MOTOR_SCALING.rawAtZeroSpeedLevel
     );
     let rawPerSpeedLevel = finite(
-      source.rawPerSpeedLevel ?? source.wheelRpmPerSpeed,
+      source.rawPerSpeedLevel,
       DEFAULT_MOTOR_SCALING.rawPerSpeedLevel
     );
     let rawDeltaPerSpinLevel = finite(
-      source.rawDeltaPerSpinLevel ?? source.wheelRpmPerSpin,
+      source.rawDeltaPerSpinLevel,
       DEFAULT_MOTOR_SCALING.rawDeltaPerSpinLevel
     );
     if (!(rawPerSpeedLevel > 1e-9)) rawPerSpeedLevel = DEFAULT_MOTOR_SCALING.rawPerSpeedLevel;
@@ -106,8 +106,8 @@
     const interceptMps = finite(source.interceptMps, fallback.interceptMps);
     let slopeMpsPerRaw = finite(source.slopeMpsPerRaw, fallback.slopeMpsPerRaw);
     if (!(slopeMpsPerRaw > 1e-9)) slopeMpsPerRaw = fallback.slopeMpsPerRaw;
-    let calibratedRawMin = finite(source.calibratedRawMin ?? source.minRaw, fallback.calibratedRawMin);
-    let calibratedRawMax = finite(source.calibratedRawMax ?? source.maxRaw, fallback.calibratedRawMax);
+    let calibratedRawMin = finite(source.calibratedRawMin, fallback.calibratedRawMin);
+    let calibratedRawMax = finite(source.calibratedRawMax, fallback.calibratedRawMax);
     if (calibratedRawMax < calibratedRawMin) [calibratedRawMin, calibratedRawMax] = [calibratedRawMax, calibratedRawMin];
     if (calibratedRawMax - calibratedRawMin < 1) {
       calibratedRawMin = fallback.calibratedRawMin;
@@ -120,33 +120,6 @@
       calibratedRawMax,
       source: String(source.source || fallback.source || "linear-calibration"),
     };
-  }
-
-  // Utility for importing old calibration files. Samples are converted once to one
-  // least-squares straight line; normal operation never interpolates between samples.
-  function fitLinearExitModel(samples, options = {}) {
-    const points = (samples || [])
-      .map(point => ({ raw: finite(point?.raw, NaN), speedMps: finite(point?.speedMps, NaN) }))
-      .filter(point => Number.isFinite(point.raw) && Number.isFinite(point.speedMps));
-    if (points.length < 2) return sanitizeLinearModel(options.fallback || DEFAULT_LINEAR_EXIT_MODEL);
-    const meanRaw = points.reduce((sum, point) => sum + point.raw, 0) / points.length;
-    const meanSpeed = points.reduce((sum, point) => sum + point.speedMps, 0) / points.length;
-    const denominator = points.reduce((sum, point) => sum + Math.pow(point.raw - meanRaw, 2), 0);
-    if (denominator < 1e-12) return sanitizeLinearModel(options.fallback || DEFAULT_LINEAR_EXIT_MODEL);
-    const slopeMpsPerRaw = points.reduce((sum, point) => sum + (point.raw - meanRaw) * (point.speedMps - meanSpeed), 0) / denominator;
-    const interceptMps = meanSpeed - slopeMpsPerRaw * meanRaw;
-    const rmseMps = Math.sqrt(points.reduce((sum, point) => {
-      const residual = interceptMps + slopeMpsPerRaw * point.raw - point.speedMps;
-      return sum + residual * residual;
-    }, 0) / points.length);
-    const model = sanitizeLinearModel({
-      interceptMps,
-      slopeMpsPerRaw,
-      calibratedRawMin: Math.min(...points.map(point => point.raw)),
-      calibratedRawMax: Math.max(...points.map(point => point.raw)),
-      source: options.source || "legacy-samples-import",
-    });
-    return { ...model, rmseMps, pointCount: points.length };
   }
 
   function exitSpeedFromRaw(raw, model = DEFAULT_LINEAR_EXIT_MODEL) {
@@ -184,21 +157,10 @@
     };
   }
 
-  // Backward-compatible name. This is a hardware-command range, not a model clamp.
-  function exitSpeedRange(model = DEFAULT_LINEAR_EXIT_MODEL) {
-    return hardwareSpeedRange(model);
-  }
-
   function isRawCalibrated(raw, model = DEFAULT_LINEAR_EXIT_MODEL) {
     const m = sanitizeLinearModel(model);
     const r = finite(raw, NaN);
     return Number.isFinite(r) && r >= m.calibratedRawMin && r <= m.calibratedRawMax;
-  }
-
-  function isSpeedCalibrated(speedMps, model = DEFAULT_LINEAR_EXIT_MODEL) {
-    const range = calibratedSpeedRange(model);
-    const s = finite(speedMps, NaN);
-    return Number.isFinite(s) && s >= range.minMps && s <= range.maxMps;
   }
 
   function clampRawToHardware(raw) {
@@ -262,14 +224,11 @@
     rawFromLevel,
     levelFromRaw,
     sanitizeLinearModel,
-    fitLinearExitModel,
     exitSpeedFromRaw,
     rawFromExitSpeed,
     calibratedSpeedRange,
     hardwareSpeedRange,
-    exitSpeedRange,
     isRawCalibrated,
-    isSpeedCalibrated,
     clampRawToHardware,
     normalizeSpinCurve,
     spinCapacityAtLevel,
