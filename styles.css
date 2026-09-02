@@ -1124,7 +1124,7 @@ button { color: inherit; }
 .speed-map-result span { color:#9fb0c3; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .speed-map-result small { color:var(--muted); }
 .ground-fit-note { padding:8px 10px; border-radius:8px; background:color-mix(in srgb,var(--warning),transparent 88%); color:#e8d2a0; font-size:.7rem; }
-.model-settings-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
+.model-settings-layout { display:grid; grid-template-columns:1fr; gap:14px; margin-top:14px; }
 .model-settings-layout .guided-card { margin:0; }
 .table-settings-card { margin-top:14px; }
 .calibration-dialog { width:min(1120px,calc(100vw - 24px)); }
@@ -1649,11 +1649,84 @@ textarea { font:inherit; color:inherit; }
 .inline-tuning-stepper output { border-left:1px solid #3b4658; border-right:1px solid #3b4658; font-weight:800; font-variant-numeric:tabular-nums; }
 .session-adjustment.active output { color:#8ce0b2; }
 .session-adjustment-summary { margin:10px 0 0; color:var(--muted); font-size:.68rem; }
-.robot-setup-summary { display:grid; grid-template-columns:minmax(160px,260px) minmax(0,1fr); align-items:center; gap:14px; margin-top:12px; }
+.robot-setup-summary { margin-top:12px; }
+.robot-setup-mini { width:min(100%,320px); }
 .robot-setup-summary svg { width:100%; height:auto; border:1px solid #3b4658; border-radius:9px; background:#0e151f; }
-.robot-setup-summary strong,.robot-setup-summary small { display:block; }
-.robot-setup-summary small { color:var(--muted); margin-top:4px; }
-.run-secondary-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px; }
+.run-secondary-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:14px; }
+
+/* Robot pose calibration */
+.pose-calibration-dialog {
+  width:min(940px,calc(100vw - 24px));
+  max-height:calc(100dvh - 24px);
+  padding:0;
+  border:1px solid var(--border);
+  border-radius:15px;
+  background:var(--panel);
+  color:var(--text);
+}
+.pose-calibration-dialog::backdrop { background:rgba(4,7,11,.8); }
+.pose-calibration-frame { max-height:calc(100dvh - 28px); overflow:auto; }
+.pose-calibration-workspace {
+  display:grid;
+  grid-template-columns:minmax(340px,.92fr) minmax(300px,.68fr);
+  gap:18px;
+  margin-top:16px;
+  align-items:stretch;
+}
+.pose-table-panel {
+  min-width:0;
+  min-height:560px;
+  display:grid;
+  place-items:center;
+  padding:12px;
+  border:1px solid #334155;
+  border-radius:13px;
+  background:radial-gradient(circle at 50% 55%,#192839 0,#0c131c 72%);
+  overflow:hidden;
+}
+.pose-calibration-table {
+  display:block;
+  width:100%;
+  max-width:455px;
+  max-height:calc(100dvh - 150px);
+  touch-action:none;
+  user-select:none;
+}
+.pose-table-surface { fill:#14344a; stroke:#6e9bb8; stroke-width:2; }
+.pose-table-centre { stroke:rgba(219,236,247,.66); stroke-width:2; }
+.pose-table-net { stroke:#f1f5f9; stroke-width:7; filter:drop-shadow(0 2px 2px rgba(0,0,0,.65)); }
+.pose-table-label { fill:rgba(225,237,246,.58); font:700 12px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; text-transform:uppercase; letter-spacing:1.2px; pointer-events:none; }
+.pose-table-label-near { text-anchor:start; }
+.pose-target circle { fill:#d29b42; stroke:#ffe0a3; stroke-width:2; }
+.pose-target text { fill:#1b1205; font:800 12px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; pointer-events:none; }
+.pose-target.active circle { fill:#63afff; stroke:#d9edff; stroke-width:4; filter:drop-shadow(0 0 8px rgba(82,164,255,.85)); }
+.pose-target.observed circle { fill:#48c98b; stroke:#c3f8df; }
+.pose-actual-landing path { fill:none; stroke:#ff8c8c; stroke-width:4; stroke-linecap:round; pointer-events:none; }
+.pose-uncertainty { fill:rgba(91,178,255,.16); stroke:#74bdff; stroke-width:2; stroke-dasharray:6 5; pointer-events:none; }
+.pose-direction-line { stroke:#98d3ff; stroke-width:4; stroke-linecap:round; pointer-events:none; }
+.pose-robot { cursor:grab; filter:drop-shadow(0 7px 8px rgba(0,0,0,.5)); }
+.pose-robot:active { cursor:grabbing; }
+.pose-robot rect { fill:#48c98b; stroke:#d5ffed; stroke-width:2.5; }
+.pose-robot circle { fill:#10251c; stroke:#d5ffed; stroke-width:2; pointer-events:none; }
+.pose-robot path { fill:none; stroke:#10251c; stroke-width:4; stroke-linecap:round; pointer-events:none; }
+.pose-rotation-handle { cursor:grab; filter:drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
+.pose-rotation-handle circle { fill:#2e78d8; stroke:#dcebff; stroke-width:3; }
+.pose-rotation-handle path { fill:none; stroke:white; stroke-width:2.5; stroke-linecap:round; }
+.pose-feedback-hit-area { fill:rgba(76,165,255,.025); stroke:#72baff; stroke-width:3; stroke-dasharray:10 7; cursor:crosshair; pointer-events:all; }
+.pose-calibration-guide { display:flex; flex-direction:column; min-width:0; padding:18px; border:1px solid var(--border); border-radius:13px; background:#111923; }
+.pose-calibration-guide h3 { margin:3px 0 8px; font-size:1.12rem; }
+.pose-calibration-guide p:not(.pose-step) { margin:0 0 14px; color:var(--muted); line-height:1.52; font-size:.78rem; }
+.pose-step { margin:0; color:#78baff; font-size:.66rem; font-weight:850; letter-spacing:.09em; text-transform:uppercase; }
+.pose-readout { display:grid; gap:7px; margin:2px 0 16px; }
+.pose-readout span { padding:8px 9px; border:1px solid #344255; border-radius:8px; background:#0c131c; color:#d8e6f3; font-size:.73rem; font-variant-numeric:tabular-nums; }
+.pose-warning { color:#f1ca78 !important; }
+.pose-confidence { margin-top:auto; padding:13px; border:1px solid #30455a; border-radius:10px; background:#0c151f; }
+.pose-confidence span,.pose-confidence strong,.pose-confidence small { display:block; }
+.pose-confidence span { color:#8fb5d4; font-size:.64rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.pose-confidence strong { margin-top:5px; color:#dcedfb; font-size:.76rem; line-height:1.45; }
+.pose-confidence small { margin-top:5px; color:var(--muted); font-size:.64rem; line-height:1.4; }
+.pose-calibration-dialog-actions { display:grid; grid-template-columns:1fr 1.4fr; gap:8px; margin-top:12px; }
+.pose-calibration-guide .wide { width:100%; min-height:44px; }
 
 /* Editor */
 .editor-screen { padding:0; max-width:none; height:calc(100dvh - 64px); overflow:hidden; }
@@ -1832,9 +1905,7 @@ textarea { font:inherit; color:inherit; }
   .run-screen .delay-field { grid-column:1; }
   .run-screen .run-progress-block { grid-column:1 / -1; }
   .session-adjustment { grid-template-columns:minmax(0,1fr) 170px; }
-  .robot-setup-summary { grid-template-columns:120px minmax(0,1fr); }
   .run-secondary-actions { grid-template-columns:1fr; }
-
   .editor-screen { height:calc(100dvh - 56px - var(--primary-nav-height)); padding:0; }
   .editor-screen-header { min-height:62px; padding:7px 8px; }
   .editor-screen-header .button { padding:7px 8px; font-size:.68rem; }
@@ -1861,7 +1932,7 @@ textarea { font:inherit; color:inherit; }
   .output-port.vertical-port:hover { transform:scale(1.08); }
   .port-caption { display:none; }
 
-  .app-dialog,.calibration-dialog,.robot-dialog,.live-tuning-dialog,.preview-dialog {
+  .app-dialog,.calibration-dialog,.pose-calibration-dialog,.robot-dialog,.live-tuning-dialog,.preview-dialog {
     width:100vw !important;
     max-width:none !important;
     height:calc(100dvh - var(--primary-nav-height));
@@ -1877,6 +1948,24 @@ textarea { font:inherit; color:inherit; }
   .dialog-action-row { display:grid; grid-template-columns:1fr 1fr; }
   .dialog-action-row .button { min-height:44px; }
   .field-grid.three { grid-template-columns:1fr; }
+
+  .pose-calibration-frame { height:100%; max-height:100%; padding:10px; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; }
+  .pose-calibration-frame > header { align-items:flex-start; }
+  .pose-calibration-frame > header h2 { font-size:1.08rem; }
+  .pose-calibration-frame > header p:not(.eyebrow) { display:none; }
+  .pose-calibration-workspace { min-height:0; margin-top:8px; grid-template-columns:1fr; grid-template-rows:minmax(0,1fr) auto; gap:8px; }
+  .pose-table-panel { min-height:0; padding:4px; border-radius:10px; }
+  .pose-calibration-table { width:auto; max-width:100%; height:100%; max-height:none; }
+  .pose-calibration-guide { padding:11px; border-radius:10px; }
+  .pose-calibration-guide h3 { margin:2px 0 4px; font-size:.96rem; }
+  .pose-calibration-guide p:not(.pose-step) { margin-bottom:8px; font-size:.68rem; line-height:1.35; }
+  .pose-readout { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; margin:0 0 8px; }
+  .pose-readout span { padding:6px 5px; font-size:.58rem; text-align:center; }
+  .pose-confidence { margin-top:8px; padding:8px; }
+  .pose-confidence strong { margin-top:3px; font-size:.66rem; }
+  .pose-confidence small { display:none; }
+  .pose-calibration-dialog-actions { margin-top:8px; }
+  .pose-calibration-guide .wide,.pose-calibration-dialog-actions .button { min-height:40px; }
 }
 
 /* v11 navigation polish: per-screen back controls own navigation; avoid duplicate arrows. */

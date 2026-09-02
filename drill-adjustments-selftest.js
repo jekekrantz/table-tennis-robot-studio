@@ -33,25 +33,32 @@ assert.deepStrictEqual(
 );
 
 const faster = A.applyShotTuning(base, { speedPct: 10 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
-assert(Math.abs(faster.params.speedMps - 8.25) < 1e-9, "speed tuning should keep requested speed exact when clearance is unchanged");
-assert(Math.abs(faster.params.spinRps - 20) < 1e-9, "speed tuning should keep spin unchanged");
+assert(Math.abs(faster.params.speedMps - 8.25) < 0.01, "speed tuning should closely keep the requested speed");
+assert(Math.abs(faster.params.spinRps - 20) < 0.01, "speed tuning should closely keep spin unchanged");
 assert(faster.landingErrorM < 0.01, `speed compensation landing error too large: ${faster.landingErrorM}`);
 
 const moreSpin = A.applyShotTuning(base, { spinPct: 10 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
-assert(Math.abs(moreSpin.params.speedMps - 7.5) < 1e-9, "spin tuning should keep speed unchanged");
-assert(Math.abs(moreSpin.params.spinRps - 22) < 1e-9, "spin tuning should change spin magnitude");
+assert(Math.abs(moreSpin.params.speedMps - 7.5) < 0.01, "spin tuning should closely keep speed unchanged");
+assert(Math.abs(moreSpin.params.spinRps - 22) < 0.01, "spin tuning should change spin magnitude");
 assert(moreSpin.landingErrorM < 0.01, `spin compensation landing error too large: ${moreSpin.landingErrorM}`);
 
 const higher = A.applyShotTuning(base, { clearancePct: 10 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
 assert(higher.prediction.net.clearanceM > basePred.net.clearanceM, "clearance should increase");
 assert(Math.abs(higher.prediction.net.clearanceM - basePred.net.clearanceM * 1.10) < 0.002, "clearance target should be closely matched");
 assert(higher.landingErrorM < 0.01, `clearance compensation landing error too large: ${higher.landingErrorM}`);
-assert(Math.abs(higher.params.spinRps / higher.params.speedMps - base.spinRps / base.speedMps) < 1e-8, "clearance solve should preserve spin/speed ratio");
+assert(higher.evaluations <= 24, "clearance solve should respect the phone-sized evaluation budget");
+
+const combined = A.applyShotTuning(base, { speedPct: 10, spinPct: 10, clearancePct: 10 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
+assert(combined.changed && combined.feasible, "combined tuning should produce one feasible adjusted trajectory");
+assert(combined.params.speedMps > base.speedMps && combined.params.spinRps > base.spinRps, "combined tuning should move speed and spin in the requested directions");
+assert(combined.prediction.net.clearanceM > basePred.net.clearanceM, "combined tuning should move clearance in the requested direction");
+assert(combined.landingErrorM < .10, `combined tuning landing error too large: ${combined.landingErrorM}`);
+assert(combined.evaluations <= 24, "combined tuning should respect the phone-sized evaluation budget");
 
 const underspin = { ...base, spinRps: -20 };
 const moreUnder = A.applyShotTuning(underspin, { spinPct: 300 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
 assert(moreUnder.params.spinRps < -20, "positive spin tuning should increase underspin magnitude too");
-assert(Math.abs(moreUnder.params.spinRps + 80) < 1e-9, "+300% spin should permit four times the stored magnitude");
+assert(Math.abs(moreUnder.params.spinRps + 80) < 0.01, "+300% spin should permit four times the stored magnitude");
 
 const noSpin = A.applyShotTuning({ ...base, spinRps: 0 }, { spinPct: 300 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
 assert.strictEqual(noSpin.params.spinRps, 0, "no-spin shots must remain no-spin under spin tuning");
@@ -61,7 +68,8 @@ assert(nearNet.targetClearanceM >= 0.00199 && nearNet.targetClearanceM <= 0.0020
 assert(nearNet.prediction.net.clearanceM >= -0.0005, "near-net tuning should not intentionally drive the ball through the net");
 
 const plusFiftySpeed = A.applyShotTuning(base, { speedPct: 50 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
-assert(Math.abs(plusFiftySpeed.params.speedMps - 11.25) < 1e-9, "speed tuning should allow +50% where supported");
+assert(Math.abs(plusFiftySpeed.params.speedMps - 11.25) < 0.05, "speed tuning should still seek the requested +50% speed");
+assert.strictEqual(plusFiftySpeed.feasible, false, "an impossible speed/landing combination should be reported, not silently accepted");
 
 const everyBall = A.applyTuningToShotList([
   { id: "a", params: { ...base } },
@@ -70,8 +78,29 @@ const everyBall = A.applyTuningToShotList([
 ], { speedPct: 4 }, toyPredict, { minSpeedMps: 3, maxSpeedMps: 15 });
 assert.strictEqual(everyBall.length, 3, "all-shot tuning must preserve every ball in the traversal");
 assert(everyBall.every(item => item.adjustment.changed), "all balls should receive active live tuning");
-assert(Math.abs(everyBall[0].adjustment.params.speedMps - 7.8) < 1e-9, "first ball speed tuning missing");
-assert(Math.abs(everyBall[1].adjustment.params.speedMps - 6.24) < 1e-9, "second ball speed tuning missing");
-assert(Math.abs(everyBall[2].adjustment.params.speedMps - 9.36) < 1e-9, "third ball speed tuning missing");
+assert(Math.abs(everyBall[0].adjustment.params.speedMps - 7.8) < 0.01, "first ball speed tuning missing");
+assert(Math.abs(everyBall[1].adjustment.params.speedMps - 6.24) < 0.01, "second ball speed tuning missing");
+assert(Math.abs(everyBall[2].adjustment.params.speedMps - 9.36) < 0.01, "third ball speed tuning missing");
+assert(everyBall.every(item => item.adjustment.evaluations <= 24), "each ball must stay within the evaluation budget");
+
+// A current physical robot pose can differ from the drill's authored pose. The
+// same solve should compensate that SE(2) shift and live tuning together.
+function posePredict(pose) {
+  return params => {
+    const local = toyPredict(params);
+    const angle = pose.yawDeg * Math.PI / 180;
+    const x = local.landing.x * Math.cos(angle) - local.landing.y * Math.sin(angle) + pose.x;
+    const y = local.landing.x * Math.sin(angle) + local.landing.y * Math.cos(angle) + pose.y;
+    return { ...local, landing: { x, y } };
+  };
+}
+const authoredPredict = posePredict({ x: 0, y: 0, yawDeg: 0 });
+const movedPredict = posePredict({ x: .04, y: -.03, yawDeg: 1 });
+const poseCompensated = A.applyShotTuning(base, { speedPct: 4, spinPct: 5, clearancePct: 5 }, movedPredict, {
+  minSpeedMps: 3, maxSpeedMps: 15, basePrediction: authoredPredict(base), forceSolve: true, preserveClearance: true,
+});
+assert(poseCompensated.feasible, "combined pose and live adjustment solve should be feasible for a small move");
+assert(poseCompensated.evaluations <= 24, "pose compensation must use the same bounded evaluation budget");
+assert(poseCompensated.landingErrorM < .12, "pose compensation should preserve the authored landing within its feasibility tolerance");
 
 console.log("Drill adjustments self-test PASS");

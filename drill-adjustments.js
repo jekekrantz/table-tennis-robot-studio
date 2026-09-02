@@ -68,128 +68,123 @@
     }
   }
 
-  function elevationCandidate(params, elevationDeg, predict, targetLanding) {
-    const candidate = { ...params, elevationDeg };
-    const prediction = safePredict(predict, candidate);
-    const error = landingErrorM(prediction, targetLanding);
-    const netPenalty = prediction?.net?.hit ? 2 : 0;
-    const missingPenalty = Number.isFinite(error) ? 0 : 100;
-    return { params: candidate, prediction, landingErrorM: error, score: (Number.isFinite(error) ? error : 10) + netPenalty + missingPenalty };
-  }
+  const CONTROL_KEYS = Object.freeze(["speedMps", "spinRps", "elevationDeg", "aimDeg"]);
 
-  function solveElevationForLanding(params, targetLanding, predict, options = {}) {
-    const minElevationDeg = finite(options.minElevationDeg, -20);
-    const maxElevationDeg = finite(options.maxElevationDeg, 30);
-    const lo = Math.min(minElevationDeg, maxElevationDeg);
-    const hi = Math.max(minElevationDeg, maxElevationDeg);
-    const coarseStepDeg = clamp(finite(options.coarseStepDeg, 1), 0.25, 5);
-
-    let best = null;
-    for (let elevation = lo; elevation <= hi + 1e-9; elevation += coarseStepDeg) {
-      const result = elevationCandidate(params, elevation, predict, targetLanding);
-      if (!best || result.score < best.score) best = result;
-    }
-    if (!best) return null;
-
-    let left = Math.max(lo, best.params.elevationDeg - coarseStepDeg * 1.5);
-    let right = Math.min(hi, best.params.elevationDeg + coarseStepDeg * 1.5);
-    for (let iteration = 0; iteration < 14 && right - left > 0.001; iteration += 1) {
-      const m1 = left + (right - left) / 3;
-      const m2 = right - (right - left) / 3;
-      const r1 = elevationCandidate(params, m1, predict, targetLanding);
-      const r2 = elevationCandidate(params, m2, predict, targetLanding);
-      if (r1.score <= r2.score) {
-        right = m2;
-        if (r1.score < best.score) best = r1;
-      } else {
-        left = m1;
-        if (r2.score < best.score) best = r2;
+  function solveLinear(matrix, rhs) {
+    const n = rhs.length;
+    const augmented = matrix.map((row, index) => [...row, rhs[index]]);
+    for (let column = 0; column < n; column += 1) {
+      let pivot = column;
+      for (let row = column + 1; row < n; row += 1) {
+        if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+      }
+      if (Math.abs(augmented[pivot][column]) < 1e-10) return null;
+      [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+      const divisor = augmented[column][column];
+      for (let j = column; j <= n; j += 1) augmented[column][j] /= divisor;
+      for (let row = 0; row < n; row += 1) {
+        if (row === column) continue;
+        const factor = augmented[row][column];
+        for (let j = column; j <= n; j += 1) augmented[row][j] -= factor * augmented[column][j];
       }
     }
-    const midpoint = elevationCandidate(params, (left + right) / 2, predict, targetLanding);
-    if (midpoint.score < best.score) best = midpoint;
-    return best;
+    return augmented.map(row => row[n]);
   }
 
-  function clearanceAtSolution(speedMps, spinPerSpeed, baseParams, targetLanding, predict, options) {
-    const params = {
-      ...baseParams,
-      speedMps,
-      spinRps: spinPerSpeed * speedMps,
+  function dot(a, b) {
+    return a.reduce((sum, value, index) => sum + value * b[index], 0);
+  }
+
+  function vectorNorm(values) {
+    return Math.hypot(...values);
+  }
+
+  function paramsFromVector(vector) {
+    return Object.fromEntries(CONTROL_KEYS.map((key, index) => [key, vector[index]]));
+  }
+
+  function goalResidual(params, prediction, goals, options) {
+    if (!prediction?.landing || prediction.net?.clearanceM == null) return null;
+    const residual = [];
+    if (goals.targetLanding) {
+      residual.push((prediction.landing.x - goals.targetLanding.x) / finite(options.landingScaleM, .025));
+      residual.push((prediction.landing.y - goals.targetLanding.y) / finite(options.landingScaleM, .025));
+    }
+    if (Number.isFinite(goals.targetClearanceM)) {
+      residual.push((prediction.net.clearanceM - goals.targetClearanceM) / finite(options.clearanceScaleM, .008));
+    }
+    if (Number.isFinite(goals.desiredSpeedMps)) {
+      residual.push((params.speedMps - goals.desiredSpeedMps) / finite(options.speedScaleMps, .10));
+    }
+    if (Number.isFinite(goals.desiredSpinRps)) {
+      residual.push((params.spinRps - goals.desiredSpinRps) / finite(options.spinScaleRps, 1.5));
+    }
+    if (prediction.net.hit) residual.push(8);
+    return residual;
+  }
+
+  function solveShotGoals(seedParams, goals, predict, options = {}) {
+    const bounds = [
+      [finite(options.minSpeedMps, 1), finite(options.maxSpeedMps, 20)],
+      [finite(options.minSpinRps, -120), finite(options.maxSpinRps, 120)],
+      [finite(options.minElevationDeg, -20), finite(options.maxElevationDeg, 45)],
+      [finite(options.minAimDeg, -60), finite(options.maxAimDeg, 60)],
+    ];
+    let point = CONTROL_KEYS.map((key, index) => clamp(finite(seedParams?.[key], 0), bounds[index][0], bounds[index][1]));
+    let evaluations = 0;
+    const evaluate = vector => {
+      evaluations += 1;
+      const params = paramsFromVector(vector);
+      const prediction = safePredict(predict, params);
+      const residual = goalResidual(params, prediction, goals, options);
+      return residual ? { params, prediction, residual, score: vectorNorm(residual) } : null;
     };
-    const landingSolution = solveElevationForLanding(params, targetLanding, predict, options);
-    if (!landingSolution?.prediction?.net?.crossed || landingSolution.prediction.net.clearanceM == null) {
-      return { ...landingSolution, clearanceM: null, clearanceErrorM: Infinity };
+    let current = evaluate(point);
+    if (!current) return null;
+    let best = current;
+    const steps = [0.04, 0.4, 0.08, 0.08];
+    const jacobian = Array.from({ length: current.residual.length }, () => Array(4).fill(0));
+    for (let column = 0; column < 4; column += 1) {
+      let step = steps[column];
+      if (point[column] + step > bounds[column][1]) step = -step;
+      const shifted = [...point];
+      shifted[column] += step;
+      const result = evaluate(shifted);
+      if (!result || result.residual.length !== current.residual.length) return null;
+      for (let row = 0; row < current.residual.length; row += 1) jacobian[row][column] = (result.residual[row] - current.residual[row]) / step;
     }
-    return { ...landingSolution, clearanceM: landingSolution.prediction.net.clearanceM };
-  }
-
-  function solveClearanceAndLanding(baseParams, desiredSpeedMps, desiredSpinRps, targetLanding, targetClearanceM, predict, options = {}) {
-    const minSpeedMps = Math.max(0.1, finite(options.minSpeedMps, desiredSpeedMps * 0.65));
-    const maxSpeedMps = Math.max(minSpeedMps + 0.01, finite(options.maxSpeedMps, desiredSpeedMps * 1.35));
-    // Search the whole supported speed range for clearance changes. Bracket
-    // selection still prefers the solution nearest the desired speed, so the
-    // wider search is used only when preserving landing/clearance requires it.
-    const lo = minSpeedMps;
-    const hi = maxSpeedMps;
-    const spinPerSpeed = Math.abs(desiredSpeedMps) > 1e-9 ? desiredSpinRps / desiredSpeedMps : 0;
-    const samples = [];
-    const sampleCount = 41;
-
-    for (let i = 0; i < sampleCount; i += 1) {
-      const speed = sampleCount === 1 ? desiredSpeedMps : lo + (hi - lo) * i / (sampleCount - 1);
-      const solution = clearanceAtSolution(speed, spinPerSpeed, baseParams, targetLanding, predict, options);
-      if (!solution?.prediction || solution.clearanceM == null || !Number.isFinite(solution.landingErrorM)) continue;
-      solution.speedMps = speed;
-      solution.clearanceErrorM = solution.clearanceM - targetClearanceM;
-      samples.push(solution);
-    }
-
-    const atDesired = clearanceAtSolution(clamp(desiredSpeedMps, minSpeedMps, maxSpeedMps), spinPerSpeed, baseParams, targetLanding, predict, options);
-    if (atDesired?.prediction && atDesired.clearanceM != null && Number.isFinite(atDesired.landingErrorM)) {
-      atDesired.speedMps = clamp(desiredSpeedMps, minSpeedMps, maxSpeedMps);
-      atDesired.clearanceErrorM = atDesired.clearanceM - targetClearanceM;
-      samples.push(atDesired);
-    }
-    if (!samples.length) return null;
-
-    samples.sort((a, b) => a.speedMps - b.speedMps);
-    let best = samples.reduce((a, b) => {
-      const scoreA = Math.abs(a.clearanceErrorM) + 0.25 * a.landingErrorM;
-      const scoreB = Math.abs(b.clearanceErrorM) + 0.25 * b.landingErrorM;
-      if (Math.abs(scoreA - scoreB) < 1e-6) return Math.abs(a.speedMps - desiredSpeedMps) <= Math.abs(b.speedMps - desiredSpeedMps) ? a : b;
-      return scoreA <= scoreB ? a : b;
-    });
-
-    const brackets = [];
-    for (let i = 1; i < samples.length; i += 1) {
-      const a = samples[i - 1];
-      const b = samples[i];
-      if (a.clearanceErrorM === 0 || b.clearanceErrorM === 0 || a.clearanceErrorM * b.clearanceErrorM < 0) {
-        brackets.push([a, b]);
+    const maxIterations = Math.round(clamp(finite(options.maxIterations, 8), 1, 14));
+    const maxEvaluations = Math.round(clamp(finite(options.maxEvaluations, 24), 5, 60));
+    for (let iteration = 0; iteration < maxIterations && evaluations < maxEvaluations; iteration += 1) {
+      const normal = Array.from({ length: 4 }, (_, row) => Array.from({ length: 4 }, (_, column) =>
+        jacobian.reduce((sum, source) => sum + source[row] * source[column], row === column ? .002 : 0)));
+      const rhs = Array.from({ length: 4 }, (_, column) => -jacobian.reduce((sum, row, index) => sum + row[column] * current.residual[index], 0));
+      const delta = solveLinear(normal, rhs);
+      if (!delta || delta.some(value => !Number.isFinite(value))) break;
+      let accepted = null;
+      for (const factor of [1, .5, .25, .125]) {
+        const candidatePoint = point.map((value, index) => value + factor * delta[index]);
+        if (candidatePoint.some((value, index) => value < bounds[index][0] || value > bounds[index][1])) continue;
+        if (evaluations >= maxEvaluations) break;
+        const candidate = evaluate(candidatePoint);
+        if (candidate && candidate.score < current.score) { accepted = { point: candidatePoint, result: candidate }; break; }
       }
+      if (!accepted) break;
+      const dx = accepted.point.map((value, index) => value - point[index]);
+      const denominator = dot(dx, dx);
+      if (denominator > 1e-10) {
+        const residualChange = accepted.result.residual.map((value, index) => value - current.residual[index]);
+        const predictedChange = jacobian.map(row => dot(row, dx));
+        jacobian.forEach((row, rowIndex) => row.forEach((value, column) => {
+          row[column] = value + (residualChange[rowIndex] - predictedChange[rowIndex]) * dx[column] / denominator;
+        }));
+      }
+      point = accepted.point;
+      current = accepted.result;
+      if (current.score < best.score) best = current;
+      if (current.score < .04) break;
     }
-    if (!brackets.length) return best;
-
-    let [left, right] = brackets.reduce((chosen, pair) => {
-      if (!chosen) return pair;
-      const pairDistance = Math.abs((pair[0].speedMps + pair[1].speedMps) / 2 - desiredSpeedMps);
-      const chosenDistance = Math.abs((chosen[0].speedMps + chosen[1].speedMps) / 2 - desiredSpeedMps);
-      return pairDistance < chosenDistance ? pair : chosen;
-    }, null);
-
-    for (let iteration = 0; iteration < 14; iteration += 1) {
-      const speed = (left.speedMps + right.speedMps) / 2;
-      const mid = clearanceAtSolution(speed, spinPerSpeed, baseParams, targetLanding, predict, options);
-      if (!mid?.prediction || mid.clearanceM == null || !Number.isFinite(mid.landingErrorM)) break;
-      mid.speedMps = speed;
-      mid.clearanceErrorM = mid.clearanceM - targetClearanceM;
-      if (Math.abs(mid.clearanceErrorM) + 0.25 * mid.landingErrorM < Math.abs(best.clearanceErrorM) + 0.25 * best.landingErrorM) best = mid;
-      if (Math.abs(mid.clearanceErrorM) < 0.0001) break;
-      if (left.clearanceErrorM * mid.clearanceErrorM <= 0) right = mid;
-      else left = mid;
-    }
-    return best;
+    return { ...best, evaluations };
   }
 
   function applyShotTuning(baseParams, inputTuning, predict, options = {}) {
@@ -200,8 +195,10 @@
       elevationDeg: finite(baseParams?.elevationDeg, 4),
       aimDeg: finite(baseParams?.aimDeg, 0),
     };
-    if (!hasActiveTuning({ ...tuning, pacePct: 0 })) {
-      const prediction = safePredict(predict, original);
+    const tuningActive = hasActiveTuning({ ...tuning, pacePct: 0 });
+    const basePrediction = options.basePrediction || safePredict(options.referencePredict || predict, original);
+    if (!tuningActive && !options.forceSolve) {
+      const prediction = basePrediction;
       return {
         params: { ...original },
         basePrediction: prediction,
@@ -211,15 +208,17 @@
         targetClearanceM: prediction?.net?.clearanceM ?? null,
         warnings: [],
         changed: false,
+        feasible: true,
+        evaluations: 0,
       };
     }
 
-    const basePrediction = safePredict(predict, original);
     if (!basePrediction?.landing) {
       return {
         params: { ...original }, basePrediction, prediction: basePrediction,
         landingErrorM: Infinity, clearanceErrorM: Infinity, targetClearanceM: null,
         warnings: ["Stored shot has no modeled landing, so trajectory tuning was skipped."], changed: false,
+        feasible: false, evaluations: 0,
       };
     }
 
@@ -229,44 +228,34 @@
     const desiredSpinRps = original.spinRps * (1 + tuning.spinPct / 100);
     const targetLanding = basePrediction.landing;
     const warnings = [];
-    let solution = null;
-    let targetClearanceM = basePrediction?.net?.clearanceM ?? null;
-
-    if (Math.abs(tuning.clearancePct) > 1e-9 && basePrediction?.net?.crossed && Number.isFinite(targetClearanceM)) {
+    const clearanceRequested = Math.abs(tuning.clearancePct) > 1e-9;
+    let targetClearanceM = clearanceRequested || options.preserveClearance
+      ? basePrediction?.net?.clearanceM ?? null
+      : null;
+    if (clearanceRequested && basePrediction?.net?.crossed && Number.isFinite(targetClearanceM)) {
       const requestedClearanceM = targetClearanceM * (1 + tuning.clearancePct / 100);
       const minNetClearanceM = Math.max(0, finite(options.minNetClearanceM, 0.002));
       targetClearanceM = Math.max(minNetClearanceM, requestedClearanceM);
       if (requestedClearanceM < minNetClearanceM - 1e-9) {
         warnings.push(`Net-clearance tuning is limited to ${(minNetClearanceM * 100).toFixed(1)} cm above the net to avoid numerical net contact.`);
       }
-      solution = solveClearanceAndLanding(
-        original,
-        desiredSpeedMps,
-        desiredSpinRps,
-        targetLanding,
-        targetClearanceM,
-        predict,
-        { ...options, minSpeedMps, maxSpeedMps }
-      );
-      if (!solution) warnings.push("Could not solve the requested net-clearance adjustment; speed/spin tuning was used instead.");
-    } else if (Math.abs(tuning.clearancePct) > 1e-9) {
+    } else if (clearanceRequested) {
       warnings.push("This shot does not have a usable modeled net clearance, so the clearance adjustment was skipped.");
+      targetClearanceM = null;
     }
+    const solution = solveShotGoals(
+      { ...original, speedMps: desiredSpeedMps, spinRps: desiredSpinRps },
+      { targetLanding, targetClearanceM, desiredSpeedMps, desiredSpinRps },
+      predict,
+      { ...options, minSpeedMps, maxSpeedMps }
+    );
 
-    if (!solution) {
-      solution = solveElevationForLanding(
-        { ...original, speedMps: desiredSpeedMps, spinRps: desiredSpinRps },
-        targetLanding,
-        predict,
-        options
-      );
-    }
-
-    if (!solution?.prediction || !Number.isFinite(solution.landingErrorM)) {
+    if (!solution?.prediction || !solution.params) {
       return {
         params: { ...original }, basePrediction, prediction: basePrediction,
         landingErrorM: Infinity, clearanceErrorM: Infinity, targetClearanceM,
         warnings: [...warnings, "No stable adjusted trajectory was found; the stored shot is used unchanged."], changed: false,
+        feasible: false, evaluations: 0,
       };
     }
 
@@ -275,15 +264,16 @@
       speedMps: finite(solution.params?.speedMps, desiredSpeedMps),
       spinRps: finite(solution.params?.spinRps, desiredSpinRps),
       elevationDeg: finite(solution.params?.elevationDeg, original.elevationDeg),
-      aimDeg: original.aimDeg,
+      aimDeg: finite(solution.params?.aimDeg, original.aimDeg),
     };
     const prediction = solution.prediction;
     const clearanceErrorM = targetClearanceM != null && prediction?.net?.clearanceM != null
       ? prediction.net.clearanceM - targetClearanceM
       : 0;
 
-    if (solution.landingErrorM > finite(options.landingToleranceM, 0.04)) {
-      warnings.push(`Best adjusted trajectory shifts the modeled landing by ${(solution.landingErrorM * 100).toFixed(1)} cm.`);
+    const solvedLandingErrorM = landingErrorM(prediction, targetLanding);
+    if (solvedLandingErrorM > finite(options.landingToleranceM, 0.04)) {
+      warnings.push(`Combined solver misses the requested landing by ${(solvedLandingErrorM * 100).toFixed(1)} cm.`);
     }
     if (Math.abs(tuning.clearancePct) > 1e-9 && Math.abs(clearanceErrorM) > finite(options.clearanceToleranceM, 0.01)) {
       warnings.push(`Best adjusted trajectory misses the requested clearance by ${(Math.abs(clearanceErrorM) * 100).toFixed(1)} cm.`);
@@ -293,11 +283,15 @@
       params,
       basePrediction,
       prediction,
-      landingErrorM: solution.landingErrorM,
+      landingErrorM: solvedLandingErrorM,
       clearanceErrorM,
       targetClearanceM,
+      desiredSpeedMps,
+      desiredSpinRps,
+      evaluations: solution.evaluations,
       warnings,
-      changed: true,
+      changed: tuningActive || Boolean(options.forceSolve),
+      feasible: !prediction?.net?.hit && solvedLandingErrorM <= finite(options.maximumLandingErrorM, .12),
     };
   }
 
@@ -315,8 +309,7 @@
     normalizeTuning,
     hasActiveTuning,
     delayWithPace,
-    solveElevationForLanding,
-    solveClearanceAndLanding,
+    solveShotGoals,
     applyShotTuning,
     applyTuningToShotList,
   };

@@ -28,6 +28,7 @@
   const GuidedCalibration = globalThis.GuidedCalibration;
   const LaunchModel = globalThis.NovaLaunchModel;
   const DrillAdjustments = globalThis.DrillAdjustments;
+  const PoseCalibration = globalThis.PoseCalibration;
   const ShotVariation = globalThis.ShotVariation;
   const els = {
     repetitionsInput: $("repetitionsInput"),
@@ -81,6 +82,7 @@
     modeText: $("modeText"),
     liveTuningBtn: $("liveTuningBtn"),
     liveTuningSummary: $("liveTuningSummary"),
+    saveLiveTunedDrillBtn: $("saveLiveTunedDrillBtn"),
     graphViewport: $("graphViewport"),
     graphSurface: $("graphSurface"),
     graphWorld: $("graphWorld"),
@@ -143,9 +145,13 @@
     guidedResults: $("guidedResults"),
     poseSvg: $("poseSvg"),
     poseLandingSummary: $("poseLandingSummary"),
-    poseXInput: $("poseXInput"),
-    poseYInput: $("poseYInput"),
-    poseYawInput: $("poseYawInput"),
+    poseCalibrationDialog: $("poseCalibrationDialog"),
+    closePoseCalibrationBtn: $("closePoseCalibrationBtn"),
+    cancelPoseCalibrationBtn: $("cancelPoseCalibrationBtn"),
+    savePoseCalibrationBtn: $("savePoseCalibrationBtn"),
+    poseCalibrationTableSvg: $("poseCalibrationTableSvg"),
+    poseCalibrationGuide: $("poseCalibrationGuide"),
+    poseCalibrationConfidence: $("poseCalibrationConfidence"),
     rotationTypeInput: $("rotationTypeInput"),
     gravityInput: $("gravityInput"),
     ballMassInput: $("ballMassInput"),
@@ -249,6 +255,9 @@
     runConnectionDot: $("runConnectionDot"),
     runConnectionText: $("runConnectionText"),
     runRobotSetup: $("runRobotSetup"),
+    runPoseStatus: $("runPoseStatus"),
+    updateRobotPoseBtn: $("updateRobotPoseBtn"),
+    saveEffectiveDrillBtn: $("saveEffectiveDrillBtn"),
     editorRunBtn: $("editorRunBtn"),
     drillDetailsBtn: $("drillDetailsBtn"),
     editorAutosaveText: $("editorAutosaveText"),
@@ -338,6 +347,9 @@
   let liveRetuneStopPromise = null;
   let pendingRobotAction = null;
   let pendingRobotReason = "";
+  let poseCalibrationState = null;
+  let poseCalibrationDrag = null;
+  let poseStaleAcknowledged = false;
   const shotVariationCache = new Map();
   let shotVariationRng = ShotVariation?.createRng(Date.now());
 
@@ -531,6 +543,7 @@
     return {
       geometryReference: ROBOT_GEOMETRY_REFERENCE,
       pose: { x: 0, y: 0, yawDeg: 0 },
+      poseSession: PoseCalibration?.sanitizeSession({}, { x: 0, y: 0, yawDeg: 0 }) || null,
       placementMode: "table",
       tableHeight: 0.76,
       table: regulationTable(),
@@ -1300,13 +1313,15 @@
       netClearanceCm: shot?.netClearanceCm === null || shot?.netClearanceCm === "" || shot?.netClearanceCm === undefined ? null : finite(shot.netClearanceCm, null),
       saved: Boolean(shot?.saved),
     })) : guidedBase.shots;
+    const sanitizedPose = {
+      x: clamp(pose.x, -1.5, 4.2, base.pose.x),
+      y: clamp(pose.y, -2, 2, base.pose.y),
+      yawDeg: clamp(pose.yawDeg, -180, 180, base.pose.yawDeg),
+    };
     return {
       geometryReference: ROBOT_GEOMETRY_REFERENCE,
-      pose: {
-        x: clamp(pose.x, -3, 10, base.pose.x),
-        y: clamp(pose.y, -5, 5, base.pose.y),
-        yawDeg: clamp(pose.yawDeg, -180, 180, base.pose.yawDeg),
-      },
+      pose: sanitizedPose,
+      poseSession: { ...PoseCalibration.sanitizeSession(raw.poseSession || {}, sanitizedPose), pose: sanitizedPose },
       placementMode: raw.placementMode === "ground" ? "ground" : "table",
       tableHeight: clamp(raw.tableHeight, .4, 1.2, base.tableHeight),
       table: {
@@ -1639,30 +1654,52 @@
     const p = drill?.robotPose || library?.calibration?.pose || { x: 0, y: 0, yawDeg: 0 };
     return { x: finite(p.x, 0), y: finite(p.y, 0), yawDeg: finite(p.yawDeg, 0) };
   }
-  function poseWords(pose) {
-    const y = Math.abs(pose.y) < .025 ? "Centered" : `${Math.abs(pose.y * 100).toFixed(0)} cm ${pose.y > 0 ? "left" : "right"} of centre`;
-    const edge = Math.abs(pose.x) < .035 ? "base back at near edge" : `base-back x ${pose.x.toFixed(2)} m`;
-    const yaw = Math.abs(pose.yawDeg) < 1 ? "straight ahead" : `${pose.yawDeg > 0 ? "left" : "right"} ${Math.abs(pose.yawDeg).toFixed(0)}°`;
-    return `${y} · ${edge} · ${yaw}`;
+  function currentRobotPose() {
+    const p = library?.calibration?.pose || { x: 0, y: 0, yawDeg: 0 };
+    return { x: finite(p.x, 0), y: finite(p.y, 0), yawDeg: finite(p.yawDeg, 0) };
   }
-  function robotSetupMiniSvg(pose) {
+  function poseDifference(reference, current = currentRobotPose()) {
+    return {
+      distanceM: Math.hypot(current.x - reference.x, current.y - reference.y),
+      yawDeg: Math.abs(current.yawDeg - reference.yawDeg),
+    };
+  }
+  function poseNeedsCompensation(reference, current = currentRobotPose()) {
+    const difference = poseDifference(reference, current);
+    return difference.distanceM > .001 || difference.yawDeg > .05;
+  }
+  function robotSetupMiniSvg(currentPose = currentRobotPose()) {
     const table = library?.calibration?.table || regulationTable();
     const w = 250, h = 118, pad = 12;
     const sx = (w - pad * 2) / table.length;
     const sy = (h - pad * 2) / table.width;
-    const x = pad + pose.x * sx;
-    const y = h / 2 - pose.y * sy;
     const ray = 28;
-    const a = radians(pose.yawDeg);
-    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Robot setup top view"><rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}" rx="4" fill="#123047" stroke="#6f8196"/><line x1="${w/2}" x2="${w/2}" y1="${pad}" y2="${h-pad}" stroke="#d7e0e9"/><circle cx="${x}" cy="${y}" r="7" fill="#55c98c"/><line x1="${x}" y1="${y}" x2="${x+Math.cos(a)*ray}" y2="${y-Math.sin(a)*ray}" stroke="#8ce0b2" stroke-width="3" marker-end="url(#none)"/></svg>`;
+    const marker = (pose, color) => {
+      const x = pad + pose.x * sx;
+      const y = h / 2 - pose.y * sy;
+      const a = radians(pose.yawDeg);
+      return `<circle cx="${x}" cy="${y}" r="7" fill="${color}"/><line x1="${x}" y1="${y}" x2="${x+Math.cos(a)*ray}" y2="${y-Math.sin(a)*ray}" stroke="${color}" stroke-width="3"/>`;
+    };
+    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Saved robot position"><rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}" rx="4" fill="#123047" stroke="#6f8196"/><line x1="${w/2}" x2="${w/2}" y1="${pad}" y2="${h-pad}" stroke="#d7e0e9"/>${marker(currentPose,"#55c98c")}</svg>`;
   }
 
   function renderRobotSetupSummary() {
     if (!els.runRobotSetup) return;
     const drill = activeDrill();
     if (!drill) { els.runRobotSetup.innerHTML = `<p class="helper">Choose a drill first.</p>`; return; }
-    const pose = drillPose(drill);
-    els.runRobotSetup.innerHTML = `<div class="robot-setup-mini">${robotSetupMiniSvg(pose)}</div><div><strong>${escapeHtml(poseWords(pose))}</strong><small>Expected physical position for this drill</small></div>`;
+    const current = currentRobotPose();
+    const session = library.calibration.poseSession;
+    const stale = PoseCalibration.isStale(session);
+    els.runRobotSetup.innerHTML = `<div class="robot-setup-mini">${robotSetupMiniSvg(current)}</div>`;
+    if (els.runPoseStatus) {
+      const uncertainty = session?.uncertainty || PoseCalibration.DEFAULT_UNCERTAINTY;
+      els.runPoseStatus.textContent = stale
+        ? `Position check recommended · last verified ${session?.verifiedAt ? `${Math.floor(PoseCalibration.ageDays(session.verifiedAt))} days ago` : "never"}`
+        : session?.verifiedAt
+          ? `Position verified · estimated uncertainty ±${fmt(uncertainty.xCm,1)} cm / ±${fmt(uncertainty.yCm,1)} cm / ±${fmt(uncertainty.yawDeg,1)}°`
+          : `Position saved recently but not verified · estimated uncertainty ±${fmt(uncertainty.xCm,1)} cm / ±${fmt(uncertainty.yCm,1)} cm / ±${fmt(uncertainty.yawDeg,1)}°`;
+      els.runPoseStatus.classList.toggle("active", stale);
+    }
   }
 
   function renderRunPage() {
@@ -3974,11 +4011,275 @@
     els.calibrationTableTab.classList.toggle("active", active === "table");
   }
 
+  function currentPoseSession() {
+    const session = PoseCalibration.sanitizeSession(library.calibration.poseSession || {}, library.calibration.pose);
+    session.pose = { ...currentRobotPose() };
+    library.calibration.poseSession = session;
+    return session;
+  }
+
+  const MANUAL_POSE_PRIOR = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, landingCm: 6, measurementCm: 2 });
+  const POSE_TABLE_VIEW = Object.freeze({ left: 43, top: 40, width: 334, height: 600 });
+
+  function verificationShotForTarget(target, pose = currentRobotPose()) {
+    const calibration = calibrationAtPose(pose);
+    const aimDeg = degrees(Math.atan2(target.y - pose.y, target.x - pose.x)) - pose.yawDeg;
+    const deep = target.x > library.calibration.table.length * .72;
+    const seeds = deep
+      ? [[7.2,16,10],[6.5,4,14],[8,-4,8]]
+      : [[5.4,4,13],[4.8,-10,17],[6,12,10]];
+    const range = LaunchModel.hardwareSpeedRange(library.calibration.nova.speedModel);
+    const candidates = seeds.map(([speedMps, spinRps, elevationDeg]) => {
+      const seed = { speedMps, spinRps, elevationDeg, aimDeg };
+      const solution = DrillAdjustments.solveShotGoals(seed, {
+        targetLanding: { x: target.x, y: target.y }, targetClearanceM: target.clearanceCm / 100,
+        desiredSpeedMps: speedMps, desiredSpinRps: spinRps,
+      }, candidate => predictTrajectory(candidate, calibration), {
+        ...tuningElevationBounds(), minSpeedMps: range.minMps, maxSpeedMps: range.maxMps,
+        landingScaleM: .012, clearanceScaleM: .006, speedScaleMps: .8, spinScaleRps: 10,
+        maxIterations: 8, maxEvaluations: 24,
+      });
+      if (!solution?.prediction?.landing || solution.prediction.net?.hit) return null;
+      const landingMiss = Math.hypot(solution.prediction.landing.x - target.x, solution.prediction.landing.y - target.y);
+      const clearanceMiss = Math.abs(solution.prediction.net.clearanceM - target.clearanceCm / 100);
+      return { ...solution, verificationScore: landingMiss / .08 + clearanceMiss / .03, landingMiss, clearanceMiss };
+    }).filter(Boolean).sort((a,b) => a.verificationScore - b.verificationScore);
+    const best = candidates[0];
+    return best && best.landingMiss <= .12 && best.clearanceMiss <= .05 ? best : null;
+  }
+
+  function poseTablePoint(pose) {
+    const table = library.calibration.table;
+    return {
+      x: POSE_TABLE_VIEW.left + POSE_TABLE_VIEW.width / 2 - pose.y / table.width * POSE_TABLE_VIEW.width,
+      y: POSE_TABLE_VIEW.top + POSE_TABLE_VIEW.height - pose.x / table.length * POSE_TABLE_VIEW.height,
+    };
+  }
+
+  function poseFromTablePoint(point, yawDeg = 0) {
+    const table = library.calibration.table;
+    return PoseCalibration.sanitizePose({
+      x: clamp((POSE_TABLE_VIEW.top + POSE_TABLE_VIEW.height - point.y) / POSE_TABLE_VIEW.height * table.length, 0, table.length, 0),
+      y: clamp((POSE_TABLE_VIEW.left + POSE_TABLE_VIEW.width / 2 - point.x) / POSE_TABLE_VIEW.width * table.width, -table.width / 2, table.width / 2, 0),
+      yawDeg,
+    });
+  }
+
+  function initializePoseCalibration() {
+    const session = currentPoseSession();
+    const uncertainty = PoseCalibration.sanitizeUncertainty(session.uncertainty || MANUAL_POSE_PRIOR);
+    const pose = { ...currentRobotPose() };
+    poseCalibrationState = {
+      pose,
+      uncertainty,
+      targets: PoseCalibration.proposeVerificationTargets(library.calibration.table, pose, MANUAL_POSE_PRIOR),
+      currentIndex: 0,
+      mode: "position",
+      observations: [],
+      landingMarks: [],
+      manuallyMoved: false,
+    };
+  }
+
+  function renderPoseCalibrationTable() {
+    const state = poseCalibrationState;
+    if (!state) return;
+    const table = library.calibration.table;
+    const view = POSE_TABLE_VIEW;
+    const robot = poseTablePoint(state.pose);
+    const yaw = radians(state.pose.yawDeg);
+    const handle = { x: robot.x - Math.sin(yaw) * 76, y: robot.y - Math.cos(yaw) * 76 };
+    const sigmaX = state.uncertainty.yCm / 100 / table.width * view.width;
+    const sigmaY = state.uncertainty.xCm / 100 / table.length * view.height;
+    const currentTarget = state.targets[state.currentIndex];
+    const targets = state.targets.map((target, index) => {
+      const point = poseTablePoint(target);
+      const active = target.id === currentTarget?.id && state.mode !== "position";
+      const observed = state.observations.some(item => item.targetId === target.id);
+      return `<g class="pose-target ${active ? "active" : ""} ${observed ? "observed" : ""}">
+        <circle cx="${point.x}" cy="${point.y}" r="${active ? 14 : 11}"/><text x="${point.x}" y="${point.y + 4}">${index + 1}</text>
+      </g>`;
+    }).join("");
+    const landings = state.landingMarks.map(mark => {
+      const point = poseTablePoint(mark);
+      return `<g class="pose-actual-landing"><path d="M ${point.x-7} ${point.y-7} L ${point.x+7} ${point.y+7} M ${point.x+7} ${point.y-7} L ${point.x-7} ${point.y+7}"/></g>`;
+    }).join("");
+    els.poseCalibrationTableSvg.innerHTML = `
+      <rect class="pose-table-surface" x="${view.left}" y="${view.top}" width="${view.width}" height="${view.height}" rx="8" data-pose-table-hit="1"/>
+      <line class="pose-table-centre" x1="${view.left + view.width/2}" x2="${view.left + view.width/2}" y1="${view.top}" y2="${view.top + view.height}"/>
+      <line class="pose-table-net" x1="${view.left}" x2="${view.left + view.width}" y1="${view.top + view.height/2}" y2="${view.top + view.height/2}"/>
+      <text class="pose-table-label" x="${view.left + view.width/2}" y="${view.top + 22}">far end</text>
+      <text class="pose-table-label pose-table-label-near" x="${view.left + 12}" y="${view.top + view.height - 12}">near edge</text>
+      ${targets}${landings}
+      <ellipse class="pose-uncertainty" cx="${robot.x}" cy="${robot.y}" rx="${Math.max(5,sigmaX)}" ry="${Math.max(5,sigmaY)}" transform="rotate(${-state.pose.yawDeg} ${robot.x} ${robot.y})"/>
+      <line class="pose-direction-line" x1="${robot.x}" y1="${robot.y}" x2="${handle.x}" y2="${handle.y}"/>
+      <g class="pose-robot" transform="translate(${robot.x} ${robot.y}) rotate(${-state.pose.yawDeg})" data-pose-drag="position">
+        <rect x="-22" y="-47" width="44" height="47" rx="10"/><circle cx="0" cy="-31" r="7"/><path d="M -12 -8 L 12 -8"/>
+      </g>
+      <g class="pose-rotation-handle" data-pose-drag="rotation"><circle cx="${handle.x}" cy="${handle.y}" r="17"/><path d="M ${handle.x-7} ${handle.y} A 8 8 0 1 1 ${handle.x+6} ${handle.y-5}"/></g>
+      ${state.mode === "feedback" ? `<rect class="pose-feedback-hit-area" x="${view.left}" y="${view.top}" width="${view.width}" height="${view.height}" rx="8" data-pose-feedback="1"/>` : ""}`;
+  }
+
+  function renderPoseCalibrationGuide() {
+    const state = poseCalibrationState;
+    if (!state) return;
+    const target = state.targets[state.currentIndex];
+    const position = `<div class="pose-readout"><span>${Math.round(state.pose.x*100)} cm from near edge</span><span>${Math.abs(state.pose.y) < .005 ? "centred" : `${Math.round(Math.abs(state.pose.y)*100)} cm ${state.pose.y > 0 ? "left" : "right"}`}</span><span>${signed(state.pose.yawDeg,1)}°</span></div>`;
+    if (state.mode === "position") {
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Step 1</p><h3>Match the physical robot</h3><p>Drag the robot body to move it. Drag the round handle to set its direction. The numbered circles are the verification targets.</p>${position}<button class="button primary wide" type="button" data-pose-action="start">Start verification</button>`;
+    } else if (state.mode === "ready") {
+      const solution = verificationShotForTarget(target, state.pose);
+      target.shotSolution = solution;
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Verification ${state.currentIndex + 1} of ${state.targets.length}</p><h3>${escapeHtml(target.label)}</h3><p>Aim for target ${state.currentIndex + 1}: ${escapeHtml(target.reference)}. Fire one ball, watch its first bounce, then report where it landed.</p><button class="button primary wide" type="button" data-pose-action="fire" ${solution ? "" : "disabled"}>${robot?.connected ? "Fire verification ball" : "Connect & fire verification ball"}</button>${solution ? "" : `<p class="pose-warning">This target is not feasible from the current position.</p>`}`;
+    } else if (state.mode === "firing") {
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Verification ${state.currentIndex + 1} of ${state.targets.length}</p><h3>Serving one ball…</h3><p>Watch the first bounce. You will mark it on the table next.</p><button class="button primary wide" type="button" disabled>Waiting for Nova</button>`;
+    } else if (state.mode === "feedback") {
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Verification ${state.currentIndex + 1} of ${state.targets.length}</p><h3>Where did the ball land?</h3><p>Tap the first-bounce position directly on the table. Target ${state.currentIndex + 1} is highlighted.</p><button class="button ghost wide" type="button" data-pose-action="retry">Fire that ball again</button>`;
+    } else {
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Complete</p><h3>Pose refined</h3><p>The landing feedback has updated both the robot pose and its estimated uncertainty. Save it for playback.</p>${position}`;
+    }
+    const u = state.uncertainty;
+    els.poseCalibrationConfidence.innerHTML = `<span>Estimated pose uncertainty</span><strong>±${fmt(u.xCm,1)} cm forward/back · ±${fmt(u.yCm,1)} cm left/right · ±${fmt(u.yawDeg,1)}° direction</strong><small>Estimated from the manual placement prior and ${state.observations.length} observed landing${state.observations.length === 1 ? "" : "s"}.</small>`;
+    els.savePoseCalibrationBtn.textContent = state.mode === "complete" ? "Save calibrated pose" : "Save position";
+    els.savePoseCalibrationBtn.disabled = state.mode === "firing" || state.mode === "feedback";
+  }
+
+  function renderPoseCalibration() {
+    renderPoseCalibrationTable();
+    renderPoseCalibrationGuide();
+  }
+
+  function openPoseCalibration() {
+    initializePoseCalibration();
+    renderPoseCalibration();
+    els.poseCalibrationDialog.showModal();
+  }
+
+  function closePoseCalibration() {
+    poseCalibrationDrag = null;
+    poseCalibrationState = null;
+    els.poseCalibrationDialog.close();
+  }
+
+  function resetPoseVerificationAfterManualMove() {
+    const state = poseCalibrationState;
+    if (!state) return;
+    state.uncertainty = PoseCalibration.sanitizeUncertainty(MANUAL_POSE_PRIOR);
+    state.targets = PoseCalibration.proposeVerificationTargets(library.calibration.table, state.pose, state.uncertainty);
+    state.currentIndex = 0;
+    state.mode = "position";
+    state.observations = [];
+    state.landingMarks = [];
+    state.manuallyMoved = true;
+  }
+
+  function poseSvgEventPoint(event) {
+    const svg = els.poseCalibrationTableSvg;
+    const rect = svg.getBoundingClientRect();
+    const scale = Math.min(rect.width / 420, rect.height / 700);
+    const offsetX = (rect.width - 420 * scale) / 2;
+    const offsetY = (rect.height - 700 * scale) / 2;
+    return { x: (event.clientX - rect.left - offsetX) / scale, y: (event.clientY - rect.top - offsetY) / scale };
+  }
+
+  function beginPoseCalibrationDrag(event) {
+    if (!poseCalibrationState || poseCalibrationState.mode === "firing" || poseCalibrationState.mode === "feedback") return;
+    const control = event.target.closest("[data-pose-drag]");
+    if (!control) return;
+    poseCalibrationDrag = { kind: control.dataset.poseDrag, pointerId: event.pointerId };
+    els.poseCalibrationTableSvg.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function updatePoseCalibrationDrag(event) {
+    if (!poseCalibrationDrag || poseCalibrationDrag.pointerId !== event.pointerId || !poseCalibrationState) return;
+    const point = poseSvgEventPoint(event);
+    if (poseCalibrationDrag.kind === "position") {
+      poseCalibrationState.pose = poseFromTablePoint(point, poseCalibrationState.pose.yawDeg);
+    } else {
+      const robot = poseTablePoint(poseCalibrationState.pose);
+      poseCalibrationState.pose.yawDeg = clamp(degrees(Math.atan2(-(point.x - robot.x), -(point.y - robot.y))), -180, 180, 0);
+    }
+    resetPoseVerificationAfterManualMove();
+    renderPoseCalibration();
+  }
+
+  function endPoseCalibrationDrag(event) {
+    if (poseCalibrationDrag?.pointerId !== event.pointerId) return;
+    poseCalibrationDrag = null;
+    els.poseCalibrationTableSvg.releasePointerCapture?.(event.pointerId);
+  }
+
+  function startPoseVerification() {
+    if (!poseCalibrationState) return;
+    poseCalibrationState.uncertainty = PoseCalibration.sanitizeUncertainty(MANUAL_POSE_PRIOR);
+    poseCalibrationState.targets = PoseCalibration.proposeVerificationTargets(library.calibration.table, poseCalibrationState.pose, poseCalibrationState.uncertainty);
+    poseCalibrationState.currentIndex = 0;
+    poseCalibrationState.mode = "ready";
+    poseCalibrationState.observations = [];
+    poseCalibrationState.landingMarks = [];
+    renderPoseCalibration();
+  }
+
+  async function fireCurrentPoseVerification() {
+    const state = poseCalibrationState;
+    const target = state?.targets[state.currentIndex];
+    const solution = target?.shotSolution || (target ? verificationShotForTarget(target, state.pose) : null);
+    if (!state || !target || !solution) { toast("This verification target is not feasible from the current position."); return; }
+    state.mode = "firing";
+    renderPoseCalibration();
+    await runCalibrationTestShot(solution.params, `${target.label} verification`, () => {
+      if (!poseCalibrationState) return;
+      poseCalibrationState.mode = "feedback";
+      renderPoseCalibration();
+    });
+    if (poseCalibrationState?.mode === "firing" && !calibrationTestRunning) {
+      poseCalibrationState.mode = "ready";
+      renderPoseCalibration();
+    }
+  }
+
+  function recordPoseLanding(point) {
+    const state = poseCalibrationState;
+    if (!state || state.mode !== "feedback") return;
+    const actual = poseFromTablePoint(point, 0);
+    const target = state.targets[state.currentIndex];
+    const observation = {
+      targetId: target.id, targetX: target.x, targetY: target.y, repeatCount: 1,
+      longitudinalErrorCm: (actual.x - target.x) * 100,
+      lateralErrorCm: (actual.y - target.y) * 100,
+    };
+    const estimate = PoseCalibration.estimatePoseCorrection(state.pose, state.uncertainty, [observation]);
+    if (estimate) {
+      state.pose = estimate.correctedPose;
+      state.uncertainty = estimate.uncertainty;
+    }
+    state.observations.push(observation);
+    state.landingMarks.push({ x: actual.x, y: actual.y, targetId: target.id });
+    state.currentIndex += 1;
+    state.mode = state.currentIndex >= state.targets.length ? "complete" : "ready";
+    renderPoseCalibration();
+  }
+
+  function savePoseCalibration() {
+    const state = poseCalibrationState;
+    if (!state) return;
+    const now = new Date().toISOString();
+    library.calibration.pose = { ...state.pose };
+    library.calibration.poseSession = PoseCalibration.sanitizeSession({
+      ...currentPoseSession(), pose: state.pose, uncertainty: state.uncertainty,
+      updatedAt: now, verifiedAt: state.mode === "complete" ? now : null,
+      observations: state.observations,
+    }, state.pose);
+    poseStaleAcknowledged = state.mode === "complete";
+    liveTuningCache.clear(); shotVariationCache.clear();
+    saveLibrary(); renderCalibration(); renderRunPage();
+    closePoseCalibration();
+    toast(state.mode === "complete" ? "Calibrated robot pose saved" : "Robot position saved");
+  }
+
   function renderCalibration() {
     const c = library.calibration;
-    els.poseXInput.value = c.pose.x;
-    els.poseYInput.value = c.pose.y;
-    els.poseYawInput.value = c.pose.yawDeg;
     els.rotationTypeInput.value = String(c.rotationType);
     els.gravityInput.value = c.gravity;
     els.ballMassInput.value = c.physics.ballMassKg * 1000;
@@ -4708,9 +5009,6 @@
 
   function bindCalibrationInputs() {
     const bindings = [
-      [els.poseXInput, value => library.calibration.pose.x = clamp(value, -1.5, 4.2, -.18)],
-      [els.poseYInput, value => library.calibration.pose.y = clamp(value, -2, 2, 0)],
-      [els.poseYawInput, value => library.calibration.pose.yawDeg = clamp(value, -180, 180, 0)],
       [els.rotationTypeInput, value => library.calibration.rotationType = Math.round(clamp(value, 0, 7, 0))],
       [els.gravityInput, value => library.calibration.gravity = clamp(value, 1, 20, 9.80665)],
       [els.ballDiameterInput, value => library.calibration.physics.ballDiameterM = clamp(value, .01, .1, .04)],
@@ -4746,6 +5044,7 @@
       setter(element.value);
       saveLibrary();
       renderCalibration();
+      renderRunPage();
       renderGraph();
       renderInspector();
     });
@@ -4840,26 +5139,36 @@
       minNetClearanceM: .002,
     };
   }
-  function adjustedShotForLiveTuning(baseParams) {
+  function calibrationAtPose(pose) {
+    return { ...library.calibration, pose: { ...pose } };
+  }
+  function adjustedShotForRuntime(baseParams, drillId = activeDrill()?.id) {
     const params = {
       speedMps: finite(baseParams?.speedMps, 8),
       spinRps: finite(baseParams?.spinRps, 0),
       elevationDeg: finite(baseParams?.elevationDeg, 4),
       aimDeg: finite(baseParams?.aimDeg, 0),
     };
-    if (!liveTrajectoryTuningIsActive()) {
-      const prediction = predictTrajectory(params);
-      return { params, basePrediction: prediction, prediction, landingErrorM: 0, clearanceErrorM: 0, targetClearanceM: prediction?.net?.clearanceM ?? null, warnings: [], changed: false };
+    const owner = getDrill(drillId);
+    const referencePose = owner ? drillPose(owner) : currentRobotPose();
+    const currentPose = currentRobotPose();
+    const poseChanged = poseNeedsCompensation(referencePose, currentPose);
+    const referenceCalibration = calibrationAtPose(referencePose);
+    const currentCalibration = calibrationAtPose(currentPose);
+    const basePrediction = predictTrajectory(params, referenceCalibration);
+    if (!liveTrajectoryTuningIsActive() && !poseChanged) {
+      return { params, basePrediction, prediction: basePrediction, landingErrorM: 0, clearanceErrorM: 0, targetClearanceM: basePrediction?.net?.clearanceM ?? null, warnings: [], changed: false, feasible: true, evaluations: 0, poseCompensated: false };
     }
-    const cacheKey = JSON.stringify([params, liveTuning, library.calibration]);
+    const cacheKey = JSON.stringify([drillId, params, liveTuning, referencePose, currentPose, library.calibration.nova, library.calibration.physics]);
     const cached = liveTuningCache.get(cacheKey);
     if (cached) return cached;
     const result = DrillAdjustments.applyShotTuning(
       params,
       liveTuning,
-      candidate => predictTrajectory(candidate),
-      liveTuningOptions()
+      candidate => predictTrajectory(candidate, currentCalibration),
+      { ...liveTuningOptions(), basePrediction, forceSolve: poseChanged, preserveClearance: poseChanged }
     );
+    result.poseCompensated = poseChanged;
     if (liveTuningCache.size > 120) liveTuningCache.clear();
     liveTuningCache.set(cacheKey, result);
     return result;
@@ -4897,6 +5206,7 @@
     els.liveTuningBtn?.classList.toggle("active", activeEntries.length > 0);
     if (els.liveTuningSummary) els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "No adjustments";
 
+    const drill = activeDrill();
     const shot = liveTuningShotForPreview();
     if (!shot) {
       els.liveTuningImpactLabel.textContent = "No shot available";
@@ -4904,8 +5214,8 @@
       return;
     }
     els.liveTuningImpactLabel.textContent = `All balls · example: ${shot.label}`;
-    const result = adjustedShotForLiveTuning(shot.params);
-    const base = result.basePrediction || predictTrajectory(shot.params);
+    const result = adjustedShotForRuntime(shot.params, drill.id);
+    const base = result.basePrediction || predictTrajectory(shot.params, calibrationAtPose(drillPose(drill)));
     const tuned = result.prediction || base;
     const baseClearance = base?.net?.clearanceM;
     const tunedClearance = tuned?.net?.clearanceM;
@@ -4955,24 +5265,24 @@
 
   function liveTuningInlineHtml(baseParams) {
     if (!liveTrajectoryTuningIsActive()) return "";
-    const result = adjustedShotForLiveTuning(baseParams);
+    const result = adjustedShotForRuntime(baseParams);
     const shift = Number.isFinite(result.landingErrorM) ? `${fmt(result.landingErrorM * 100,1)} cm` : "unknown";
     return `<div class="live-tuning-inline"><strong>Live tuning is active.</strong> Effective shot: ${fmt(result.params.speedMps,2)} m/s · ${signed(result.params.spinRps,1)} rps · ${signed(result.params.elevationDeg,1)}°. Modeled landing shift: ${shift}. Stored values below are unchanged.</div>`;
   }
 
-  function variationEnvironment(drillId) {
+  function variationEnvironment(drillId, runtime = false) {
     const drill = getDrill(drillId) || activeDrill();
-    const calibration = { ...library.calibration, pose: { ...drillPose(drill) } };
+    const calibration = calibrationAtPose(runtime ? currentRobotPose() : drillPose(drill));
     return {
       calibration,
       evaluate: params => predictTrajectory(params, calibration),
     };
   }
 
-  function variationCacheEntry(shot, baseParams) {
+  function variationCacheEntry(shot, baseParams, runtime = false) {
     if (!shot.variation?.enabled) return null;
-    const environment = variationEnvironment(shot.drillId);
-    const cacheKey = JSON.stringify([shot.drillId, shot.nodeId, baseParams, shot.variation, environment.calibration]);
+    const environment = variationEnvironment(shot.drillId, runtime);
+    const cacheKey = JSON.stringify([runtime, shot.drillId, shot.nodeId, baseParams, shot.variation, environment.calibration]);
     let entry = shotVariationCache.get(cacheKey);
     if (entry) return entry;
     const prepared = ShotVariation.prepare(baseParams, shot.variation, environment.evaluate);
@@ -4982,9 +5292,9 @@
     return entry;
   }
 
-  function variedShotParams(shot, baseParams) {
+  function variedShotParams(shot, baseParams, runtime = false) {
     if (!shot.variation?.enabled) return { params: baseParams, result: null };
-    const entry = variationCacheEntry(shot, baseParams);
+    const entry = variationCacheEntry(shot, baseParams, runtime);
     if (!entry?.prepared?.ok) return { params: null, error: entry?.prepared?.reason || "Variation preparation failed." };
     const result = ShotVariation.sample(entry.prepared, entry.evaluate, shotVariationRng, {
       attempts: 5,
@@ -5161,19 +5471,22 @@
     const prepared = [];
     const batchLimit = Math.max(1, Math.min(NOVA_SEQUENCE_RECORD_LIMIT, Math.trunc(finite(maxBatchSize, NOVA_SEQUENCE_RECORD_LIMIT)) || NOVA_SEQUENCE_RECORD_LIMIT));
 
-    // IMPORTANT: tune the entire compiled traversal, not the selected/inspected
-    // shot. The same runtime modifiers are applied independently to every ball.
-    const tunedShots = DrillAdjustments.applyTuningToShotList(
-      compiled.shots,
-      liveTuning,
-      candidate => predictTrajectory(candidate),
-      liveTuningOptions()
-    );
-
     for (let index = 0; index < compiled.shots.length; index += 1) {
       const baseShot = compiled.shots[index];
-      const adjusted = tunedShots[index].adjustment;
-      const variation = variedShotParams(baseShot, adjusted.params);
+      // Pose compensation and every active live modifier share one solve. This
+      // avoids order-dependent stacking and uses each sub-drill's authored pose.
+      const directPrediction = baseShot.skipRuntimeAdjustments
+        ? predictTrajectory(baseShot.params, calibrationAtPose(currentRobotPose()))
+        : null;
+      const adjusted = baseShot.skipRuntimeAdjustments
+        ? { params: { ...baseShot.params }, basePrediction: directPrediction, prediction: directPrediction, warnings: [], changed: false, feasible: true, evaluations: 0 }
+        : adjustedShotForRuntime(baseShot.params, baseShot.drillId);
+      const runtimeVariationShot = baseShot.variation?.enabled
+        ? { ...baseShot, variation: variationShiftedToEffectiveShot(baseShot.variation, baseShot.params, adjusted) }
+        : baseShot;
+      const variation = baseShot.skipRuntimeAdjustments
+        ? { params: adjusted.params, result: null }
+        : variedShotParams(runtimeVariationShot, adjusted.params, true);
       const shot = {
         ...baseShot,
         params: { ...(variation.params || adjusted.params) },
@@ -5183,6 +5496,7 @@
         variationResult: variation.result || null,
       };
       if (adjusted.warnings?.length) warnings.push(...adjusted.warnings.map(message => `“${shot.label}”: ${message}`));
+      if (!adjusted.feasible) errors.push(`“${shot.label}”: no feasible trajectory was found for the current robot position and live adjustments.`);
       if (variation.error) errors.push(`“${shot.label}”: ${variation.error}`);
       const preflight = robotShotPreflight(shot);
       errors.push(...preflight.errors);
@@ -5282,14 +5596,15 @@
     };
   }
 
-  function buildCalibrationTestExecutionPlan() {
+  function buildCalibrationTestExecutionPlan(params = library.calibration.testShot, label = "Calibration test shot") {
     const c = library.calibration;
     return buildRobotExecutionPlan({
       shots: [{
         drillId: "__calibration__",
         nodeId: "__test_shot__",
-        label: "Calibration test shot",
-        params: { ...c.testShot },
+        label,
+        params: { ...params },
+        skipRuntimeAdjustments: true,
         delayBefore: 0,
       }],
       warnings: [],
@@ -5381,7 +5696,7 @@
     }
   }
 
-  async function runCalibrationTestShot() {
+  async function runCalibrationTestShot(params = library.calibration.testShot, label = "Calibration test shot", onComplete = null) {
     if (calibrationTestRunning) {
       await stopPlayback();
       return;
@@ -5399,7 +5714,7 @@
 
     let plan;
     try {
-      plan = buildCalibrationTestExecutionPlan();
+      plan = buildCalibrationTestExecutionPlan(params, label);
     } catch (error) {
       calibrationTestMessage = error instanceof Error ? error.message : String(error);
       renderCalibrationTestShotPanel();
@@ -5417,7 +5732,7 @@
     try {
       if (!robot.connected || !robot.authenticated) {
         calibrationTestRunning = false;
-        requestRobotConnection("Calibration test shot", () => runCalibrationTestShot());
+        requestRobotConnection(label, () => runCalibrationTestShot(params, label, onComplete));
         return;
       }
 
@@ -5440,12 +5755,13 @@
       await robot.startBatch(batch.packet, {
         timeoutMs,
         expectedDurationMs: batch.encodedSeconds * 1000,
-        description: `calibration test shot (${fmt(shot.params.speedMps,1)} m/s, ${signed(shot.params.spinRps,1)} rps)`,
+        description: `${label} (${fmt(shot.params.speedMps,1)} m/s, ${signed(shot.params.spinRps,1)} rps)`,
       });
 
       if (!calibrationTestRunning || token !== playbackToken) return;
       calibrationTestMessage = "Test shot complete · Nova Ready";
-      toast("Calibration test shot complete · Nova Ready");
+      toast(`${label} complete · Nova Ready`);
+      if (typeof onComplete === "function") onComplete();
     } catch (error) {
       if (token === playbackToken) {
         calibrationTestMessage = `Test shot stopped: ${error instanceof Error ? error.message : String(error)}`;
@@ -5500,6 +5816,15 @@
     if (!drill) return;
     const validation = validateDrill(drill);
     if (!validation.valid) { toast("Fix drill errors before playing."); return; }
+    if (!poseStaleAcknowledged && PoseCalibration.isStale(currentPoseSession())) {
+      askConfirm(
+        "Check the robot position?",
+        "This saved position has not been used or checked in two weeks. If the robot may have moved, cancel and choose Update pose. Otherwise continue with the saved position.",
+        () => { poseStaleAcknowledged = true; void startPlayback(); },
+        { actionLabel: "Continue with saved pose", actionClass: "primary" }
+      );
+      return;
+    }
     if (!robot) { toast("Robot controller module did not load."); return; }
     if (!robot.connected || !robot.authenticated) {
       requestRobotConnection("Play drill", () => startPlayback());
@@ -5514,6 +5839,8 @@
     activeEdgeRef = null;
     runtimeCounterDisplay = new Map();
     updatePlayButton();
+    currentPoseSession().lastRobotUseAt = new Date().toISOString();
+    saveLibrary();
 
     const configured = drill.settings.repetitions;
     const infinite = configured <= 0;
@@ -5721,7 +6048,7 @@
       resetRepeatersTriggeredBySimulation(drill, node, context, repeaters);
       let edge = null;
       if (node.type === "shot") {
-        const adjusted = adjustedShotForLiveTuning(node.params);
+        const adjusted = adjustedShotForRuntime(node.params, drillId);
         const p = adjusted.params;
         const suffix = adjusted.changed ? ` · live tuning · elev ${signed(p.elevationDeg,1)}°` : "";
         context.events.push({ kind: "shot", title: node.label, detail: `${fmt(p.speedMps,1)} m/s · ${spinWords(p.spinRps)}${suffix}` });
@@ -5833,6 +6160,64 @@
     });
     clone.startNodeId = idMap.get(source.startNodeId) ?? clone.nodes[0]?.id ?? null;
     return clone;
+  }
+
+  function variationShiftedToEffectiveShot(variation, baseParams, adjustment) {
+    if (!variation?.enabled) return null;
+    const copy = structuredClone(variation);
+    const speedDelta = adjustment.params.speedMps - baseParams.speedMps;
+    const spinDelta = adjustment.params.spinRps - baseParams.spinRps;
+    const clearanceDeltaCm = ((adjustment.prediction?.net?.clearanceM ?? 0) - (adjustment.basePrediction?.net?.clearanceM ?? 0)) * 100;
+    copy.speed.minMps += speedDelta; copy.speed.maxMps += speedDelta;
+    copy.spin.minRps += spinDelta; copy.spin.maxRps += spinDelta;
+    copy.clearance.minCm += clearanceDeltaCm; copy.clearance.maxCm += clearanceDeltaCm;
+    return ShotVariation.normalizeVariation(copy, adjustment.params, adjustment.prediction?.net?.clearanceM);
+  }
+
+  function saveEffectiveDrillAsNew() {
+    if (playbackRunning || calibrationTestRunning || robotIsActive()) { toast("Stop the robot before saving the current effective drill."); return; }
+    const source = activeDrill();
+    if (!source) return;
+    let compiled;
+    try { compiled = compileRobotSet(source.id); }
+    catch (error) { toast(error instanceof Error ? error.message : String(error)); return; }
+    if (!compiled.shots.length) { toast("This drill has no playable sequence to save."); return; }
+    const effective = [];
+    for (const shot of compiled.shots) {
+      const adjustment = adjustedShotForRuntime(shot.params, shot.drillId);
+      if (!adjustment.feasible) {
+        toast(`Cannot save: “${shot.label}” is not feasible from the current position and adjustments.`);
+        return;
+      }
+      effective.push({ shot, adjustment });
+    }
+    const saved = defaultDrill(uniqueDrillName(`${isActiveBuiltIn() ? builtInDisplayName(source.name) : source.name} — current setup`));
+    saved.description = `Saved runtime result of “${isActiveBuiltIn() ? builtInDisplayName(source.name) : source.name}”. Robot position and live adjustments were baked into this sampled sequence; the source drill was not changed.`;
+    saved.tags = [...new Set([...(source.tags || []), "saved setup"])];
+    saved.robotPose = { ...currentRobotPose() };
+    saved.settings = {
+      repetitions: source.settings.repetitions,
+      delayBetweenSets: tunedDelaySeconds(source.settings.delayBetweenSets),
+    };
+    saved.nodes = effective.map(({ shot, adjustment }, index) => ({
+      id: makeId("shot"), type: "shot", label: shot.label,
+      x: 150 + (index % 4) * 320, y: 220 + Math.floor(index / 4) * 230,
+      params: { ...adjustment.params },
+      variation: variationShiftedToEffectiveShot(shot.variation, shot.params, adjustment),
+    }));
+    saved.startNodeId = saved.nodes[0]?.id || null;
+    saved.nodes.slice(0, -1).forEach((node, index) => saved.edges.push({
+      id: makeId("edge"), source: node.id, sourceSlot: "next", target: saved.nodes[index + 1].id,
+      weight: 1, delaySeconds: tunedDelaySeconds(effective[index + 1].shot.delayBefore),
+    }));
+    library.drills.push(saved);
+    library.activeDrillSource = "user";
+    library.activeDrillId = saved.id;
+    liveTuning = { ...DrillAdjustments.DEFAULT_TUNING };
+    liveTuningCache.clear();
+    saveLiveTuningPreference();
+    saveLibrary(); renderAll(); renderLiveTuning();
+    toast(`Saved and selected “${saved.name}”. Live tuning was reset because its result is now stored in the new drill.`);
   }
 
   function createDrill() {
@@ -6614,6 +6999,33 @@ STATUS
     els.closeLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
     els.doneLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
     els.resetLiveTuningBtn.addEventListener("click", resetLiveTuning);
+    els.saveLiveTunedDrillBtn.addEventListener("click", () => { els.liveTuningDialog.close(); saveEffectiveDrillAsNew(); });
+    els.saveEffectiveDrillBtn.addEventListener("click", saveEffectiveDrillAsNew);
+    els.updateRobotPoseBtn.addEventListener("click", openPoseCalibration);
+    els.closePoseCalibrationBtn.addEventListener("click", () => {
+      if (calibrationTestRunning) void stopPlayback().then(closePoseCalibration); else closePoseCalibration();
+    });
+    els.cancelPoseCalibrationBtn.addEventListener("click", () => {
+      if (calibrationTestRunning) void stopPlayback().then(closePoseCalibration); else closePoseCalibration();
+    });
+    els.savePoseCalibrationBtn.addEventListener("click", savePoseCalibration);
+    els.poseCalibrationTableSvg.addEventListener("pointerdown", event => {
+      if (event.target.closest("[data-pose-feedback]")) {
+        recordPoseLanding(poseSvgEventPoint(event));
+        event.preventDefault();
+        return;
+      }
+      beginPoseCalibrationDrag(event);
+    });
+    els.poseCalibrationTableSvg.addEventListener("pointermove", updatePoseCalibrationDrag);
+    els.poseCalibrationTableSvg.addEventListener("pointerup", endPoseCalibrationDrag);
+    els.poseCalibrationTableSvg.addEventListener("pointercancel", endPoseCalibrationDrag);
+    els.poseCalibrationGuide.addEventListener("click", event => {
+      const action = event.target.closest("[data-pose-action]")?.dataset.poseAction;
+      if (action === "start") startPoseVerification();
+      if (action === "fire") void fireCurrentPoseVerification();
+      if (action === "retry" && poseCalibrationState) { poseCalibrationState.mode = "ready"; renderPoseCalibration(); }
+    });
     document.querySelectorAll("[data-tuning-key][data-tuning-delta]").forEach(button => {
       button.addEventListener("click", () => stepLiveTuning(button.dataset.tuningKey, finite(button.dataset.tuningDelta, 0)));
     });
@@ -6765,6 +7177,27 @@ STATUS
       };
       return profileShotVariation(benchmarkNode, count);
     },
+    benchmarkRuntimeSolver(count = 24) {
+      const drill = activeDrill();
+      const node = drill?.nodes.find(candidate => candidate.type === "shot");
+      if (!drill || !node) return { ok: false, reason: "The active drill has no direct shot." };
+      const referencePose = drillPose(drill);
+      const simulatedPose = { x: referencePose.x + .03, y: referencePose.y - .02, yawDeg: referencePose.yawDeg + 1 };
+      const basePrediction = predictTrajectory(node.params, calibrationAtPose(referencePose));
+      const iterations = Math.max(1, Math.min(200, Math.round(count)));
+      let evaluations = 0;
+      let feasible = 0;
+      const started = performance.now();
+      for (let index = 0; index < iterations; index += 1) {
+        const result = DrillAdjustments.applyShotTuning(node.params, { speedPct: 6, spinPct: 5, clearancePct: 5 },
+          candidate => predictTrajectory(candidate, calibrationAtPose(simulatedPose)),
+          { ...liveTuningOptions(), basePrediction, forceSolve: true, preserveClearance: true });
+        evaluations += result.evaluations || 0;
+        if (result.feasible) feasible += 1;
+      }
+      const elapsedMs = performance.now() - started;
+      return { ok: feasible === iterations, iterations, feasible, evaluations, elapsedMs, millisecondsPerShot: elapsedMs / iterations };
+    },
     exportGuidedMeasurements,
     addUserDrill(drill) {
       const allIds = new Set([...(builtInCatalog?.drills || []).map(item => item.id), ...library.drills.map(item => item.id), String(drill?.id || "")]);
@@ -6800,6 +7233,7 @@ STATUS
       ["guided calibration", GuidedCalibration],
       ["launch model", LaunchModel],
       ["drill adjustments", DrillAdjustments],
+      ["pose calibration", PoseCalibration],
       ["shot variation", ShotVariation],
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missingRuntimeModules.length) {
@@ -6830,6 +7264,10 @@ STATUS
       setCalibrationTab("guided");
       renderCalibration();
       setTimeout(() => els.calibrationDialog.showModal(), 20);
+    }
+    const runtimeProfileCount = Number(new URLSearchParams(location.search).get("profileRuntime"));
+    if (Number.isFinite(runtimeProfileCount) && runtimeProfileCount > 0) {
+      document.body.dataset.runtimeSolverProfile = JSON.stringify(globalThis.TableTennisRobotStudio.benchmarkRuntimeSolver(runtimeProfileCount));
     }
     globalThis.__TTRS_BOOT_OK = true;
   } catch (error) {

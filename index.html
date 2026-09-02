@@ -85,7 +85,7 @@
           </section>
 
           <section class="session-adjustments-card panel-card">
-            <div class="section-title-row"><div><h3>Player tuning</h3><p>Your preferred session feel. Applies to every ball, persists between sessions, and is never stored in the drill.</p></div><button id="liveTuningBtn" class="button compact ghost" type="button">Details</button></div>
+            <div class="section-title-row"><div><h3>Player tuning</h3><p>Your preferred session feel. Applies to every ball without changing the source drill.</p></div><button id="liveTuningBtn" class="button compact ghost" type="button">Details</button></div>
             <div class="session-adjustment-list">
               <div class="session-adjustment" data-run-tuning="pacePct"><div><strong>Pace</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="pacePct" data-tuning-delta="-5">−</button><output data-tuning-output="pacePct">0%</output><button type="button" data-tuning-key="pacePct" data-tuning-delta="5">+</button></div></div>
               <div class="session-adjustment" data-run-tuning="clearancePct"><div><strong>Net clearance</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="clearancePct" data-tuning-delta="-5">−</button><output data-tuning-output="clearancePct">0%</output><button type="button" data-tuning-key="clearancePct" data-tuning-delta="5">+</button></div></div>
@@ -96,11 +96,13 @@
           </section>
 
           <section class="run-setup-card panel-card">
-            <div class="section-title-row"><div><h3>Robot setup</h3><p>Place the robot as expected by this drill before playing.</p></div></div>
+            <div class="section-title-row"><div><h3>Robot setup</h3><p>The current position is compensated at runtime; the source drill stays unchanged.</p></div><button id="updateRobotPoseBtn" class="button compact primary" type="button">Calibrate pose</button></div>
             <div id="runRobotSetup" class="robot-setup-summary"></div>
+            <p id="runPoseStatus" class="session-adjustment-summary"></p>
             <div class="run-secondary-actions">
               <button id="previewBtn" class="button ghost" type="button">Preview sequence</button>
               <button id="runEditDrillBtn" class="button primary" type="button">✎ Edit drill</button>
+              <button id="saveEffectiveDrillBtn" class="button ghost" type="button">Save current setup as new drill</button>
             </div>
           </section>
         </div>
@@ -190,12 +192,34 @@
       <div class="dialog-action-row"><button id="copyBuiltInBtn" class="button primary" type="button">Copy to My drills</button><button id="duplicateDrillBtn" class="button ghost" type="button">Duplicate</button><button id="moveDrillBtn" class="button ghost" type="button">Move</button><button id="deleteDrillBtn" class="button danger" type="button">Delete</button></div>
     </div>
   </dialog>
+  <dialog id="poseCalibrationDialog" class="pose-calibration-dialog">
+    <div class="dialog-frame pose-calibration-frame">
+      <header>
+        <div><p class="eyebrow">Robot setup</p><h2>Position the robot</h2><p>Drag the robot to its physical position, rotate its direction handle, then refine the estimate with verification balls.</p></div>
+        <button id="closePoseCalibrationBtn" class="icon-button" type="button" aria-label="Close">×</button>
+      </header>
+      <div class="pose-calibration-workspace">
+        <section class="pose-table-panel" aria-label="Interactive robot position">
+          <svg id="poseCalibrationTableSvg" class="pose-calibration-table" viewBox="0 0 420 700" role="img" aria-label="Table top view. Drag the robot to position it and drag its handle to rotate it."></svg>
+        </section>
+        <section class="pose-calibration-guide">
+          <div id="poseCalibrationGuide"></div>
+          <div id="poseCalibrationConfidence" class="pose-confidence"></div>
+          <div class="pose-calibration-dialog-actions">
+            <button id="cancelPoseCalibrationBtn" class="button ghost" type="button">Cancel</button>
+            <button id="savePoseCalibrationBtn" class="button primary" type="button">Save position</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="calibrationDialog" class="calibration-dialog">
     <div class="dialog-frame calibration-frame">
       <header class="calibration-header">
         <div>
           <h2>Robot calibration</h2>
-          <p>Collect no-spin shots and fit one global raw motor input → launch-speed line. The measured robot geometry stays fixed.</p>
+          <p>Calibrate the launch-speed model, physical geometry and table dimensions.</p>
         </div>
         <button id="closeCalibrationBtn" class="icon-button" type="button" aria-label="Close">×</button>
       </header>
@@ -296,13 +320,8 @@
       <section id="calibrationPosePanel" class="calibration-panel" hidden>
         <div class="model-settings-layout">
           <section class="guided-card">
-            <h3>Robot pose & launch model</h3>
-            <p class="helper">Guided calibration updates these values. Fine-tune only if you have independent measurements.</p>
-            <div class="field-grid three">
-              <label class="field"><span>Base-back X from near edge</span><span class="input-with-unit"><input id="poseXInput" type="number" step="0.01"><small>m</small></span></label>
-              <label class="field"><span>Robot Y from centre</span><span class="input-with-unit"><input id="poseYInput" type="number" step="0.01"><small>m</small></span></label>
-              <label class="field"><span>Direction</span><span class="input-with-unit"><input id="poseYawInput" type="number" step="1"><small>°</small></span></label>
-            </div>
+            <h3>Robot / model settings</h3>
+            <p class="helper">Physical head orientation and advanced launch-model controls. Robot position is calibrated from the Run screen.</p>
             <label class="field"><span>Physical head orientation</span><select id="rotationTypeInput"><option value="0">Top/underspin — standard (type 0)</option><option value="1">Side/mixed orientation A (type 1)</option><option value="2">Side/mixed orientation B (type 2)</option><option value="3">Side/mixed orientation C (type 3)</option><option value="4">Top/underspin — reversed wheels (type 4)</option><option value="5">Side/mixed A — reversed wheels (type 5)</option><option value="6">Side/mixed B — reversed wheels (type 6)</option><option value="7">Side/mixed C — reversed wheels (type 7)</option></select></label>
             <div class="setup-note"><strong>Fixed measured geometry:</strong> base back → yaw pivot 24.2 cm; yaw → pitch pivot 7.5 cm; pitch pivot → wheels 7.5 cm; yaw pivot 24.0 cm above the support surface. Pitch and yaw/aim move the physical release point.</div>
             <div id="poseLandingSummary" class="landing-summary" hidden></div>
@@ -337,7 +356,7 @@
           </section>
 
           <section class="guided-card">
-            <details class="advanced-panel nova-scaling-panel" open>
+            <details class="advanced-panel nova-scaling-panel">
               <summary>Nova raw-command scaling &amp; spin capacity</summary>
               <div class="field-grid three advanced-fields">
                 <label class="field"><span>Raw input at Nova speed 0</span><span class="input-with-unit"><input id="rawAtZeroSpeedInput" type="number" min="0" max="20000" step="0.001"><small>raw</small></span></label>
@@ -536,6 +555,7 @@ STOP</pre>
 
       <div class="dialog-actions live-tuning-actions">
         <button id="resetLiveTuningBtn" class="button ghost" type="button">Reset all</button>
+        <button id="saveLiveTunedDrillBtn" class="button ghost" type="button">Save current setup as new drill</button>
         <button id="doneLiveTuningBtn" class="button primary" type="button">Done</button>
       </div>
     </div>
@@ -594,7 +614,7 @@ STOP</pre>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-01.3" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-01.5" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {
