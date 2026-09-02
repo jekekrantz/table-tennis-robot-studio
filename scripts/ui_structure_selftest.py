@@ -139,11 +139,13 @@ for token in ('LIVE_TUNING_STORAGE_KEY', 'saveLiveTuningPreference', 'loadLiveTu
 # Robot position is set directly on a table, then refined from observed first bounces.
 for token in (
     'data-pose-drag="position"', 'data-pose-drag="rotation"',
-    'Tap where the ball landed', 'recordPoseObservationFromMap', 'MANUAL_POSE_PRIOR',
+    'Zoomable equal-scale landing view', 'recordPoseObservationFromMap', 'MANUAL_POSE_PRIOR',
     'PoseCalibration.estimatePoseObservation', 'pose-observation-map',
     'PoseCalibration.planCalibrationSequence', 'PoseCalibration.feedbackMeasurementNoise',
-    'pose-table-markings', 'pose-net-mesh', 'data-pose-map-zoom="in"',
+    'pose-table-markings', 'pose-net-mesh', 'pose-observation-grid',
+    'pose-expected-region', 'PoseCalibration.expectedLandingCovariance',
     'beginPoseMeasurementGesture', 'All numbers are centimetres',
+    'horizontalPlacement', 'verticalPlacement', 'Fire calibration shot',
 ):
     if token not in app:
         raise SystemExit(f"Missing interactive pose-calibration behavior: {token}")
@@ -151,6 +153,10 @@ for obsolete in (
     'poseUncertaintyXInput', 'poseLandingNoiseInput', 'poseMeasurementNoiseInput',
     'generatePoseVerificationBtn', 'markPoseVerifiedBtn', 'poseVerificationPlan',
     'data-pose-category', 'recordPoseCategory', 'pose-miss-actions',
+    'data-pose-map-zoom', 'pose-map-controls', 'pose-reference-summary',
+    'pose-observation-heading', 'pose-expected-point',
+    'data-pose-action="retry"', 'Fire that ball again',
+    'Fire when ready', 'Connect & fire when ready', 'clearOfBall',
 ):
     if obsolete in app or f'id="{obsolete}"' in html:
         raise SystemExit(f"Obsolete manual pose-calibration control remains: {obsolete}")
