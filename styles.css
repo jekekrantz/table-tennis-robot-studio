@@ -1653,6 +1653,7 @@ textarea { font:inherit; color:inherit; }
 .robot-setup-mini { width:min(100%,320px); }
 .robot-setup-summary svg { width:100%; height:auto; border:1px solid #3b4658; border-radius:9px; background:#0e151f; }
 .run-secondary-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:14px; }
+.run-setup-card #updateRobotPoseBtn { white-space:nowrap; }
 
 /* Robot pose calibration */
 .pose-calibration-dialog {
@@ -1721,6 +1722,7 @@ textarea { font:inherit; color:inherit; }
 .pose-readout span { padding:8px 9px; border:1px solid #344255; border-radius:8px; background:#0c131c; color:#d8e6f3; font-size:.73rem; font-variant-numeric:tabular-nums; }
 .pose-warning { color:#f1ca78 !important; }
 .pose-confidence { margin-top:auto; padding:13px; border:1px solid #30455a; border-radius:10px; background:#0c151f; }
+.pose-confidence[hidden],.pose-calibration-dialog-actions[hidden] { display:none; }
 .pose-confidence span,.pose-confidence strong,.pose-confidence small { display:block; }
 .pose-confidence span { color:#8fb5d4; font-size:.64rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
 .pose-confidence strong { margin-top:5px; color:#dcedfb; font-size:.76rem; line-height:1.45; }

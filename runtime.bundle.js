@@ -8213,6 +8213,9 @@ root.TTRSQRCode={
     }
     const u = state.uncertainty;
     els.poseCalibrationConfidence.innerHTML = `<span>Estimated pose uncertainty</span><strong>±${fmt(u.xCm,1)} cm forward/back · ±${fmt(u.yCm,1)} cm left/right · ±${fmt(u.yawDeg,1)}° direction</strong><small>Estimated from the manual placement prior and ${state.observations.length} observed landing${state.observations.length === 1 ? "" : "s"}.</small>`;
+    const verificationActive = ["ready", "firing", "feedback"].includes(state.mode);
+    els.poseCalibrationConfidence.hidden = verificationActive;
+    els.savePoseCalibrationBtn.parentElement.hidden = verificationActive;
     els.savePoseCalibrationBtn.textContent = state.mode === "complete" ? "Save calibrated pose" : "Save position";
     els.savePoseCalibrationBtn.disabled = state.mode === "firing" || state.mode === "feedback";
   }
