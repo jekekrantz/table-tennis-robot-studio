@@ -1667,6 +1667,7 @@ textarea { font:inherit; color:inherit; }
 }
 .pose-calibration-dialog::backdrop { background:rgba(4,7,11,.8); }
 .pose-calibration-frame { max-height:calc(100dvh - 28px); overflow:auto; }
+.pose-calibration-frame > header .icon-button { border:1px solid #7f90a3; background:#17212d; color:#f3f7fb; }
 .pose-calibration-workspace {
   display:grid;
   grid-template-columns:minmax(340px,.92fr) minmax(300px,.68fr);
@@ -1694,6 +1695,7 @@ textarea { font:inherit; color:inherit; }
   user-select:none;
 }
 .pose-table-surface { fill:#14344a; stroke:#6e9bb8; stroke-width:2; }
+.pose-plan-grid line { stroke:#83a6bd; stroke-width:.7; opacity:.38; pointer-events:none; }
 .pose-table-centre { stroke:rgba(219,236,247,.66); stroke-width:2; }
 .pose-table-net { stroke:#f1f5f9; stroke-width:7; filter:drop-shadow(0 2px 2px rgba(0,0,0,.65)); }
 .pose-table-label { fill:rgba(225,237,246,.58); font:700 12px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; text-transform:uppercase; letter-spacing:1.2px; pointer-events:none; }
@@ -1713,7 +1715,6 @@ textarea { font:inherit; color:inherit; }
 .pose-rotation-handle { cursor:grab; filter:drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
 .pose-rotation-handle circle { fill:#2e78d8; stroke:#dcebff; stroke-width:3; }
 .pose-rotation-handle path { fill:none; stroke:white; stroke-width:2.5; stroke-linecap:round; }
-.pose-feedback-hit-area { fill:rgba(76,165,255,.025); stroke:#72baff; stroke-width:3; stroke-dasharray:10 7; cursor:crosshair; pointer-events:all; }
 .pose-calibration-guide { display:flex; flex-direction:column; min-width:0; padding:18px; border:1px solid var(--border); border-radius:13px; background:#111923; }
 .pose-calibration-guide h3 { margin:3px 0 8px; font-size:1.12rem; }
 .pose-calibration-guide p:not(.pose-step) { margin:0 0 14px; color:var(--muted); line-height:1.52; font-size:.78rem; }
@@ -1729,6 +1730,30 @@ textarea { font:inherit; color:inherit; }
 .pose-confidence small { margin-top:5px; color:var(--muted); font-size:.64rem; line-height:1.4; }
 .pose-calibration-dialog-actions { display:grid; grid-template-columns:1fr 1.4fr; gap:8px; margin-top:12px; }
 .pose-calibration-guide .wide { width:100%; min-height:44px; }
+.pose-feedback-mode .pose-table-panel { display:none; }
+.pose-feedback-mode .pose-calibration-workspace { display:block; }
+.pose-feedback-mode .pose-calibration-guide { width:min(100%,680px); margin:0 auto; }
+.pose-reference-summary { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:1px 0 10px; }
+.pose-reference-summary span { padding:8px 7px; border:1px solid #37618a; border-radius:8px; background:#11283b; color:#cfe9ff; font-size:.7rem; font-weight:750; text-align:center; }
+.pose-map-shell { position:relative; width:min(100%,620px); margin:2px auto 10px; }
+.pose-observation-map { display:block; width:100%; border:1px solid #31445a; border-radius:11px; background:#070c12; touch-action:none; user-select:none; }
+.pose-map-controls { position:absolute; z-index:2; top:39px; right:7px; display:flex; gap:4px; }
+.pose-map-controls button { width:31px; height:28px; border:1px solid #49627a; border-radius:7px; background:rgba(12,23,34,.94); color:#e7f3fc; font-size:.82rem; font-weight:800; cursor:pointer; }
+.pose-map-controls button:active { background:#254a69; }
+.pose-feedback-background { fill:#080d14; }
+.pose-feedback-table { fill:#1d5877; }
+.pose-observation-heading { fill:#b7cce0; font:800 8.5px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; letter-spacing:.06em; }
+.pose-table-markings .edge-line,.pose-table-markings .centre-line { stroke:#f6f8f9; }
+.pose-net-shadow { stroke:#dce5ea; stroke-width:7; opacity:.35; }
+.pose-net-mesh { stroke:#f4f6f7; stroke-width:3; stroke-dasharray:2 2; filter:drop-shadow(0 2px 2px rgba(0,0,0,.8)); }
+.pose-net-post { fill:#d9e1e5; stroke:#273640; stroke-width:2; }
+.pose-landmark-label { fill:#fff; stroke:#071019; stroke-width:3px; paint-order:stroke fill; font:850 8px ui-sans-serif,system-ui,sans-serif; letter-spacing:.055em; }
+.pose-landmark-label.horizontal { text-anchor:end; }
+.pose-landmark-label.vertical { text-anchor:start; }
+.pose-axis-number { fill:#e7eff5; stroke:#071019; stroke-width:2px; paint-order:stroke fill; font:750 8px ui-sans-serif,system-ui,sans-serif; font-variant-numeric:tabular-nums; }
+.pose-expected-point { fill:#5ba9ff; stroke:#e4f2ff; stroke-width:2.5; }
+.pose-expected-halo { fill:rgba(91,169,255,.2); stroke:#80beff; stroke-width:2; stroke-dasharray:4 3; }
+.pose-observation-hit { fill:transparent; stroke:none; cursor:crosshair; pointer-events:all; }
 
 /* Editor */
 .editor-screen { padding:0; max-width:none; height:calc(100dvh - 64px); overflow:hidden; }
@@ -1968,6 +1993,8 @@ textarea { font:inherit; color:inherit; }
   .pose-confidence small { display:none; }
   .pose-calibration-dialog-actions { margin-top:8px; }
   .pose-calibration-guide .wide,.pose-calibration-dialog-actions .button { min-height:40px; }
+  .pose-feedback-mode .pose-calibration-workspace { display:block; overflow-y:auto; }
+  .pose-feedback-mode .pose-calibration-guide { width:100%; }
 }
 
 /* v11 navigation polish: per-screen back controls own navigation; avoid duplicate arrows. */

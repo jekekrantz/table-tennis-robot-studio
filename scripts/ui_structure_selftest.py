@@ -139,14 +139,18 @@ for token in ('LIVE_TUNING_STORAGE_KEY', 'saveLiveTuningPreference', 'loadLiveTu
 # Robot position is set directly on a table, then refined from observed first bounces.
 for token in (
     'data-pose-drag="position"', 'data-pose-drag="rotation"',
-    'Where did the ball land?', 'recordPoseLanding', 'MANUAL_POSE_PRIOR',
-    'PoseCalibration.estimatePoseCorrection',
+    'Tap where the ball landed', 'recordPoseObservationFromMap', 'MANUAL_POSE_PRIOR',
+    'PoseCalibration.estimatePoseObservation', 'pose-observation-map',
+    'PoseCalibration.planCalibrationSequence', 'PoseCalibration.feedbackMeasurementNoise',
+    'pose-table-markings', 'pose-net-mesh', 'data-pose-map-zoom="in"',
+    'beginPoseMeasurementGesture', 'All numbers are centimetres',
 ):
     if token not in app:
         raise SystemExit(f"Missing interactive pose-calibration behavior: {token}")
 for obsolete in (
     'poseUncertaintyXInput', 'poseLandingNoiseInput', 'poseMeasurementNoiseInput',
     'generatePoseVerificationBtn', 'markPoseVerifiedBtn', 'poseVerificationPlan',
+    'data-pose-category', 'recordPoseCategory', 'pose-miss-actions',
 ):
     if obsolete in app or f'id="{obsolete}"' in html:
         raise SystemExit(f"Obsolete manual pose-calibration control remains: {obsolete}")

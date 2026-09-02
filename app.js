@@ -146,6 +146,7 @@
     poseSvg: $("poseSvg"),
     poseLandingSummary: $("poseLandingSummary"),
     poseCalibrationDialog: $("poseCalibrationDialog"),
+    poseCalibrationTitle: $("poseCalibrationTitle"),
     closePoseCalibrationBtn: $("closePoseCalibrationBtn"),
     cancelPoseCalibrationBtn: $("cancelPoseCalibrationBtn"),
     savePoseCalibrationBtn: $("savePoseCalibrationBtn"),
@@ -349,6 +350,7 @@
   let pendingRobotReason = "";
   let poseCalibrationState = null;
   let poseCalibrationDrag = null;
+  let poseMeasurementGesture = null;
   let poseStaleAcknowledged = false;
   const shotVariationCache = new Map();
   let shotVariationRng = ShotVariation?.createRng(Date.now());
@@ -4018,8 +4020,21 @@
     return session;
   }
 
-  const MANUAL_POSE_PRIOR = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, landingCm: 6, measurementCm: 2 });
+  const MANUAL_POSE_PRIOR = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, landingCm: 5, measurementCm: 2 });
+  const MAX_POSE_CALIBRATION_SHOTS = 7;
   const POSE_TABLE_VIEW = Object.freeze({ left: 43, top: 40, width: 334, height: 600 });
+
+  function predictedIncidenceDeg(prediction) {
+    const points = prediction?.points || [];
+    if (points.length < 2) return 30;
+    const end = points[points.length - 1];
+    let previous = points[points.length - 2];
+    for (let index = points.length - 2; index >= 0; index -= 1) {
+      if (Math.abs(points[index].z - end.z) >= .01) { previous = points[index]; break; }
+    }
+    const horizontal = Math.hypot(end.x - previous.x, end.y - previous.y);
+    return clamp(degrees(Math.atan2(Math.abs(end.z - previous.z), Math.max(.001, horizontal))), 8, 85, 30);
+  }
 
   function verificationShotForTarget(target, pose = currentRobotPose()) {
     const calibration = calibrationAtPose(pose);
@@ -4045,7 +4060,12 @@
       return { ...solution, verificationScore: landingMiss / .08 + clearanceMiss / .03, landingMiss, clearanceMiss };
     }).filter(Boolean).sort((a,b) => a.verificationScore - b.verificationScore);
     const best = candidates[0];
-    return best && best.landingMiss <= .12 && best.clearanceMiss <= .05 ? best : null;
+    if (!best || best.landingMiss > .12 || best.clearanceMiss > .05) return null;
+    const release = best.prediction.points?.[0] || pose;
+    const flightDistanceM = Math.hypot(best.prediction.landing.x - finite(release.x, pose.x), best.prediction.landing.y - finite(release.y, pose.y));
+    const incidenceDeg = predictedIncidenceDeg(best.prediction);
+    const shotSigmaCm = Math.max(MANUAL_POSE_PRIOR.landingCm, GuidedCalibration.measurementSigmaM(flightDistanceM, incidenceDeg, { distanceNoisePerM: .015 }) * 100);
+    return { ...best, incidenceDeg, shotSigmaCm };
   }
 
   function poseTablePoint(pose) {
@@ -4069,15 +4089,27 @@
     const session = currentPoseSession();
     const uncertainty = PoseCalibration.sanitizeUncertainty(session.uncertainty || MANUAL_POSE_PRIOR);
     const pose = { ...currentRobotPose() };
+    const covariance = PoseCalibration.sanitizeCovariance(session.covariance, uncertainty);
+    const plan = PoseCalibration.planCalibrationSequence(library.calibration.table, pose, uncertainty, { covariance, maxShots: 4 });
     poseCalibrationState = {
       pose,
       uncertainty,
-      targets: PoseCalibration.proposeVerificationTargets(library.calibration.table, pose, MANUAL_POSE_PRIOR),
-      currentIndex: 0,
+      covariance,
+      targets: plan.sequence,
+      planStatus: plan.status,
+      currentTarget: null,
       mode: "position",
       observations: [],
       landingMarks: [],
+      recentTargets: [],
+      shotsFired: 0,
+      acceptedCount: 0,
+      currentWatchGroup: null,
+      verificationAttempted: false,
+      verificationPassed: false,
+      confidenceLimited: false,
       manuallyMoved: false,
+      measurementViewport: null,
     };
   }
 
@@ -4091,13 +4123,25 @@
     const handle = { x: robot.x - Math.sin(yaw) * 76, y: robot.y - Math.cos(yaw) * 76 };
     const sigmaX = state.uncertainty.yCm / 100 / table.width * view.width;
     const sigmaY = state.uncertainty.xCm / 100 / table.length * view.height;
-    const currentTarget = state.targets[state.currentIndex];
-    const targets = state.targets.map((target, index) => {
+    const currentTarget = state.currentTarget;
+    const gridCm = currentTarget?.gridCm || PoseCalibration.gridResolutionCm(state.uncertainty);
+    const planGrid = state.mode === "position" ? "" : `<g class="pose-plan-grid">${[
+      ...Array.from({ length: Math.floor(table.length * 100 / gridCm) + 1 }, (_, index) => {
+        const y = poseTablePoint({ x: index * gridCm / 100, y: 0 }).y;
+        return `<line x1="${view.left}" x2="${view.left + view.width}" y1="${y}" y2="${y}"/>`;
+      }),
+      ...Array.from({ length: Math.floor(table.width * 100 / gridCm) + 1 }, (_, index) => {
+        const x = poseTablePoint({ x: 0, y: table.width / 2 - index * gridCm / 100 }).x;
+        return `<line x1="${x}" x2="${x}" y1="${view.top}" y2="${view.top + view.height}"/>`;
+      }),
+    ].join("")}</g>`;
+    const visibleTargets = state.mode === "position" ? [] : state.targets.slice(0, 1);
+    const targets = visibleTargets.map((target, index) => {
       const point = poseTablePoint(target);
       const active = target.id === currentTarget?.id && state.mode !== "position";
       const observed = state.observations.some(item => item.targetId === target.id);
       return `<g class="pose-target ${active ? "active" : ""} ${observed ? "observed" : ""}">
-        <circle cx="${point.x}" cy="${point.y}" r="${active ? 14 : 11}"/><text x="${point.x}" y="${point.y + 4}">${index + 1}</text>
+        <circle cx="${point.x}" cy="${point.y}" r="${active ? 14 : 11}"/>${active ? "" : `<text x="${point.x}" y="${point.y + 4}">${index + 1}</text>`}
       </g>`;
     }).join("");
     const landings = state.landingMarks.map(mark => {
@@ -4106,6 +4150,7 @@
     }).join("");
     els.poseCalibrationTableSvg.innerHTML = `
       <rect class="pose-table-surface" x="${view.left}" y="${view.top}" width="${view.width}" height="${view.height}" rx="8" data-pose-table-hit="1"/>
+      ${planGrid}
       <line class="pose-table-centre" x1="${view.left + view.width/2}" x2="${view.left + view.width/2}" y1="${view.top}" y2="${view.top + view.height}"/>
       <line class="pose-table-net" x1="${view.left}" x2="${view.left + view.width}" y1="${view.top + view.height/2}" y2="${view.top + view.height/2}"/>
       <text class="pose-table-label" x="${view.left + view.width/2}" y="${view.top + 22}">far end</text>
@@ -4117,37 +4162,202 @@
         <rect x="-22" y="-47" width="44" height="47" rx="10"/><circle cx="0" cy="-31" r="7"/><path d="M -12 -8 L 12 -8"/>
       </g>
       <g class="pose-rotation-handle" data-pose-drag="rotation"><circle cx="${handle.x}" cy="${handle.y}" r="17"/><path d="M ${handle.x-7} ${handle.y} A 8 8 0 1 1 ${handle.x+6} ${handle.y-5}"/></g>
-      ${state.mode === "feedback" ? `<rect class="pose-feedback-hit-area" x="${view.left}" y="${view.top}" width="${view.width}" height="${view.height}" rx="8" data-pose-feedback="1"/>` : ""}`;
+      `;
+  }
+
+  function poseMeasurementViewport(state, target, baseView) {
+    if (!state.measurementViewport || state.measurementViewport.targetId !== target.id) {
+      state.measurementViewport = {
+        targetId: target.id,
+        centerX: (baseView.minX + baseView.maxX) / 2,
+        centerY: (baseView.minY + baseView.maxY) / 2,
+        baseLongitudinalSpan: baseView.maxX - baseView.minX,
+        baseLateralSpan: baseView.maxY - baseView.minY,
+        baseGridCm: baseView.gridCm,
+        zoom: 1,
+      };
+    }
+    const viewport = state.measurementViewport;
+    const longitudinalSpan = viewport.baseLongitudinalSpan / viewport.zoom;
+    const lateralSpan = viewport.baseLateralSpan / viewport.zoom;
+    const desiredGridCm = viewport.baseGridCm / viewport.zoom;
+    const gridCm = [1, 2, 5, 10, 20, 50].reduce((best, step) => Math.abs(step - desiredGridCm) < Math.abs(best - desiredGridCm) ? step : best);
+    return {
+      ...baseView,
+      minX: viewport.centerX - longitudinalSpan / 2,
+      maxX: viewport.centerX + longitudinalSpan / 2,
+      minY: viewport.centerY - lateralSpan / 2,
+      maxY: viewport.centerY + lateralSpan / 2,
+      gridCm,
+    };
+  }
+
+  function poseObservationMapSvg(target, baseView = null) {
+    const table = library.calibration.table;
+    const initialView = baseView || PoseCalibration.localMeasurementView(table, target, poseCalibrationState?.uncertainty, {
+      pose: poseCalibrationState?.pose, covariance: poseCalibrationState?.covariance,
+    });
+    const view = poseMeasurementViewport(poseCalibrationState, target, initialView);
+    const viewWidth = 360, viewHeight = 500;
+    const maxPlotWidth = 304, maxPlotHeight = 430;
+    const longitudinalSpan = view.maxX - view.minX;
+    const lateralSpan = view.maxY - view.minY;
+    const pixelsPerMetre = Math.min(maxPlotWidth / lateralSpan, maxPlotHeight / longitudinalSpan);
+    const plotWidth = lateralSpan * pixelsPerMetre;
+    const plotHeight = longitudinalSpan * pixelsPerMetre;
+    const plotLeft = (viewWidth - plotWidth) / 2;
+    const plotTop = 39 + (maxPlotHeight - plotHeight) / 2;
+    const plotRight = plotLeft + plotWidth;
+    const plotBottom = plotTop + plotHeight;
+    const gridCm = view.gridCm;
+    const stepM = gridCm / 100;
+    const sx = y => plotLeft + (view.maxY - y) * pixelsPerMetre;
+    const sy = x => plotTop + (view.maxX - x) * pixelsPerMetre;
+    const inX = value => value >= view.minX - 1e-6 && value <= view.maxX + 1e-6;
+    const inY = value => value >= view.minY - 1e-6 && value <= view.maxY + 1e-6;
+    const expectedX = sx(target.y), expectedY = sy(target.x);
+    const tableMinX = Math.max(0, view.minX), tableMaxX = Math.min(table.length, view.maxX);
+    const tableMinY = Math.max(-table.width/2, view.minY), tableMaxY = Math.min(table.width/2, view.maxY);
+    const tableRect = tableMinX < tableMaxX && tableMinY < tableMaxY
+      ? `<rect class="pose-feedback-table" x="${sx(tableMaxY)}" y="${sy(tableMaxX)}" width="${(tableMaxY-tableMinY)*pixelsPerMetre}" height="${(tableMaxX-tableMinX)*pixelsPerMetre}"/>` : "";
+    const edgeWidth = Math.max(1.5, .02 * pixelsPerMetre);
+    const centreWidth = Math.max(.65, .003 * pixelsPerMetre);
+    const tableMarkings = `<g class="pose-table-markings" clip-path="url(#pose-feedback-plot-clip)">
+      <line class="edge-line endline" x1="${sx(table.width/2)}" x2="${sx(-table.width/2)}" y1="${sy(.01)}" y2="${sy(.01)}" stroke-width="${edgeWidth}"/>
+      <line class="edge-line endline" x1="${sx(table.width/2)}" x2="${sx(-table.width/2)}" y1="${sy(table.length-.01)}" y2="${sy(table.length-.01)}" stroke-width="${edgeWidth}"/>
+      <line class="edge-line sideline" x1="${sx(table.width/2-.01)}" x2="${sx(table.width/2-.01)}" y1="${sy(0)}" y2="${sy(table.length)}" stroke-width="${edgeWidth}"/>
+      <line class="edge-line sideline" x1="${sx(-table.width/2+.01)}" x2="${sx(-table.width/2+.01)}" y1="${sy(0)}" y2="${sy(table.length)}" stroke-width="${edgeWidth}"/>
+      <line class="centre-line" x1="${sx(0)}" x2="${sx(0)}" y1="${sy(0)}" y2="${sy(table.length)}" stroke-width="${centreWidth}"/>
+    </g>`;
+    const netOverhangM = .1525;
+    const netY = sy(table.length/2);
+    const netLeft = sx(table.width/2 + netOverhangM);
+    const netRight = sx(-table.width/2 - netOverhangM);
+    const netMarkup = inX(table.length/2) ? `<g class="pose-net" clip-path="url(#pose-feedback-plot-clip)">
+      <line class="pose-net-shadow" x1="${netLeft}" x2="${netRight}" y1="${netY}" y2="${netY}"/>
+      <line class="pose-net-mesh" x1="${netLeft}" x2="${netRight}" y1="${netY}" y2="${netY}"/>
+      <circle class="pose-net-post" cx="${netLeft}" cy="${netY}" r="4"/><circle class="pose-net-post" cx="${netRight}" cy="${netY}" r="4"/>
+    </g>` : "";
+    const horizontalLandmarks = [
+      { value: 0, label: "NEAR ENDLINE", kind: "near-endline", numberSide: "below" },
+      { value: table.length/2, label: "NET", kind: "net", numberSide: "below" },
+      { value: table.length, label: "FAR ENDLINE", kind: "far-endline", numberSide: "above" },
+    ].filter(item => inX(item.value));
+    const verticalLandmarks = [
+      { value: table.width/2, label: "LEFT SIDELINE", kind: "left-sideline", numberSide: "left" },
+      { value: 0, label: "CENTRE LINE", kind: "centre-line", numberSide: "right" },
+      { value: -table.width/2, label: "RIGHT SIDELINE", kind: "right-sideline", numberSide: "right" },
+    ].filter(item => inY(item.value));
+    const yGridValues = [];
+    const xGridValues = [];
+    for (let value = view.yReference.value + Math.floor((view.minY-view.yReference.value)/stepM)*stepM; value <= view.maxY+1e-6; value += stepM) yGridValues.push(value);
+    for (let value = view.xReference.value + Math.floor((view.minX-view.xReference.value)/stepM)*stepM; value <= view.maxX+1e-6; value += stepM) xGridValues.push(value);
+    const clearOfBall = (x, y) => Math.hypot(x-expectedX, y-expectedY) > 29;
+    const rulerNumbers = [
+      ...horizontalLandmarks.flatMap(line => {
+        const y = sy(line.value) + (line.numberSide === "above" ? -7 : 13);
+        return yGridValues.map(value => ({ x: sx(value), y, text: Math.round(Math.abs(value-view.yReference.value)*100), anchor: "middle" }))
+          .filter(item => item.x < plotRight-42 && clearOfBall(item.x,item.y));
+      }),
+      ...verticalLandmarks.flatMap(line => {
+        const left = line.numberSide === "left";
+        const x = sx(line.value) + (left ? -7 : 7);
+        return xGridValues.map(value => ({ x, y: sy(value)+3, text: Math.round(Math.abs(value-view.xReference.value)*100), anchor: left ? "end" : "start" }))
+          .filter((item,index) => Math.abs(xGridValues[index]-view.xReference.value) > 1e-6 && item.y < plotBottom-38 && clearOfBall(item.x,item.y));
+      }),
+    ].map(item => `<text class="pose-axis-number" x="${item.x}" y="${item.y}" text-anchor="${item.anchor}">${item.text}</text>`).join("");
+    const landmarkLabels = [
+      ...horizontalLandmarks.map(line => {
+        const y = Math.max(plotTop+11, Math.min(plotBottom-6, sy(line.value)+(line.numberSide === "above" ? -7 : 13)));
+        return `<text class="pose-landmark-label horizontal" x="${plotRight-5}" y="${y}">${line.label}</text>`;
+      }),
+      ...verticalLandmarks.map(line => {
+        const x = Math.max(plotLeft+10, Math.min(plotRight-10, sx(line.value)+(line.numberSide === "left" ? 10 : -10)));
+        return `<text class="pose-landmark-label vertical" transform="translate(${x} ${plotBottom-6}) rotate(-90)">${line.label}</text>`;
+      }),
+    ].join("");
+    return `<div class="pose-map-shell"><svg class="pose-observation-map" viewBox="0 0 ${viewWidth} ${viewHeight}"
+      data-view-width="${viewWidth}" data-view-height="${viewHeight}" data-plot-left="${plotLeft}" data-plot-top="${plotTop}"
+      data-plot-width="${plotWidth}" data-plot-height="${plotHeight}" data-min-x="${view.minX}" data-max-x="${view.maxX}"
+      data-min-y="${view.minY}" data-max-y="${view.maxY}" data-grid-cm="${gridCm}"
+      data-reference-x="${view.xReference.value}" data-reference-y="${view.yReference.value}"
+      role="img" aria-label="Zoomable equal-scale view around the ${escapeHtml(view.xReference.label)} and ${escapeHtml(view.yReference.label)} intersection. All numbers are centimetres. Tap the observed first-bounce position, including outside the table.">
+      <defs><clipPath id="pose-feedback-plot-clip"><rect x="${plotLeft}" y="${plotTop}" width="${plotWidth}" height="${plotHeight}" rx="7"/></clipPath></defs>
+      <text class="pose-observation-heading" x="180" y="20">${escapeHtml(view.xReference.label)} × ${escapeHtml(view.yReference.label)} · CM</text>
+      <rect class="pose-feedback-background" x="${plotLeft}" y="${plotTop}" width="${plotWidth}" height="${plotHeight}" rx="7"/>
+      ${tableRect}${tableMarkings}${netMarkup}${rulerNumbers}${landmarkLabels}
+      <circle class="pose-expected-halo" cx="${expectedX}" cy="${expectedY}" r="15"/><circle class="pose-expected-point" cx="${expectedX}" cy="${expectedY}" r="7"/>
+      <rect class="pose-observation-hit" x="${plotLeft}" y="${plotTop}" width="${plotWidth}" height="${plotHeight}" rx="7"/>
+    </svg><div class="pose-map-controls" aria-label="Map zoom controls"><button type="button" data-pose-map-zoom="out" aria-label="Zoom out">−</button><button type="button" data-pose-map-zoom="reset" aria-label="Reset map view">1×</button><button type="button" data-pose-map-zoom="in" aria-label="Zoom in">＋</button></div></div>`;
+  }
+
+  function refreshPosePlan(state, verification = false) {
+    const plan = PoseCalibration.planCalibrationSequence(library.calibration.table, state.pose, state.uncertainty, {
+      covariance: state.covariance, recentTargets: state.recentTargets, currentWatchGroup: state.currentWatchGroup,
+      maxShots: verification ? 1 : Math.min(4, MAX_POSE_CALIBRATION_SHOTS - state.shotsFired), verification,
+    });
+    state.targets = plan.sequence;
+    state.planStatus = plan.status;
+  }
+
+  function choosePoseTarget(state, verification = false) {
+    refreshPosePlan(state, verification);
+    const plannedIds = new Set(state.targets.map(target => target.id));
+    const fallbacks = PoseCalibration.proposeCalibrationTargets(library.calibration.table, state.pose, state.uncertainty, {
+      covariance: state.covariance, recentTargets: state.recentTargets, currentWatchGroup: state.currentWatchGroup, verification,
+    }).filter(target => !plannedIds.has(target.id)).slice(0, 24);
+    const ordered = [...state.targets, ...fallbacks];
+    for (const target of ordered) {
+      const solution = verificationShotForTarget(target, state.pose);
+      if (solution) {
+        const selected = { ...target, incidenceDeg: solution.incidenceDeg, shotSigmaCm: solution.shotSigmaCm, shotSolution: solution, isVerification: verification };
+        state.targets = [selected];
+        return selected;
+      }
+    }
+    return null;
+  }
+
+  function poseEstimateReadyForVerification(state) {
+    return state.acceptedCount >= 1
+      && PoseCalibration.calibrationStatus(library.calibration.table, state.pose, state.covariance, state.uncertainty).converged;
   }
 
   function renderPoseCalibrationGuide() {
     const state = poseCalibrationState;
     if (!state) return;
-    const target = state.targets[state.currentIndex];
+    const target = state.currentTarget;
+    const status = PoseCalibration.calibrationStatus(library.calibration.table, state.pose, state.covariance, state.uncertainty);
     const position = `<div class="pose-readout"><span>${Math.round(state.pose.x*100)} cm from near edge</span><span>${Math.abs(state.pose.y) < .005 ? "centred" : `${Math.round(Math.abs(state.pose.y)*100)} cm ${state.pose.y > 0 ? "left" : "right"}`}</span><span>${signed(state.pose.yawDeg,1)}°</span></div>`;
     if (state.mode === "position") {
-      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Step 1</p><h3>Match the physical robot</h3><p>Drag the robot body to move it. Drag the round handle to set its direction. The numbered circles are the verification targets.</p>${position}<button class="button primary wide" type="button" data-pose-action="start">Start verification</button>`;
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Step 1</p><h3>Match the physical robot</h3><p>Drag the robot body to move it and the round handle to aim it. Calibration placements are chosen after this pose is set, then recalculated after every answer.</p>${position}<button class="button primary wide" type="button" data-pose-action="start">Start calibration</button>`;
     } else if (state.mode === "ready") {
-      const solution = verificationShotForTarget(target, state.pose);
-      target.shotSolution = solution;
-      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Verification ${state.currentIndex + 1} of ${state.targets.length}</p><h3>${escapeHtml(target.label)}</h3><p>Aim for target ${state.currentIndex + 1}: ${escapeHtml(target.reference)}. Fire one ball, watch its first bounce, then report where it landed.</p><button class="button primary wide" type="button" data-pose-action="fire" ${solution ? "" : "disabled"}>${robot?.connected ? "Fire verification ball" : "Connect & fire verification ball"}</button>${solution ? "" : `<p class="pose-warning">This target is not feasible from the current position.</p>`}`;
+      const phase = target?.isVerification ? "Final verification" : `Calibration shot ${state.shotsFired + 1}`;
+      const remaining = target?.isVerification ? "Independent check—not used to tighten the estimate." : `Pose adds about ${fmt(status.worstPoseLandingCm,1)} cm at worst; stop goal is the modeled ${fmt(status.acceptableLandingCm,1)} cm ball noise.`;
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">${phase}</p><h3>Aim for the blue target</h3><p><strong>${escapeHtml(target?.watchInstruction || "Watch the first bounce.")}</strong><br>${escapeHtml(target?.coordinateLabel || "")}<br>${remaining}</p><button class="button primary wide" type="button" data-pose-action="fire" ${target?.shotSolution ? "" : "disabled"}>${robot?.connected ? "Fire when ready" : "Connect & fire when ready"}</button>${target?.shotSolution ? "" : `<p class="pose-warning">No safe shot is feasible from the current position.</p>`}`;
     } else if (state.mode === "firing") {
-      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Verification ${state.currentIndex + 1} of ${state.targets.length}</p><h3>Serving one ball…</h3><p>Watch the first bounce. You will mark it on the table next.</p><button class="button primary wide" type="button" disabled>Waiting for Nova</button>`;
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">${target?.isVerification ? "Final verification" : `Calibration shot ${state.shotsFired + 1}`}</p><h3>Serving one ball…</h3><p>Watch the first bounce relative to the highlighted ${escapeHtml(target?.reference || "landmark")}.</p><button class="button primary wide" type="button" disabled>Waiting for Nova</button>`;
     } else if (state.mode === "feedback") {
-      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Verification ${state.currentIndex + 1} of ${state.targets.length}</p><h3>Where did the ball land?</h3><p>Tap the first-bounce position directly on the table. Target ${state.currentIndex + 1} is highlighted.</p><button class="button ghost wide" type="button" data-pose-action="retry">Fire that ball again</button>`;
+      const measurementView = PoseCalibration.localMeasurementView(library.calibration.table, target, state.uncertainty, { pose: state.pose, covariance: state.covariance });
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Report the first bounce</p><h3>Tap where the ball landed</h3><div class="pose-reference-summary"><span>${escapeHtml(measurementView.longitudinalLabel)}</span><span>${escapeHtml(measurementView.lateralLabel)}</span></div><p>Numbers are centimetres. Drag to move the view; pinch, scroll, or use the controls to zoom. A stationary tap records the landing.</p>${poseObservationMapSvg(target, measurementView)}<button class="button ghost wide" type="button" data-pose-action="retry">Fire that ball again</button>`;
     } else {
-      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Complete</p><h3>Pose refined</h3><p>The landing feedback has updated both the robot pose and its estimated uncertainty. Save it for playback.</p>${position}`;
+      const result = state.verificationPassed ? "Independent verification passed." : state.confidenceLimited ? "Maximum calibration shots reached; keep the wider uncertainty in mind." : "The pose estimate has been refined.";
+      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Complete</p><h3>Pose refined</h3><p>${result} Save it for playback.</p>${position}`;
     }
     const u = state.uncertainty;
-    els.poseCalibrationConfidence.innerHTML = `<span>Estimated pose uncertainty</span><strong>±${fmt(u.xCm,1)} cm forward/back · ±${fmt(u.yCm,1)} cm left/right · ±${fmt(u.yawDeg,1)}° direction</strong><small>Estimated from the manual placement prior and ${state.observations.length} observed landing${state.observations.length === 1 ? "" : "s"}.</small>`;
+    els.poseCalibrationConfidence.innerHTML = `<span>Calibration accuracy</span><strong>Pose contribution ≤ ${fmt(status.worstPoseLandingCm,1)} cm · modeled ball noise ${fmt(status.acceptableLandingCm,1)} cm</strong><small>Pose: ±${fmt(u.xCm,1)} cm / ±${fmt(u.yCm,1)} cm / ±${fmt(u.yawDeg,1)}°. The process stops when further pose precision would be hidden by normal landing dispersion.</small>`;
     const verificationActive = ["ready", "firing", "feedback"].includes(state.mode);
     els.poseCalibrationConfidence.hidden = verificationActive;
     els.savePoseCalibrationBtn.parentElement.hidden = verificationActive;
-    els.savePoseCalibrationBtn.textContent = state.mode === "complete" ? "Save calibrated pose" : "Save position";
+    els.savePoseCalibrationBtn.textContent = state.verificationPassed ? "Save calibrated pose" : "Save position";
     els.savePoseCalibrationBtn.disabled = state.mode === "firing" || state.mode === "feedback";
   }
 
   function renderPoseCalibration() {
+    els.poseCalibrationTitle.textContent = poseCalibrationState?.mode === "position"
+      ? "Position the robot"
+      : poseCalibrationState?.mode === "feedback" ? "Mark the first bounce" : "Calibrate robot pose";
+    els.poseCalibrationDialog.classList.toggle("pose-feedback-mode", poseCalibrationState?.mode === "feedback");
     renderPoseCalibrationTable();
     renderPoseCalibrationGuide();
   }
@@ -4160,6 +4370,7 @@
 
   function closePoseCalibration() {
     poseCalibrationDrag = null;
+    poseMeasurementGesture = null;
     poseCalibrationState = null;
     els.poseCalibrationDialog.close();
   }
@@ -4168,12 +4379,23 @@
     const state = poseCalibrationState;
     if (!state) return;
     state.uncertainty = PoseCalibration.sanitizeUncertainty(MANUAL_POSE_PRIOR);
-    state.targets = PoseCalibration.proposeVerificationTargets(library.calibration.table, state.pose, state.uncertainty);
-    state.currentIndex = 0;
+    state.covariance = PoseCalibration.covarianceFromUncertainty(state.uncertainty);
+    const plan = PoseCalibration.planCalibrationSequence(library.calibration.table, state.pose, state.uncertainty, { covariance: state.covariance, maxShots: 4 });
+    state.targets = plan.sequence;
+    state.planStatus = plan.status;
+    state.currentTarget = null;
     state.mode = "position";
     state.observations = [];
     state.landingMarks = [];
+    state.recentTargets = [];
+    state.shotsFired = 0;
+    state.acceptedCount = 0;
+    state.currentWatchGroup = null;
+    state.verificationAttempted = false;
+    state.verificationPassed = false;
+    state.confidenceLimited = false;
     state.manuallyMoved = true;
+    state.measurementViewport = null;
   }
 
   function poseSvgEventPoint(event) {
@@ -4216,8 +4438,13 @@
   function startPoseVerification() {
     if (!poseCalibrationState) return;
     poseCalibrationState.uncertainty = PoseCalibration.sanitizeUncertainty(MANUAL_POSE_PRIOR);
-    poseCalibrationState.targets = PoseCalibration.proposeVerificationTargets(library.calibration.table, poseCalibrationState.pose, poseCalibrationState.uncertainty);
-    poseCalibrationState.currentIndex = 0;
+    poseCalibrationState.covariance = PoseCalibration.covarianceFromUncertainty(poseCalibrationState.uncertainty);
+    poseCalibrationState.recentTargets = [];
+    poseCalibrationState.shotsFired = 0;
+    poseCalibrationState.acceptedCount = 0;
+    poseCalibrationState.currentWatchGroup = null;
+    poseCalibrationState.verificationAttempted = false;
+    poseCalibrationState.currentTarget = choosePoseTarget(poseCalibrationState, false);
     poseCalibrationState.mode = "ready";
     poseCalibrationState.observations = [];
     poseCalibrationState.landingMarks = [];
@@ -4226,8 +4453,8 @@
 
   async function fireCurrentPoseVerification() {
     const state = poseCalibrationState;
-    const target = state?.targets[state.currentIndex];
-    const solution = target?.shotSolution || (target ? verificationShotForTarget(target, state.pose) : null);
+    const target = state?.currentTarget;
+    const solution = target?.shotSolution;
     if (!state || !target || !solution) { toast("This verification target is not feasible from the current position."); return; }
     state.mode = "firing";
     renderPoseCalibration();
@@ -4242,26 +4469,205 @@
     }
   }
 
-  function recordPoseLanding(point) {
+  function finishPoseObservation(observation) {
     const state = poseCalibrationState;
     if (!state || state.mode !== "feedback") return;
-    const actual = poseFromTablePoint(point, 0);
-    const target = state.targets[state.currentIndex];
-    const observation = {
-      targetId: target.id, targetX: target.x, targetY: target.y, repeatCount: 1,
-      longitudinalErrorCm: (actual.x - target.x) * 100,
-      lateralErrorCm: (actual.y - target.y) * 100,
-    };
-    const estimate = PoseCalibration.estimatePoseCorrection(state.pose, state.uncertainty, [observation]);
-    if (estimate) {
-      state.pose = estimate.correctedPose;
-      state.uncertainty = estimate.uncertainty;
+    const target = state.currentTarget;
+    const hasMeasurement = observation.longitudinalErrorCm != null || observation.lateralErrorCm != null;
+    const normalizedComponents = [];
+    if (observation.longitudinalErrorCm != null) normalizedComponents.push(observation.longitudinalErrorCm / Math.hypot(observation.shotSigmaCm, observation.humanSigmaLongitudinalCm));
+    if (observation.lateralErrorCm != null) normalizedComponents.push(observation.lateralErrorCm / Math.hypot(observation.shotSigmaCm, observation.humanSigmaLateralCm));
+    const verificationZ = normalizedComponents.length ? Math.sqrt(normalizedComponents.reduce((sum, value) => sum + value * value, 0) / normalizedComponents.length) : Infinity;
+    let estimate = null;
+    if (target.isVerification && hasMeasurement && verificationZ <= 2) {
+      state.verificationPassed = true;
+      observation.accepted = true;
+    } else {
+      estimate = PoseCalibration.estimatePoseObservation(state.pose, state.covariance, observation, state.uncertainty);
+      observation.accepted = estimate.accepted;
+      observation.downweighted = estimate.downweighted;
+      if (estimate.accepted) {
+        state.pose = estimate.correctedPose;
+        state.covariance = estimate.covariance;
+        state.uncertainty = estimate.uncertainty;
+        state.acceptedCount += 1;
+      }
+      if (target.isVerification) state.verificationAttempted = false;
     }
     state.observations.push(observation);
-    state.landingMarks.push({ x: actual.x, y: actual.y, targetId: target.id });
-    state.currentIndex += 1;
-    state.mode = state.currentIndex >= state.targets.length ? "complete" : "ready";
+    if (hasMeasurement) state.landingMarks.push({
+      x: target.x + (observation.longitudinalErrorCm || 0) / 100,
+      y: target.y + (observation.lateralErrorCm || 0) / 100,
+      targetId: target.id,
+    });
+    state.shotsFired += 1;
+    state.recentTargets.push({ id: target.id, x: target.x, y: target.y, watchGroup: target.watchGroup });
+    state.currentWatchGroup = target.watchGroup;
+    if (state.verificationPassed) {
+      state.mode = "complete";
+    } else if (state.shotsFired >= MAX_POSE_CALIBRATION_SHOTS) {
+      state.confidenceLimited = true;
+      state.mode = "complete";
+    } else {
+      const shouldVerify = !state.verificationAttempted && poseEstimateReadyForVerification(state);
+      if (shouldVerify) state.verificationAttempted = true;
+      state.currentTarget = choosePoseTarget(state, shouldVerify);
+      state.mode = state.currentTarget ? "ready" : "complete";
+      if (!state.currentTarget) state.confidenceLimited = true;
+    }
     renderPoseCalibration();
+  }
+
+  function recordPoseObservationFromMap(event, svg) {
+    const state = poseCalibrationState;
+    const target = state?.currentTarget;
+    if (!state || state.mode !== "feedback" || !target) return;
+    const mapped = poseMapPhysicalPoint(event, svg);
+    if (!mapped?.inside) return;
+    const { actual, scale, plotWidth, maxY, minY } = mapped;
+    const table = library.calibration.table;
+    const cmPerCssPixel = (maxY - minY) * 100 / (plotWidth * scale);
+    const measurement = PoseCalibration.feedbackMeasurementNoise(table, actual, {
+      gridCm: finite(svg.dataset.gridCm, 10), pointerSigmaCm: Math.max(1.5, cmPerCssPixel * 5),
+      longitudinalGridOriginM: finite(svg.dataset.referenceX, 0), lateralGridOriginM: finite(svg.dataset.referenceY, -table.width/2),
+    });
+    const outside = measurement.outsideLongitudinal || measurement.outsideLateral;
+    finishPoseObservation({
+      targetId: target.id, kind: "table", quality: outside ? "outside-tap" : "tap", targetX: target.x, targetY: target.y,
+      longitudinalErrorCm: (actual.x - target.x) * 100,
+      lateralErrorCm: (actual.y - target.y) * 100,
+      humanSigmaLongitudinalCm: measurement.longitudinalSigmaCm,
+      humanSigmaLateralCm: measurement.lateralSigmaCm,
+      outsideLongitudinal: measurement.outsideLongitudinal,
+      outsideLateral: measurement.outsideLateral,
+      shotSigmaCm: target.shotSigmaCm,
+    });
+  }
+
+  function poseMapPhysicalPoint(event, svg) {
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const viewWidth = finite(svg.dataset.viewWidth, 360);
+    const viewHeight = finite(svg.dataset.viewHeight, 500);
+    const scale = Math.min(rect.width / viewWidth, rect.height / viewHeight);
+    const point = { x: (event.clientX - rect.left - (rect.width-viewWidth*scale)/2) / scale, y: (event.clientY - rect.top - (rect.height-viewHeight*scale)/2) / scale };
+    const plotLeft = finite(svg.dataset.plotLeft, 28);
+    const plotTop = finite(svg.dataset.plotTop, 39);
+    const plotWidth = finite(svg.dataset.plotWidth, 304);
+    const plotHeight = finite(svg.dataset.plotHeight, 430);
+    const minX = finite(svg.dataset.minX, 0);
+    const maxX = finite(svg.dataset.maxX, library.calibration.table.length);
+    const minY = finite(svg.dataset.minY, -library.calibration.table.width/2);
+    const maxY = finite(svg.dataset.maxY, library.calibration.table.width/2);
+    const actual = {
+      x: maxX - (point.y - plotTop) / plotHeight * (maxX - minX),
+      y: maxY - (point.x - plotLeft) / plotWidth * (maxY - minY),
+    };
+    return {
+      actual, scale, plotWidth, plotHeight, minX, maxX, minY, maxY,
+      inside: point.x >= plotLeft && point.x <= plotLeft+plotWidth && point.y >= plotTop && point.y <= plotTop+plotHeight,
+    };
+  }
+
+  function changePoseMeasurementZoom(factor, anchor = null) {
+    const state = poseCalibrationState;
+    const target = state?.currentTarget;
+    const viewport = state?.measurementViewport;
+    if (!state || state.mode !== "feedback" || !target || !viewport) return;
+    const oldZoom = viewport.zoom;
+    const newZoom = clamp(oldZoom * factor, .5, 6, oldZoom);
+    if (anchor) {
+      const ratio = oldZoom / newZoom;
+      viewport.centerX = anchor.x - (anchor.x-viewport.centerX) * ratio;
+      viewport.centerY = anchor.y - (anchor.y-viewport.centerY) * ratio;
+    }
+    viewport.zoom = newZoom;
+    renderPoseCalibrationGuide();
+  }
+
+  function resetPoseMeasurementViewport() {
+    if (!poseCalibrationState) return;
+    poseCalibrationState.measurementViewport = null;
+    renderPoseCalibrationGuide();
+  }
+
+  function rebasePoseMeasurementGesture() {
+    if (!poseMeasurementGesture || !poseCalibrationState?.measurementViewport) return;
+    const points = [...poseMeasurementGesture.points.values()];
+    poseMeasurementGesture.startViewport = { ...poseCalibrationState.measurementViewport };
+    poseMeasurementGesture.startPoints = points.map(point => ({ ...point }));
+    if (points.length >= 2) {
+      poseMeasurementGesture.startDistance = Math.hypot(points[1].x-points[0].x, points[1].y-points[0].y);
+      poseMeasurementGesture.startMidpoint = { x: (points[0].x+points[1].x)/2, y: (points[0].y+points[1].y)/2 };
+    }
+  }
+
+  function beginPoseMeasurementGesture(event, svg) {
+    if (!poseCalibrationState || poseCalibrationState.mode !== "feedback") return;
+    if (!poseMeasurementGesture) poseMeasurementGesture = { points: new Map(), origins: new Map(), maxMovement: 0, hadMultiple: false };
+    const point = { x: event.clientX, y: event.clientY };
+    poseMeasurementGesture.points.set(event.pointerId, point);
+    poseMeasurementGesture.origins.set(event.pointerId, point);
+    if (poseMeasurementGesture.points.size > 1) poseMeasurementGesture.hadMultiple = true;
+    els.poseCalibrationGuide.setPointerCapture?.(event.pointerId);
+    rebasePoseMeasurementGesture();
+    event.preventDefault();
+  }
+
+  function updatePoseMeasurementGesture(event) {
+    const gesture = poseMeasurementGesture;
+    const viewport = poseCalibrationState?.measurementViewport;
+    if (!gesture?.points.has(event.pointerId) || !viewport) return;
+    gesture.points.set(event.pointerId, { x:event.clientX, y:event.clientY });
+    const origin = gesture.origins.get(event.pointerId);
+    gesture.maxMovement = Math.max(gesture.maxMovement, Math.hypot(event.clientX-origin.x,event.clientY-origin.y));
+    const svg = els.poseCalibrationGuide.querySelector(".pose-observation-map");
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const scale = Math.min(rect.width/finite(svg.dataset.viewWidth,360), rect.height/finite(svg.dataset.viewHeight,500));
+    const cssPlotWidth = finite(svg.dataset.plotWidth,304) * scale;
+    const cssPlotHeight = finite(svg.dataset.plotHeight,430) * scale;
+    const points = [...gesture.points.values()];
+    const start = gesture.startViewport;
+    const startLongitudinalSpan = start.baseLongitudinalSpan / start.zoom;
+    const startLateralSpan = start.baseLateralSpan / start.zoom;
+    if (points.length >= 2) {
+      const distance = Math.max(10, Math.hypot(points[1].x-points[0].x,points[1].y-points[0].y));
+      const midpoint = { x:(points[0].x+points[1].x)/2, y:(points[0].y+points[1].y)/2 };
+      viewport.zoom = clamp(start.zoom * distance/Math.max(10,gesture.startDistance), .5, 6, start.zoom);
+      viewport.centerY = start.centerY + (midpoint.x-gesture.startMidpoint.x) * startLateralSpan/cssPlotWidth;
+      viewport.centerX = start.centerX + (midpoint.y-gesture.startMidpoint.y) * startLongitudinalSpan/cssPlotHeight;
+    } else {
+      viewport.centerY = start.centerY + (points[0].x-gesture.startPoints[0].x) * startLateralSpan/cssPlotWidth;
+      viewport.centerX = start.centerX + (points[0].y-gesture.startPoints[0].y) * startLongitudinalSpan/cssPlotHeight;
+    }
+    const table = library.calibration.table;
+    viewport.centerX = clamp(viewport.centerX, -1.5, table.length+1.5, start.centerX);
+    viewport.centerY = clamp(viewport.centerY, -table.width/2-1.5, table.width/2+1.5, start.centerY);
+    renderPoseCalibrationGuide();
+    event.preventDefault();
+  }
+
+  function endPoseMeasurementGesture(event) {
+    const gesture = poseMeasurementGesture;
+    if (!gesture?.points.has(event.pointerId)) return;
+    gesture.points.delete(event.pointerId);
+    els.poseCalibrationGuide.releasePointerCapture?.(event.pointerId);
+    if (gesture.points.size) {
+      rebasePoseMeasurementGesture();
+    } else {
+      const isTap = !gesture.hadMultiple && gesture.maxMovement < 6 && event.type !== "pointercancel";
+      poseMeasurementGesture = null;
+      if (isTap) recordPoseObservationFromMap(event, els.poseCalibrationGuide.querySelector(".pose-observation-map"));
+    }
+    event.preventDefault();
+  }
+
+  function zoomPoseMeasurementWithWheel(event, svg) {
+    const mapped = poseMapPhysicalPoint(event, svg);
+    if (!mapped?.inside) return;
+    changePoseMeasurementZoom(Math.exp(-event.deltaY*.002), mapped.actual);
+    event.preventDefault();
   }
 
   function savePoseCalibration() {
@@ -4270,15 +4676,15 @@
     const now = new Date().toISOString();
     library.calibration.pose = { ...state.pose };
     library.calibration.poseSession = PoseCalibration.sanitizeSession({
-      ...currentPoseSession(), pose: state.pose, uncertainty: state.uncertainty,
-      updatedAt: now, verifiedAt: state.mode === "complete" ? now : null,
+      ...currentPoseSession(), pose: state.pose, uncertainty: state.uncertainty, covariance: state.covariance,
+      updatedAt: now, verifiedAt: state.verificationPassed ? now : null,
       observations: state.observations,
     }, state.pose);
-    poseStaleAcknowledged = state.mode === "complete";
+    poseStaleAcknowledged = state.verificationPassed;
     liveTuningCache.clear(); shotVariationCache.clear();
     saveLibrary(); renderCalibration(); renderRunPage();
     closePoseCalibration();
-    toast(state.mode === "complete" ? "Calibrated robot pose saved" : "Robot position saved");
+    toast(state.verificationPassed ? "Calibrated robot pose saved" : state.confidenceLimited ? "Robot position saved with limited confidence" : "Robot position saved");
   }
 
   function renderCalibration() {
@@ -7012,14 +7418,7 @@ STATUS
       if (calibrationTestRunning) void stopPlayback().then(closePoseCalibration); else closePoseCalibration();
     });
     els.savePoseCalibrationBtn.addEventListener("click", savePoseCalibration);
-    els.poseCalibrationTableSvg.addEventListener("pointerdown", event => {
-      if (event.target.closest("[data-pose-feedback]")) {
-        recordPoseLanding(poseSvgEventPoint(event));
-        event.preventDefault();
-        return;
-      }
-      beginPoseCalibrationDrag(event);
-    });
+    els.poseCalibrationTableSvg.addEventListener("pointerdown", beginPoseCalibrationDrag);
     els.poseCalibrationTableSvg.addEventListener("pointermove", updatePoseCalibrationDrag);
     els.poseCalibrationTableSvg.addEventListener("pointerup", endPoseCalibrationDrag);
     els.poseCalibrationTableSvg.addEventListener("pointercancel", endPoseCalibrationDrag);
@@ -7028,7 +7427,23 @@ STATUS
       if (action === "start") startPoseVerification();
       if (action === "fire") void fireCurrentPoseVerification();
       if (action === "retry" && poseCalibrationState) { poseCalibrationState.mode = "ready"; renderPoseCalibration(); }
+      const mapZoom = event.target.closest("[data-pose-map-zoom]")?.dataset.poseMapZoom;
+      if (mapZoom === "in") changePoseMeasurementZoom(1.4);
+      if (mapZoom === "out") changePoseMeasurementZoom(1/1.4);
+      if (mapZoom === "reset") resetPoseMeasurementViewport();
     });
+    els.poseCalibrationGuide.addEventListener("pointerdown", event => {
+      const map = event.target.closest(".pose-observation-map");
+      if (!map) return;
+      beginPoseMeasurementGesture(event, map);
+    });
+    els.poseCalibrationGuide.addEventListener("pointermove", updatePoseMeasurementGesture);
+    els.poseCalibrationGuide.addEventListener("pointerup", endPoseMeasurementGesture);
+    els.poseCalibrationGuide.addEventListener("pointercancel", endPoseMeasurementGesture);
+    els.poseCalibrationGuide.addEventListener("wheel", event => {
+      const map = event.target.closest(".pose-observation-map");
+      if (map) zoomPoseMeasurementWithWheel(event, map);
+    }, { passive:false });
     document.querySelectorAll("[data-tuning-key][data-tuning-delta]").forEach(button => {
       button.addEventListener("click", () => stepLiveTuning(button.dataset.tuningKey, finite(button.dataset.tuningDelta, 0)));
     });

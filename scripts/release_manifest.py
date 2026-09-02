@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "RELEASE_MANIFEST.sha256"
-EXCLUDED_PARTS = {".git", "__pycache__"}
+EXCLUDED_PARTS = {".git", ".codex", "__pycache__"}
 EXCLUDED_NAMES = {MANIFEST.name}
 
 

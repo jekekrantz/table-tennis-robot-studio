@@ -195,7 +195,7 @@
   <dialog id="poseCalibrationDialog" class="pose-calibration-dialog">
     <div class="dialog-frame pose-calibration-frame">
       <header>
-        <div><p class="eyebrow">Robot setup</p><h2>Position the robot</h2><p>Drag the robot to its physical position, rotate its direction handle, then refine the estimate with verification balls.</p></div>
+        <div><p class="eyebrow">Robot setup</p><h2 id="poseCalibrationTitle">Position the robot</h2><p>Match the physical pose, then refine it from a few observed first bounces.</p></div>
         <button id="closePoseCalibrationBtn" class="icon-button" type="button" aria-label="Close">×</button>
       </header>
       <div class="pose-calibration-workspace">
@@ -614,7 +614,7 @@ STOP</pre>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-01.5" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-02.4" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

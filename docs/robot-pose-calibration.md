@@ -12,12 +12,13 @@ At runtime the app predicts the stored shot at the authored position, then uses 
 Open **Run → Calibrate pose**:
 
 1. Drag the robot body on the top-view table until it matches the physical robot. Drag the blue handle to set its direction.
-2. Start verification. The app proposes numbered landing targets chosen to make forward/back, lateral and direction errors observable using the table edges, centre line and net as visual references.
-3. Fire the proposed ball and watch its first bounce.
-4. Tap that first-bounce position directly on the table visualization. The app immediately updates the pose estimate and uncertainty, then proposes the next ball from that refined pose.
-5. Save the calibrated pose after the sequence.
+2. Start calibration. The app searches a dense grid of feasible landing placements and predicts a short information-rich sequence. The score rewards reduction of the remaining calibration error and penalizes moving to a different viewing area, so useful nearby shots are grouped when possible.
+3. Move to the named viewing area, fire one ball deliberately, and watch its first bounce against the numbered table references.
+4. Tap that bounce on a local, uncertainty-sized view. The initial view includes the nearest useful intersection (endline/net × sideline/centre line), and every visible table line is named. All ruler numbers are centimetres and use clean 1/2/5/10/20/50 cm intervals as the zoom changes. Drag to translate; pinch, scroll, or use the buttons to zoom. Official 2 cm edge markings and the 3 mm centre line are drawn at physical scale. The top-view net is a symbolic mesh band at the exact net plane, extends 15.25 cm past each sideline, and has visible posts. The dark ground remains clickable for misses outside the table.
+5. The app updates the pose and replans from the measurement actually received. Once pose-induced landing error is no larger than normal modeled ball dispersion, it stops tightening and asks for a spatially distinct check shot which is not used to fit the pose.
+6. Save the calibrated pose after that independent check passes, or after the seven-shot safety limit with the remaining uncertainty shown.
 
-The user never enters uncertainty. A manual placement starts with a conservative 5 cm forward/back, 5 cm lateral and 3° direction prior, plus a base landing/feedback noise model. Each reported landing is a new measurement in a small-angle SE(2) update, so the displayed pose uncertainty contracts as useful feedback arrives. A 14-day inactivity reminder is shown before playback; continuing is allowed when the robot has not moved.
+The user never enters uncertainty. A manual placement starts with a conservative 5 cm forward/back, 5 cm lateral and 3° direction prior. Landing dispersion has a 5 cm floor and reuses the guided shot-calibration relationship `1.5 cm/m × flight distance / sin(impact incidence)`, so long and shallow shots receive less weight. Tap uncertainty is estimated independently in the forward/back and lateral axes from pointer resolution and proximity to the numbered table references. Clicking outside preserves the certain inside/outside classification but increases positional uncertainty. Grossly inconsistent answers are downweighted rather than dragging the estimate to an extreme. A 14-day inactivity reminder is shown before playback; continuing is allowed when the robot has not moved.
 
 ## Saving a temporary result
 
