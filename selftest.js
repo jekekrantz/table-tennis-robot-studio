@@ -175,6 +175,12 @@ async function main() {
   const parsedRawStatus = P.parseStatusFrame(rawStatus);
   if (parsedRawStatus.state !== 3) throw new Error("requestRaw did not return the Ready status frame");
   await controller.sendRaw(P.COMMANDS.heartbeat, { label: "mock fire-and-forget heartbeat" });
+  const ballEventPromise = controller.waitForBallEvent(controller.ballCounter, 2000);
+  fake.notify.emit(frame(0x05, [1, 0, 0, 0, 1, 0, 0]));
+  const ballEvent = await ballEventPromise;
+  if (ballEvent.counter !== 1 || ballEvent.eventNumber !== 1 || ballEvent.recordIndex !== 0) {
+    throw new Error(`Mock ball event was not parsed: ${JSON.stringify(ballEvent)}`);
+  }
 
   const ball = P.packBallRecord({
     wheelA: 2861,
@@ -274,7 +280,7 @@ async function main() {
 
   console.log("Table Tennis Robot Studio self-test: PASS");
   console.log(`  protocol MD5/auth/known Start/live-adjust vectors: PASS`);
-  console.log(`  mock BLE auth/init/heartbeat/Start/rolling-update/done/Stop/Ready: PASS\n  repeated one-ball calibration Start/Ready cycle: PASS`);
+  console.log(`  mock BLE auth/init/heartbeat/ball-event/Start/rolling-update/done/Stop/Ready: PASS\n  repeated one-ball calibration Start/Ready cycle: PASS`);
   console.log(`  Ready/Initializing state gate (no redundant Init): PASS`);
   console.log(`  mock GATT writes: ${fake.write.writes.length}`);
 }

@@ -24,6 +24,8 @@
       this.writeLock = Promise.resolve();
       this.heartbeatTimer = null;
       this.doneCounter = 0;
+      this.ballCounter = 0;
+      this.lastBallEvent = null;
       this.lastDoneSignature = "";
       this.lastStartAt = 0;
       this.disconnectRequested = false;
@@ -54,6 +56,7 @@
         deviceId: this.device?.id || "",
         wireState: this.wireState,
         stateDetail: this.stateDetail,
+        ballCounter: this.ballCounter,
         stateName: this.wireState == null ? "Unknown" : P.stateName(this.wireState),
         browserSupported: this.browserSupported,
       };
@@ -281,6 +284,32 @@
       throw new Error(`Timed out waiting for batch completion; last state was ${last ? P.stateName(last.state) : "unknown"}`);
     }
 
+    waitForBallEvent(afterCounter = this.ballCounter, timeoutMs = 5000) {
+      if (this.ballCounter > afterCounter && this.lastBallEvent) return Promise.resolve(this.lastBallEvent);
+      return new Promise((resolve, reject) => {
+        const cleanup = () => {
+          clearTimeout(timer);
+          this.removeEventListener("ball", onBall);
+          this.removeEventListener("disconnect", onDisconnect);
+        };
+        const onBall = event => {
+          if (event.detail.counter <= afterCounter) return;
+          cleanup();
+          resolve(event.detail);
+        };
+        const onDisconnect = () => {
+          cleanup();
+          reject(new Error("Nova disconnected while waiting for the next ball event"));
+        };
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for the next Nova ball event"));
+        }, Math.max(250, timeoutMs));
+        this.addEventListener("ball", onBall);
+        this.addEventListener("disconnect", onDisconnect, { once: true });
+      });
+    }
+
     async stopAndWaitFree(timeoutMs = 25000) {
       if (!this.connected || !this.authenticated) return null;
       let status;
@@ -399,6 +428,17 @@
         else if (status.state === 2) this.phase = "initializing";
         this.dispatchEvent(new CustomEvent("status", { detail: status }));
         this.emitState();
+      }
+
+      if (frame.opcode === 0x05 && frame.success) {
+        try {
+          const ball = P.parseBallEventFrame(frame);
+          this.ballCounter += 1;
+          this.lastBallEvent = { ...ball, counter: this.ballCounter, receivedAt: performance.now() };
+          this.dispatchEvent(new CustomEvent("ball", { detail: this.lastBallEvent }));
+        } catch (error) {
+          this.log(`Malformed ball event: ${error.message}`, "error", bytes);
+        }
       }
 
       const queue = this.waiters.get(frame.opcode);

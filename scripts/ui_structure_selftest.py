@@ -117,12 +117,14 @@ if 'distanceTrajectorySvg(' in app:
 if 'params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 }' not in app:
     raise SystemExit("New-shot default must use the re-solved safe center no-spin ball")
 
-# Continuous playback: no artificial STOP/START at ordinary logical set boundaries.
+# Continuous playback: one active record slot, advanced by real ball events.
 for token in (
-    'function compilePlaybackWindow', 'NOVA_SEQUENCE_RECORD_LIMIT = 9', 'maxRecords = NOVA_SEQUENCE_RECORD_LIMIT', 'maxBatchSize = NOVA_SEQUENCE_RECORD_LIMIT',
-    'rolling feed', 'Protocol.buildLiveAdjustPacket(records)',
-    'robot.updateActiveSequence(', 'Continuous feed · next', 'nextCarryDelay',
-    'flushImmediateLiveRetune', 'live-tuned queued shot pack', 'enqueuePlaybackUpdate',
+    'function compilePlaybackWindow', 'NOVA_SEQUENCE_RECORD_LIMIT = 9', 'NOVA_STREAM_COMBO_LIMIT = 255',
+    'maxRecords = NOVA_SEQUENCE_RECORD_LIMIT', 'maxBatchSize: 1',
+    'Protocol.buildLiveAdjustPacket(records)', 'mode: 3, value: 0',
+    'value: segment.batches.length', 'robot.updateActiveSequence(',
+    'robot.waitForBallEvent(', 'next streaming shot', 'nextCarryDelay',
+    'flushImmediateLiveRetune', 'enqueuePlaybackUpdate',
 ):
     if token not in app:
         raise SystemExit(f"Missing continuous playback behavior: {token}")

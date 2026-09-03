@@ -34,7 +34,7 @@ Back arrows pop navigation history; close buttons dismiss only the current dialo
 - Local browser persistence plus JSON import/export.
 - Web Bluetooth connection, authentication and state-aware Nova control.
 - Real Start/Stop execution with Ready-state gating and heartbeat handling.
-- Small Start batches for BLE/robot stability.
+- Event-driven one-slot streaming for continuous per-ball updates without ordinary reset boundaries.
 - Physical shot inputs in m/s, rps and degrees, converted to Nova parameters.
 - Physically constrained per-shot variation in landing position, net clearance, speed and spin, used selectively by random, match-like and variable-practice drills.
 - Persisted manual SE(2) robot-position calibration with uncertainty-aware verification targets based on table lines and net geometry.
@@ -319,9 +319,9 @@ The graph toolbar includes **Live tuning**, a non-destructive player-preference 
 - **Spin** uses 5% steps from -100% to +300%. It scales spin magnitude while keeping exit speed fixed, then solves elevation to minimize landing shift. A no-spin shot remains no-spin.
 - **Speed** uses smaller 2% steps from -50% to +50%. It changes exit speed while keeping spin fixed, then solves elevation to minimize landing shift. Hardware/model speed limits still apply.
 
-The stored shot parameters stay unchanged. Preview uses the effective tuned shots, and Play applies the same modifiers independently to every ball in the compiled traversal, including balls reached through sub-drills. During Play, rapid tuning changes are combined and sent with `0x84` to the active pack or the already-queued next pack. Tuning and automatic refill use one serialized update queue so they cannot overwrite each other out of order.
+The stored shot parameters stay unchanged. Preview uses the effective tuned shots, and Play applies the same modifiers independently to every ball in the compiled traversal, including balls reached through sub-drills. During Play, rapid tuning changes are combined and sent with `0x84` to the active one-record slot. Tuning and automatic next-shot writes use one serialized update queue so they cannot overwrite each other out of order.
 
-Normal playback crosses logical set boundaries when possible. The first pack uses `START`, then the app queues successive packs with the experimental `0x84` live-update command before the current pack ends. Each pack stays within the conservative nine-record transport limit, and only one bounded look-ahead pack is compiled at a time, including for infinite drills. Inter-ball and between-set delays are encoded in the shot frequency field whenever possible; a host-side wait/START boundary remains necessary when a requested delay cannot be represented there. If a live update is rejected, playback falls back to a new `START` after the current pack finishes.
+Normal playback keeps one record slot running. The first shot uses `START`; every `0x05` served-ball notification loads the next shot into that same slot with a same-size `0x84` replacement. Finite sessions use the exact combo count and infinite sessions use endless mode. Inter-ball and between-set delays are encoded in the shot frequency field whenever possible; only a delay longer than the Nova can encode, or a finite segment beyond the verified 255-combo field, requires another START. This behavior was verified directly against the Nova rather than inferred from timers.
 
 ## Drill sharing and AI-assisted editing
 

@@ -197,6 +197,21 @@
     };
   }
 
+  function parseBallEventFrame(frameOrBytes) {
+    const frame = frameOrBytes?.payload ? frameOrBytes : parseResponse(frameOrBytes);
+    if (frame.opcode !== 0x05) throw new Error(`Expected ball-event opcode 0x05, got 0x${frame.opcode.toString(16)}`);
+    if (!frame.success) throw new Error(`Robot ball event failed (${frame.status})`);
+    if (frame.payload.length < 7) throw new Error(`Ball-event payload is too short (${frame.payload.length}/7)`);
+    const view = new DataView(frame.payload.buffer, frame.payload.byteOffset, frame.payload.byteLength);
+    return {
+      eventNumber: view.getUint16(0, true),
+      cycleIndex: view.getUint16(2, true),
+      servedCount: view.getUint16(4, true),
+      recordIndex: frame.payload[6],
+      frame,
+    };
+  }
+
   function deriveVerification(access) {
     const parsed = access?.serialBytes ? access : parseAccessFrame(access);
     const salt = new TextEncoder().encode(SALT);
@@ -315,6 +330,11 @@
     expect("known tested start", hex(knownStart), "811c00000500002d0b00002d0b0000555555c0000000009a99193f01000000");
     const knownLiveAdjust = buildLiveAdjustPacket([record]);
     expect("known live-adjust", hex(knownLiveAdjust), "8418002d0b00002d0b0000555555c0000000009a99193f01000000");
+    const ballEvent = parseBallEventFrame(bytesFromHex("0005070005000100050000"));
+    expect("ball event number", String(ballEvent.eventNumber), "5");
+    expect("ball event cycle", String(ballEvent.cycleIndex), "1");
+    expect("ball event served count", String(ballEvent.servedCount), "5");
+    expect("ball event record index", String(ballEvent.recordIndex), "0");
 
     if (failures.length) throw new Error(`Pongbot protocol self-test failed: ${failures.join("; ")}`);
     return true;
@@ -337,6 +357,7 @@
     parseResponse,
     parseStatusFrame,
     parseAccessFrame,
+    parseBallEventFrame,
     deriveVerification,
     frequencyHzFromPercent,
     delaySecondsFromFrequencyHz,

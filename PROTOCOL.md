@@ -43,6 +43,11 @@ Directly recovered/validated during this project:
 84 LL HH ...   live-adjust ball parameters
 ```
 
+The robot also emits opcode `0x05` notifications after served balls. The observed
+seven-byte payload contains a 16-bit event number, 16-bit cycle index, 16-bit
+served count, and an 8-bit record index. Playback uses receipt of this event—not
+a browser timer—to load the next record.
+
 ## Authentication
 
 Salt:
@@ -223,15 +228,23 @@ so Table Tennis Robot Studio uses:
 
 for flow batches, then waits for completion/Ready before sending the next batch.
 
-## Experimental live-adjust packet
+## Live-adjust packet
 
-The app now treats opcode `0x84` as a record-only update that queues the next shot pack while a sequence is active:
+Opcode `0x84` is a record-only replacement for an active drill:
 
 ```text
 84 <body-length LE16> <24-byte records...>
 ```
 
-The body contains one to nine ball records, without `START`'s four-byte mode metadata. The app sends the next pack about two ball intervals before the current one is expected to end. The same command replaces the active or already-queued records when live tuning changes; refill and tuning writes are serialized. A successful `0x84` response is treated as acknowledgement, and completion is still determined from status/done transitions. These rolling-buffer and live-tuning behaviors are explicit working assumptions for hardware testing and have not yet been physically verified on this Nova.
+The body contains ball records without `START`'s four-byte mode metadata. Direct hardware testing established these constraints:
+
+- a four-record endless START accepted a four-record replacement while Running;
+- a four-record/two-combo START accepted a four-record replacement between cycles and completed exactly eight balls;
+- a one-record/six-combo START accepted five successive one-record replacements, one after each ball event, and completed exactly six balls;
+- changing the active record count (four records to three) was rejected with response status 1;
+- sending another START while the first was Running was rejected with response status 1.
+
+Normal playback therefore uses a fixed one-record slot. Finite sessions set combo mode and the exact shot count (up to the verified one-byte limit of 255 per segment); infinite sessions use mode 3/endless. Each `0x05` ball event causes the next one-record `0x84` replacement. Completion remains determined from Ready/done transitions.
 
 ## Completion transition
 
@@ -253,7 +266,7 @@ used up to 9. Their later client intentionally divides unlimited drills into
 individual custom-drill packets **never longer than 6 balls** for better
 reliability.
 
-Normal Table Tennis Robot Studio playback currently uses a conservative **9-record** START window. This deliberately crosses ordinary logical set boundaries without STOP/START while staying below the 10+ record size reported unreliable by earlier community testing. Guided Debug contains explicit 16- and 20-record experiments to determine whether a particular Nova firmware accepts larger buffers; those experiments do not silently raise the normal runtime limit.
+Normal Table Tennis Robot Studio playback now uses a verified **one-record** active slot and same-size `0x84` replacements. The planner still limits look-ahead/debug packets to nine records because earlier community work found 10+ record START packets unreliable. Guided Debug retains explicit 16- and 20-record experiments for firmware comparison; those experiments do not change normal playback.
 
 ## Recovered native parameter conversion
 
@@ -294,7 +307,9 @@ Table Tennis Robot Studio clamps these fields to raw command values 400–7500. 
 
 **Direct project evidence:** authentication vector, response/status framing,
 state-aware Init rule, 24-byte layout, parameter conversion, heartbeat bytes,
-known Start packet, Start/Stop acknowledgements and state transitions.
+known Start packet, Start/Stop acknowledgements and state transitions, `0x05`
+ball-event shape, same-size `0x84` updates in combo/endless mode, and rejection of
+active buffer resizing/second START.
 
 **Community evidence used operationally:** Web Bluetooth UUID confirmation,
 one-run Start metadata `01 01 00 00`, completion signature state5/detail1,
