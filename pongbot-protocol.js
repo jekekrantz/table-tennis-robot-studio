@@ -264,6 +264,26 @@
     return packet;
   }
 
+  function buildLiveAdjustPacket(records) {
+    const balls = records.map(toUint8);
+    if (!balls.length) throw new Error("Live-adjust packet needs at least one ball record");
+    for (const ball of balls) {
+      if (ball.length !== 24) throw new Error(`Ball record must be 24 bytes, got ${ball.length}`);
+    }
+    const bodyLength = balls.length * 24;
+    if (bodyLength > 0xffff) throw new Error("Live-adjust packet is too large");
+    const packet = new Uint8Array(3 + bodyLength);
+    packet[0] = 0x84;
+    packet[1] = bodyLength & 0xff;
+    packet[2] = (bodyLength >> 8) & 0xff;
+    let offset = 3;
+    for (const ball of balls) {
+      packet.set(ball, offset);
+      offset += 24;
+    }
+    return packet;
+  }
+
   function selfTest() {
     const failures = [];
     const expect = (name, actual, wanted) => {
@@ -293,6 +313,8 @@
     expect("known ball record", hex(record), "2d0b00002d0b0000555555c0000000009a99193f01000000");
     const knownStart = buildStartPacket([record], { mode: 0, value: 5, sequence: 0 });
     expect("known tested start", hex(knownStart), "811c00000500002d0b00002d0b0000555555c0000000009a99193f01000000");
+    const knownLiveAdjust = buildLiveAdjustPacket([record]);
+    expect("known live-adjust", hex(knownLiveAdjust), "8418002d0b00002d0b0000555555c0000000009a99193f01000000");
 
     if (failures.length) throw new Error(`Pongbot protocol self-test failed: ${failures.join("; ")}`);
     return true;
@@ -321,6 +343,7 @@
     frequencyHzFromDelaySeconds,
     packBallRecord,
     buildStartPacket,
+    buildLiveAdjustPacket,
     selfTest,
   });
 });

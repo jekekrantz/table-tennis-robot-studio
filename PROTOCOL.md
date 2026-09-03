@@ -223,6 +223,16 @@ so Table Tennis Robot Studio uses:
 
 for flow batches, then waits for completion/Ready before sending the next batch.
 
+## Experimental live-adjust packet
+
+The app now treats opcode `0x84` as a record-only update that queues the next shot pack while a sequence is active:
+
+```text
+84 <body-length LE16> <24-byte records...>
+```
+
+The body contains one to nine ball records, without `START`'s four-byte mode metadata. The app sends the next pack about two ball intervals before the current one is expected to end. The same command replaces the active or already-queued records when live tuning changes; refill and tuning writes are serialized. A successful `0x84` response is treated as acknowledgement, and completion is still determined from status/done transitions. These rolling-buffer and live-tuning behaviors are explicit working assumptions for hardware testing and have not yet been physically verified on this Nova.
+
 ## Completion transition
 
 Olanga identifies this exact status message as done:

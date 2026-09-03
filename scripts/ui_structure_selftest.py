@@ -120,8 +120,9 @@ if 'params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 }' not i
 # Continuous playback: no artificial STOP/START at ordinary logical set boundaries.
 for token in (
     'function compilePlaybackWindow', 'NOVA_SEQUENCE_RECORD_LIMIT = 9', 'maxRecords = NOVA_SEQUENCE_RECORD_LIMIT', 'maxBatchSize = NOVA_SEQUENCE_RECORD_LIMIT',
-    'continuous sequence', 'Tuning queued for the next sequence buffer',
-    'avoids an artificial STOP/START', 'nextCarryDelay',
+    'rolling feed', 'Protocol.buildLiveAdjustPacket(records)',
+    'robot.updateActiveSequence(', 'Continuous feed · next', 'nextCarryDelay',
+    'flushImmediateLiveRetune', 'live-tuned queued shot pack', 'enqueuePlaybackUpdate',
 ):
     if token not in app:
         raise SystemExit(f"Missing continuous playback behavior: {token}")

@@ -46,6 +46,7 @@ class FakeNova {
   constructor(initialState = 0) {
     this.state = initialState;
     this.detail = 0;
+    this.sequenceGeneration = 0;
     this.connected = false;
     this.notify = new FakeNotify();
     this.write = new FakeWrite(this);
@@ -89,6 +90,29 @@ class FakeNova {
     if (opcode === 0x01) { this.emit(frame(0x01, [1, 2, 3])); return; }
     if (opcode === 0x02) { this.emit(this.statusFrame()); return; }
     if (opcode === 0x83) { this.emit(frame(0x83)); return; }
+    if (opcode === 0x84) {
+      this.emit(frame(0x84));
+      const generation = ++this.sequenceGeneration;
+      this.state = 60;
+      this.detail = 0;
+      this.later(12, () => {
+        if (generation !== this.sequenceGeneration) return;
+        this.state = 4;
+        this.notify.emit(this.statusFrame());
+      });
+      this.later(120, () => {
+        if (generation !== this.sequenceGeneration) return;
+        this.state = 5;
+        this.detail = 1;
+        this.notify.emit(this.statusFrame());
+      });
+      this.later(180, () => {
+        if (generation !== this.sequenceGeneration) return;
+        this.state = 3;
+        this.detail = 0;
+      });
+      return;
+    }
 
     if (opcode === 0x80) {
       const action = command[3];
@@ -107,13 +131,23 @@ class FakeNova {
 
     if (opcode === 0x81) {
       this.emit(frame(0x81));
-      this.later(20, () => { this.state = 4; this.detail = 0; });
+      const generation = ++this.sequenceGeneration;
+      this.later(20, () => {
+        if (generation !== this.sequenceGeneration) return;
+        this.state = 4;
+        this.detail = 0;
+      });
       this.later(100, () => {
+        if (generation !== this.sequenceGeneration) return;
         this.state = 5;
         this.detail = 1;
         this.notify.emit(this.statusFrame());
       });
-      this.later(180, () => { this.state = 3; this.detail = 0; });
+      this.later(180, () => {
+        if (generation !== this.sequenceGeneration) return;
+        this.state = 3;
+        this.detail = 0;
+      });
       return;
     }
 
@@ -151,9 +185,38 @@ async function main() {
     count: 1,
   });
   const packet = P.buildStartPacket([ball], { mode: 1, value: 1, sequence: 0 });
-  await controller.startBatch(packet, { timeoutMs: 3000, description: "mock one-ball batch" });
+  const nextBall = P.packBallRecord({
+    wheelA: 3000,
+    wheelB: 2750,
+    pitchDeg: -2,
+    yawDeg: 1,
+    frequencyHz: 0.8,
+    count: 1,
+  });
+  const liveUpdatePacket = P.buildLiveAdjustPacket([nextBall]);
+  const thirdBall = P.packBallRecord({
+    wheelA: 3150,
+    wheelB: 2650,
+    pitchDeg: 1,
+    yawDeg: -1,
+    frequencyHz: 0.9,
+    count: 1,
+  });
+  const secondLiveUpdatePacket = P.buildLiveAdjustPacket([thirdBall]);
+  const doneBaseline = await controller.beginBatch(packet, { description: "mock first shot pack" });
+  await new Promise(resolve => setTimeout(resolve, 45));
+  await controller.updateActiveSequence(liveUpdatePacket, { description: "mock next shot pack" });
+  await new Promise(resolve => setTimeout(resolve, 45));
+  await controller.updateActiveSequence(secondLiveUpdatePacket, { description: "mock third shot pack" });
+  await controller.waitForBatchComplete(doneBaseline, 3000, 500);
   if (controller.wireState !== 3 || controller.doneCounter < 1) {
     throw new Error("Mock Start did not complete and return Ready");
+  }
+  if (!fake.write.writes.includes(P.hex(liveUpdatePacket))) {
+    throw new Error("Rolling live-update packet was not written during the active batch");
+  }
+  if (!fake.write.writes.includes(P.hex(secondLiveUpdatePacket))) {
+    throw new Error("A second rolling live-update packet was not written during the same active run");
   }
 
   // Calibration Test Shot uses the same one-run Start path, exactly one
@@ -210,8 +273,8 @@ async function main() {
   }
 
   console.log("Table Tennis Robot Studio self-test: PASS");
-  console.log(`  protocol MD5/auth/known Start vectors: PASS`);
-  console.log(`  mock BLE auth/init/heartbeat/Start/done/Stop/Ready: PASS\n  repeated one-ball calibration Start/Ready cycle: PASS`);
+  console.log(`  protocol MD5/auth/known Start/live-adjust vectors: PASS`);
+  console.log(`  mock BLE auth/init/heartbeat/Start/rolling-update/done/Stop/Ready: PASS\n  repeated one-ball calibration Start/Ready cycle: PASS`);
   console.log(`  Ready/Initializing state gate (no redundant Init): PASS`);
   console.log(`  mock GATT writes: ${fake.write.writes.length}`);
 }

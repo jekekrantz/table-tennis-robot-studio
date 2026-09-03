@@ -3,6 +3,7 @@
 
   const P = root.PongbotProtocol;
   if (!P) throw new Error("pongbot-protocol.js must load before pongbot-ble.js");
+  const ACTIVE_PLAYBACK_STATES = Object.freeze([4, 6, 7, 60]);
 
   class NovaBleController extends EventTarget {
     constructor() {
@@ -224,6 +225,11 @@
     }
 
     async startBatch(packet, { timeoutMs = 30000, description = "batch", expectedDurationMs = 0 } = {}) {
+      const doneBaseline = await this.beginBatch(packet, { description });
+      return this.waitForBatchComplete(doneBaseline, timeoutMs, expectedDurationMs);
+    }
+
+    async beginBatch(packet, { description = "batch" } = {}) {
       await this.ensureReadyForStart();
       await this.sendHeartbeat().catch(() => null);
       const doneBaseline = this.doneCounter;
@@ -231,20 +237,31 @@
       this.log(`Starting ${description}`, "tx", packet);
       await this.requestCommand(packet, 0x81, 6000, "start", { logTx: false });
       this.setPhase("running");
-      return this.waitForBatchComplete(doneBaseline, timeoutMs, expectedDurationMs);
+      return doneBaseline;
+    }
+
+    async updateActiveSequence(packet, { description = "next shot pack" } = {}) {
+      if (!this.connected || !this.authenticated) throw new Error("Nova is not connected and authenticated");
+      let state = this.wireState;
+      if (!ACTIVE_PLAYBACK_STATES.includes(state)) state = (await this.queryStatus()).state;
+      if (!ACTIVE_PLAYBACK_STATES.includes(state)) {
+        throw new Error(`Nova is ${P.stateName(state)} (wire state ${state}); there is no active sequence to update`);
+      }
+      this.log(`Queueing ${description}`, "tx", packet);
+      return this.requestCommand(packet, 0x84, 6000, "live-update", { logTx: false });
     }
 
     async waitForBatchComplete(doneBaseline, timeoutMs, expectedDurationMs = 0) {
       const startedAt = performance.now();
       const deadline = startedAt + timeoutMs;
-      let seenActive = this.wireState === 4 || this.wireState === 5 || this.wireState === 6;
+      let seenActive = this.wireState === 5 || ACTIVE_PLAYBACK_STATES.includes(this.wireState);
       let last = null;
 
       while (performance.now() < deadline) {
         if (!this.connected) throw new Error("Nova disconnected while a batch was running");
         if (this.doneCounter > doneBaseline) seenActive = true;
         last = await this.queryStatus();
-        if ([4, 5, 6].includes(last.state)) seenActive = true;
+        if (last.state === 5 || ACTIVE_PLAYBACK_STATES.includes(last.state)) seenActive = true;
         if (last.state === 202) throw new Error("Nova reported an error while serving");
         if (last.state === 3 && (seenActive || this.doneCounter > doneBaseline)) {
           this.setPhase("ready");
@@ -376,7 +393,7 @@
         const signature = `${status.state}:${status.detail}`;
         if (status.state === 5 && status.detail === 1 && signature !== previousSignature) this.doneCounter += 1;
         if (status.state === 3 && this.authenticated) this.phase = "ready";
-        else if (status.state === 4) this.phase = "running";
+        else if (status.state === 4 || status.state === 60) this.phase = "running";
         else if (status.state === 5) this.phase = "stopping";
         else if (status.state === 6) this.phase = "paused";
         else if (status.state === 2) this.phase = "initializing";

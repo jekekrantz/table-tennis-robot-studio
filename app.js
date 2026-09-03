@@ -344,8 +344,11 @@
   let liveTuning = null;
   const liveTuningCache = new Map();
   let liveTuningRevision = 0;
-  let playbackRetuneRequested = false;
-  let liveRetuneStopPromise = null;
+  let playbackLiveContext = null;
+  let playbackUpdateLock = Promise.resolve();
+  let liveRetuneTimer = null;
+  let liveRetunePending = false;
+  let liveRetuneInFlight = false;
   let pendingRobotAction = null;
   let pendingRobotReason = "";
   let poseCalibrationState = null;
@@ -5534,7 +5537,7 @@
   }
 
   function robotIsActive() {
-    return Boolean(robot?.connected && [4, 5, 6, 7].includes(robot.wireState));
+    return Boolean(robot?.connected && [4, 5, 6, 7, 60].includes(robot.wireState));
   }
 
   function liveTrajectoryTuningIsActive() {
@@ -5674,11 +5677,13 @@
   function requestImmediateLiveRetune() {
     liveTuningRevision += 1;
     if (!playbackRunning || calibrationTestRunning) return;
-    // Nova buffers a START packet. Do not inject a STOP just because the player
-    // changed a tuning slider: keep the current sequence smooth and apply the new
-    // tuning when the next buffer is compiled.
-    playbackRetuneRequested = true;
-    els.runStatus.textContent = "Tuning queued for the next sequence buffer…";
+    liveRetunePending = true;
+    if (liveRetuneTimer) clearTimeout(liveRetuneTimer);
+    liveRetuneTimer = setTimeout(() => {
+      liveRetuneTimer = null;
+      void flushImmediateLiveRetune();
+    }, 90);
+    els.runStatus.textContent = "Applying live tuning to the rolling feed…";
   }
   function stepLiveTuning(key, delta) {
     if (!(key in liveTuning)) return;
@@ -5994,8 +5999,10 @@
       batches.push({
         shots: current,
         packet,
+        liveUpdatePacket: Protocol.buildLiveAdjustPacket(current.map(item => item.record)),
         encodedSeconds,
         hostDelayBefore: pendingHostDelay,
+        tuningRevision: liveTuningRevision,
       });
       current = [];
       pendingHostDelay = 0;
@@ -6030,6 +6037,95 @@
       warnings: [...new Set(warnings)],
       shotCount: prepared.length,
     };
+  }
+
+  function rebuildPlaybackBatchForLiveTuning(batch) {
+    const sourceShots = batch.shots.map(shot => ({
+      ...shot,
+      params: { ...shot.baseParams },
+      baseParams: { ...shot.baseParams },
+      record: undefined,
+    }));
+    const rebuilt = buildRobotExecutionPlan({ shots: sourceShots, warnings: [], trailingDelay: 0 }, {
+      maxBatchSize: NOVA_SEQUENCE_RECORD_LIMIT,
+    });
+    const shots = rebuilt.batches.flatMap(item => item.shots);
+    if (shots.length !== batch.shots.length) {
+      throw new Error(`live adjustment rebuilt ${shots.length} records for a ${batch.shots.length}-record sequence`);
+    }
+    if (rebuilt.batches.length > 1) {
+      rebuilt.warnings.push("The slower live pace needs a host-side delay that cannot be inserted into an already-running sequence; this buffer uses the Nova's slowest encoded pace.");
+    }
+    const records = shots.map(shot => shot.record);
+    return {
+      ...batch,
+      shots,
+      packet: Protocol.buildStartPacket(records, { mode: 1, value: 1, sequence: 0 }),
+      liveUpdatePacket: Protocol.buildLiveAdjustPacket(records),
+      encodedSeconds: shots.reduce((sum, shot) => sum + shot.encodedDelay, 0),
+      hostDelayBefore: rebuilt.batches[0]?.hostDelayBefore ?? batch.hostDelayBefore,
+      tuningRevision: liveTuningRevision,
+      retuneWarnings: rebuilt.warnings,
+    };
+  }
+
+  function enqueuePlaybackUpdate(task) {
+    const run = playbackUpdateLock.catch(() => {}).then(task);
+    playbackUpdateLock = run.catch(() => {});
+    return run;
+  }
+
+  async function flushImmediateLiveRetune() {
+    if (liveRetuneInFlight) return;
+    liveRetuneInFlight = true;
+    try {
+      while (liveRetunePending && playbackRunning && !calibrationTestRunning) {
+        liveRetunePending = false;
+        const revision = liveTuningRevision;
+        const context = playbackLiveContext;
+        if (!context || context.token !== playbackToken) {
+          els.runStatus.textContent = "Live tuning will apply to the next shot pack.";
+          break;
+        }
+
+        await enqueuePlaybackUpdate(async () => {
+          if (playbackLiveContext !== context || !playbackRunning || context.token !== playbackToken) return;
+          const queued = Boolean(context.queuedBatch);
+          const original = queued ? context.queuedBatch : context.currentBatch;
+          if (!original) return;
+          const remainingFraction = queued
+            ? null
+            : clamp((context.expectedEndAt - performance.now()) / Math.max(1, original.encodedSeconds * 1000), 0, 1, 0);
+          const replacement = rebuildPlaybackBatchForLiveTuning(original);
+          await robot.updateActiveSequence(replacement.liveUpdatePacket, {
+            description: queued ? "live-tuned queued shot pack" : "live-tuned active shot pack",
+          });
+          if (playbackLiveContext !== context || !playbackRunning || context.token !== playbackToken) return;
+          if (queued && context.queuedBatch === original) {
+            context.queuedBatch = replacement;
+          } else if (!queued && context.currentBatch === original) {
+            context.currentBatch = replacement;
+            context.expectedEndAt = performance.now() + replacement.encodedSeconds * remainingFraction * 1000;
+          }
+          if (replacement.retuneWarnings?.length) robot.log(`Live tuning warning: ${replacement.retuneWarnings[0]}`, "warn");
+          els.runStatus.textContent = queued
+            ? "Live tuning applied to the queued shot pack."
+            : "Live tuning applied to the active shot pack.";
+        });
+        if (revision !== liveTuningRevision) liveRetunePending = true;
+      }
+    } catch (error) {
+      robot?.log(`Live tuning update failed: ${error.message}`, "warn");
+      els.runStatus.textContent = "Live tuning will apply to the next shot pack.";
+    } finally {
+      liveRetuneInFlight = false;
+      if (liveRetunePending && playbackRunning && !liveRetuneTimer) {
+        liveRetuneTimer = setTimeout(() => {
+          liveRetuneTimer = null;
+          void flushImmediateLiveRetune();
+        }, 90);
+      }
+    }
   }
 
   function buildCalibrationTestExecutionPlan(params = library.calibration.testShot, label = "Calibration test shot") {
@@ -6270,7 +6366,10 @@
     playbackToken += 1;
     const token = playbackToken;
     playbackRunning = true;
-    playbackRetuneRequested = false;
+    liveRetunePending = false;
+    if (liveRetuneTimer) clearTimeout(liveRetuneTimer);
+    liveRetuneTimer = null;
+    playbackLiveContext = null;
     activeNodeRef = null;
     activeEdgeRef = null;
     runtimeCounterDisplay = new Map();
@@ -6281,58 +6380,147 @@
     const configured = drill.settings.repetitions;
     const infinite = configured <= 0;
     let completed = 0;
+    let planned = 0;
     let carryDelay = 0;
+    let pendingBatches = [];
     let warningsShown = false;
+
+    const reportWarnings = warnings => {
+      if (warningsShown || !warnings.length) return;
+      warningsShown = true;
+      warnings.forEach(message => robot.log(`Plan warning: ${message}`, "warn"));
+      toast(warnings[0]);
+    };
+    const planMore = () => {
+      if (!infinite && planned >= configured) return false;
+      runtimeCounterDisplay = new Map();
+      const window = compilePlaybackWindow(drill, planned, configured, infinite, carryDelay, NOVA_SEQUENCE_RECORD_LIMIT);
+      if (!window.shots.length || !window.setsIncluded) throw new Error("The drill produced no playable shots.");
+      const plan = buildRobotExecutionPlan({ shots: window.shots, warnings: window.warnings, trailingDelay: 0 }, { maxBatchSize: NOVA_SEQUENCE_RECORD_LIMIT });
+      for (let index = 0; index < plan.batches.length; index += 1) {
+        const batch = plan.batches[index];
+        const lastSet = batch.shots.at(-1)?.logicalSet ?? null;
+        const sameSetContinues = lastSet != null && plan.batches.slice(index + 1).some(next => next.shots.some(shot => shot.logicalSet === lastSet));
+        batch.completedSetThrough = sameSetContinues ? null : lastSet;
+      }
+      pendingBatches.push(...plan.batches);
+      planned += window.setsIncluded;
+      carryDelay = window.nextCarryDelay;
+      reportWarnings(plan.warnings);
+      return true;
+    };
+    const takeNextBatch = () => {
+      while (!pendingBatches.length) {
+        if (!planMore()) return null;
+      }
+      let batch = pendingBatches.shift();
+      if (batch.tuningRevision !== liveTuningRevision) {
+        batch = rebuildPlaybackBatchForLiveTuning(batch);
+        if (batch.retuneWarnings?.length) reportWarnings(batch.retuneWarnings);
+      }
+      return batch;
+    };
+    const markBatchComplete = batch => {
+      if (Number.isFinite(batch.completedSetThrough)) completed = Math.max(completed, batch.completedSetThrough);
+      updateProgress(completed, configured, infinite, infinite ? `∞ · ${completed} repetitions completed` : `${completed} of ${configured} repetitions completed`);
+    };
+    const showActiveBatch = (batch, message) => {
+      const firstShot = batch.shots[0];
+      activeNodeRef = { drillId: firstShot.drillId, nodeId: firstShot.nodeId };
+      activeEdgeRef = null;
+      if (firstShot.drillId === activeDrill()?.id) renderGraph();
+      const firstSet = firstShot.logicalSet || completed + 1;
+      const lastSet = batch.shots.at(-1)?.logicalSet || firstSet;
+      const setText = firstSet === lastSet ? `set ${firstSet}` : `sets ${firstSet}–${lastSet}`;
+      els.runStatus.textContent = `${setText} · ${message} · ${batch.shots.length} ball${batch.shots.length === 1 ? "" : "s"}`;
+      return setText;
+    };
+    const updateLeadSeconds = batch => {
+      const tail = batch.shots.slice(-Math.min(2, batch.shots.length)).reduce((sum, shot) => sum + shot.encodedDelay, 0);
+      return clamp(tail, .75, 2, 1.25);
+    };
+    const waitForUpdatePoint = async context => {
+      while (playbackRunning && token === playbackToken && playbackLiveContext === context) {
+        const updateAt = context.expectedEndAt - updateLeadSeconds(context.currentBatch) * 1000;
+        const remainingMs = updateAt - performance.now();
+        if (remainingMs <= 0) return;
+        await sleep(Math.min(100, remainingMs), token);
+      }
+    };
 
     try {
       await robot.ensureReadyForStart();
-      while (playbackRunning && token === playbackToken && (infinite || completed < configured)) {
-        runtimeCounterDisplay = new Map();
-        const window = compilePlaybackWindow(drill, completed, configured, infinite, carryDelay, NOVA_SEQUENCE_RECORD_LIMIT);
-        if (!window.shots.length || !window.setsIncluded) throw new Error("The drill produced no playable shots.");
-        const plan = buildRobotExecutionPlan({ shots: window.shots, warnings: window.warnings, trailingDelay: 0 }, { maxBatchSize: NOVA_SEQUENCE_RECORD_LIMIT });
-        if (!warningsShown && plan.warnings.length) {
-          warningsShown = true;
-          plan.warnings.forEach(message => robot.log(`Plan warning: ${message}`, "warn"));
-          toast(plan.warnings[0]);
+      let nextBatch = takeNextBatch();
+      while (nextBatch && playbackRunning && token === playbackToken) {
+        if (nextBatch.hostDelayBefore > 0) {
+          await waitWithStatus(nextBatch.hostDelayBefore, token, "Long requested delay");
+          if (!playbackRunning || token !== playbackToken) break;
+          if (nextBatch.tuningRevision !== liveTuningRevision) nextBatch = rebuildPlaybackBatchForLiveTuning(nextBatch);
         }
 
-        for (let batchIndex = 0; batchIndex < plan.batches.length; batchIndex += 1) {
-          if (!playbackRunning || token !== playbackToken) break;
-          const batch = plan.batches[batchIndex];
-          if (batch.hostDelayBefore > 0) {
-            await waitWithStatus(batch.hostDelayBefore, token, "Long requested delay");
-            if (!playbackRunning || token !== playbackToken) break;
-          }
-          const firstShot = batch.shots[0];
-          activeNodeRef = { drillId: firstShot.drillId, nodeId: firstShot.nodeId };
-          activeEdgeRef = null;
-          if (firstShot.drillId === activeDrill()?.id) renderGraph();
-          const firstSet = firstShot.logicalSet || completed + 1;
-          const lastSet = batch.shots.at(-1)?.logicalSet || firstSet;
-          const setText = firstSet === lastSet ? `set ${firstSet}` : `sets ${firstSet}–${lastSet}`;
-          els.runStatus.textContent = `${setText} · continuous sequence ${batchIndex + 1}/${plan.batches.length} · ${batch.shots.length} ball${batch.shots.length === 1 ? "" : "s"}`;
-          const timeoutMs = Math.max(20000, Math.ceil((batch.encodedSeconds + 12) * 1000));
-          const revisionAtStart = liveTuningRevision;
-          await robot.startBatch(batch.packet, {
-            timeoutMs,
-            expectedDurationMs: batch.encodedSeconds * 1000,
-            description: `${setText}, continuous sequence ${batchIndex + 1}/${plan.batches.length} (${batch.shots.length} balls)`,
-          });
-          activeNodeRef = null;
-          if (activeDrill()) renderGraph();
-          // Tuning changes are intentionally applied only after a buffered START
-          // finishes. This avoids an artificial STOP/START and physical pause.
-          if (playbackRetuneRequested || liveTuningRevision !== revisionAtStart) {
-            playbackRetuneRequested = false;
+        let currentBatch = nextBatch;
+        const setText = showActiveBatch(currentBatch, "starting rolling feed");
+        const doneBaseline = await robot.beginBatch(currentBatch.packet, {
+          description: `${setText}, rolling feed (${currentBatch.shots.length} balls)`,
+        });
+        const liveContext = {
+          token,
+          currentBatch,
+          queuedBatch: null,
+          expectedEndAt: performance.now() + currentBatch.encodedSeconds * 1000,
+        };
+        playbackLiveContext = liveContext;
+        nextBatch = null;
+
+        while (playbackRunning && token === playbackToken) {
+          let candidate = takeNextBatch();
+          if (!candidate || candidate.hostDelayBefore > 0) {
+            const remainingMs = Math.max(0, liveContext.expectedEndAt - performance.now());
+            await robot.waitForBatchComplete(doneBaseline, Math.max(20000, remainingMs + 12000), remainingMs);
+            markBatchComplete(liveContext.currentBatch);
+            nextBatch = candidate;
+            if (playbackLiveContext === liveContext) playbackLiveContext = null;
             break;
           }
-        }
 
-        if (!playbackRunning || token !== playbackToken) break;
-        completed += window.setsIncluded;
-        carryDelay = window.nextCarryDelay;
-        updateProgress(completed, configured, infinite, infinite ? `∞ · ${completed} repetitions completed` : `${completed} of ${configured} repetitions completed`);
+          await waitForUpdatePoint(liveContext);
+          if (!playbackRunning || token !== playbackToken) break;
+          showActiveBatch(liveContext.currentBatch, `queueing next ${candidate.shots.length}-ball pack`);
+          try {
+            candidate = await enqueuePlaybackUpdate(async () => {
+              if (playbackLiveContext !== liveContext || !playbackRunning || token !== playbackToken) return null;
+              if (candidate.tuningRevision !== liveTuningRevision) candidate = rebuildPlaybackBatchForLiveTuning(candidate);
+              await robot.updateActiveSequence(candidate.liveUpdatePacket, {
+                description: `next ${candidate.shots.length}-ball pack`,
+              });
+              liveContext.queuedBatch = candidate;
+              return candidate;
+            });
+          } catch (error) {
+            robot.log(`Rolling live update failed; falling back to a new START after this pack: ${error.message}`, "warn");
+            const remainingMs = Math.max(0, liveContext.expectedEndAt - performance.now());
+            await robot.waitForBatchComplete(doneBaseline, Math.max(20000, remainingMs + 12000), remainingMs);
+            markBatchComplete(liveContext.currentBatch);
+            nextBatch = candidate;
+            if (playbackLiveContext === liveContext) playbackLiveContext = null;
+            break;
+          }
+          if (!candidate || !playbackRunning || token !== playbackToken) break;
+
+          els.runStatus.textContent = `Continuous feed · next ${candidate.shots.length}-ball pack queued`;
+          await waitUntilPlaybackDeadline(liveContext.expectedEndAt, token);
+          if (!playbackRunning || token !== playbackToken) break;
+          markBatchComplete(liveContext.currentBatch);
+          await enqueuePlaybackUpdate(async () => {
+            if (playbackLiveContext !== liveContext || !playbackRunning || token !== playbackToken) return;
+            currentBatch = liveContext.queuedBatch || candidate;
+            liveContext.currentBatch = currentBatch;
+            liveContext.queuedBatch = null;
+            liveContext.expectedEndAt += currentBatch.encodedSeconds * 1000;
+          });
+          showActiveBatch(currentBatch, "rolling feed");
+        }
+        if (playbackLiveContext === liveContext) playbackLiveContext = null;
       }
 
       if (playbackRunning && token === playbackToken) {
@@ -6348,8 +6536,11 @@
     } finally {
       if (token === playbackToken) {
         playbackRunning = false;
-        playbackRetuneRequested = false;
-            activeNodeRef = null;
+        liveRetunePending = false;
+        if (liveRetuneTimer) clearTimeout(liveRetuneTimer);
+        liveRetuneTimer = null;
+        playbackLiveContext = null;
+        activeNodeRef = null;
         activeEdgeRef = null;
         updatePlayButton();
         renderGraph();
@@ -6369,6 +6560,14 @@
     }
   }
 
+  async function waitUntilPlaybackDeadline(deadlineMs, token) {
+    while (playbackRunning && token === playbackToken) {
+      const remainingMs = deadlineMs - performance.now();
+      if (remainingMs <= 0) return;
+      await sleep(Math.min(100, remainingMs), token);
+    }
+  }
+
   function sleep(ms, token) {
     return new Promise(resolve => setTimeout(() => resolve(token === playbackToken), ms));
   }
@@ -6380,7 +6579,10 @@
     if (!playbackRunning && !calibrationTestRunning && !needsRobotStop) return;
 
     playbackRunning = false;
-    playbackRetuneRequested = false;
+    liveRetunePending = false;
+    if (liveRetuneTimer) clearTimeout(liveRetuneTimer);
+    liveRetuneTimer = null;
+    playbackLiveContext = null;
     calibrationTestRunning = false;
     if (hadCalibrationTest) calibrationTestMessage = needsRobotStop ? "Stopping calibration test shot…" : "Calibration test shot canceled.";
     playbackToken += 1;
