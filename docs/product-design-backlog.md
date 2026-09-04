@@ -10,6 +10,41 @@ Captured 2026-09-04. These are product observations and future work, not complet
 - Treat phone screen space as valuable. Avoid persistent explanations that are irrelevant during routine use and avoid unused dead space.
 - Prefer progressive disclosure: show the control and the few words needed to use it, then make deeper explanations available on demand.
 
+## Completed
+
+### Serve shot type — completed 2026-09-04
+
+- Added a first-class **Serve** node with serve-oriented defaults and the same full manual speed, spin, elevation, aim, variation, timing, and connection controls as a Shot.
+- Serve previews simulate three flight segments: release to the robot-side
+  bounce, across the net to the receiver's first bounce, then onward to the
+  receiver's second bounce or the 0.5 m outside-table display limit.
+- Serve validation distinguishes an invalid first-bounce side, post-bounce net failure, and invalid second-bounce placement without turning a trajectory-model warning into a hardware encoding error.
+- Serve nodes participate in traversal, Nova playback, live tuning, import/export, duplication, sharing, and AI-assist data handling.
+- Added a dedicated built-in **Serve / receive** collection with short backspin,
+  short no-spin, fast-long topspin, third-ball follow-ups, spin/length
+  recognition, weighted randomness, controlled physical variation, and a
+  reusable combination mix.
+
+### Simulate and display post-bounce trajectories — completed 2026-09-04
+
+- Added the Conti et al. ball-table contact model, including incoming velocity,
+  spin, sliding/rolling friction, velocity-dependent restitution, and the
+  published fitted residual corrections.
+- Extended shot-creation and drill/drill-editor previews through the second
+  bounce, capped at 0.5 m outside the table. Serve previews add a third flight
+  segment through the receiver's second bounce. Calibration views intentionally
+  remain first-flight-only.
+- Rendered the first arc and landing in the existing outcome color and the
+  second arc and landing in high-contrast magenta, and the Serve-only third arc
+  in gold, with white-ringed bounce circles in both top and side views. Full
+  creation/editor previews include a numbered color key so every segment is
+  immediately identifiable.
+- Long trajectories that exceed the display limit stop at the boundary without
+  inventing a second-bounce marker.
+- Marked post-bounce placement as an equipment-specific approximation.
+- Removed the routine `15.25 cm net` annotation; net height is labeled only
+  when it differs from the regulation default.
+
 ## Backlog
 
 ### Reduce text in core workflows
@@ -67,28 +102,6 @@ The app currently refused to play a deliberately authored shot that the model pr
 - Allow the user to play physically encodable shots despite trajectory warnings after an appropriately lightweight acknowledgement.
 - Continue blocking only commands that cannot be represented safely or validly for the hardware.
 
-### Add serves to the drill model and editor
-
-Serves are a core part of table tennis and should be represented explicitly rather than approximated as ordinary shots.
-
-- Add a **Serve** node to the drill editor.
-- A serve trajectory must bounce first on the robot's side of the table and then cross the net and bounce on the user's side.
-- Give serve nodes suitable editing, preview, validation, variation, playback, import/export, duplication, and AI-assist behavior.
-- Preserve full manual control while offering sensible serve-oriented defaults.
-
-### Simulate and display post-bounce trajectories
-
-Implemented for shot creation and drill/drill-editor previews. Calibration
-views intentionally retain the first-flight-only display.
-
-Trajectory previews should continue through table impacts rather than stopping at the first bounce.
-
-- Add a physically meaningful ball-table bounce model, including the effects of incoming velocity and spin.
-- Draw the trajectory after each relevant bounce.
-- Make the first and second bounce locations clear in top and side views.
-- Use the post-bounce trajectory to distinguish short, half-long, and long balls; these are materially different outcomes for the player even when the first landing point is similar.
-- Expose model uncertainty where it matters instead of implying that post-bounce predictions are exact.
-
 ### Support second-bounce goals and variation
 
 - Let the user specify a desired second-bounce outcome, including half-long placement.
@@ -135,8 +148,7 @@ delay(A → B) = 2 × (A flight time + A bounce-to-peak time)
 2. Improve numeric controls, Back targets, and parent-folder navigation.
 3. Redesign live tuning as coarse sliders plus fine buttons.
 4. Separate trajectory warnings from genuinely invalid hardware commands.
-5. Add the bounce model and post-bounce trajectory visualization.
-6. Add second-bounce goals/variation and the Serve node.
-7. Add manual/Auto transition timing using the initial return-cycle model.
-8. Specify and test the resting-head state with the physical robot available.
-9. Promote AI assist globally and add screen-aware help context.
+5. Add second-bounce goals/variation and the Serve node.
+6. Add manual/Auto transition timing using the initial return-cycle model.
+7. Specify and test the resting-head state with the physical robot available.
+8. Promote AI assist globally and add screen-aware help context.

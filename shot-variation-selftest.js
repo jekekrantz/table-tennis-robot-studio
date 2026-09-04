@@ -29,6 +29,8 @@ const config = {
 
 const prepared = Variation.prepare(base, config, analyticPrediction);
 assert(prepared.ok, prepared.reason);
+const invalidServe = Variation.prepare(base, config, params => ({ ...analyticPrediction(params), serve: { valid: false } }));
+assert(!invalidServe.ok, 'serve variation must reject trajectories without a legal second bounce');
 assert.strictEqual(prepared.evaluations, 5, 'preparation must use one base + four finite-difference evaluations');
 assert(Math.abs(prepared.tangent.reduce((sum, value) => sum + value * value, 0) - 1) < 1e-9);
 

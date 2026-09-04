@@ -60,6 +60,35 @@ The default drill set includes:
 
 The short-opening patterns are intended for flick/receive practice followed by recovery into a more match-like long ball. The random pattern mix uses reusable sub-drills, so a set chooses a whole tactical pattern rather than randomizing every individual ball independently.
 
+## Serve / receive drills
+
+The built-in Serve / receive folder contains modeled serves whose server-side
+first bounce, post-bounce net crossing, and receiver-side first bounce are all
+valid with the default table and centered robot pose. The preview then follows
+a third arc to the receiver's second bounce or the 0.5 m outside-table limit:
+
+- Short backspin to backhand
+- Short backspin to forehand
+- Short no-spin to middle
+- Fast long topspin to backhand
+- Short backspin → third-ball attack
+- Fast long → backhand pressure
+- Backspin / no-spin recognition
+- Short or fast-long random
+- Mixed serve + random third ball
+- Combination mix, which chooses whole serve-and-follow-up sub-drills
+
+The recognition drills randomize serve families and placements. The follow-up
+drills represent the server's next ball after the player receives the serve.
+Serve variation is deliberately tighter than ordinary rally-ball variation and
+invalid modeled samples are skipped. Technique names that require a verified
+sidespin axis are intentionally omitted; the current model supports top/back
+spin only.
+
+These choices follow common serve/receive practice principles: vary placement,
+speed and spin; mix short backspin or no-spin with fast-long serves; attack long
+serves; and train the serve together with the expected third-ball response.
+
 These patterns are based on widely used coaching and robot-training patterns. In particular, Butterfly's training material describes forehand/backhand alternating, one-one footwork, random three-spot placement, the two-one/Falkenberg family, and whole-table random work; Butterfly also documents Timo Boll's 2-2 robot drill. Newgy robot training material uses related forehand/backhand, middle/random, backhand/random and spin-switching exercises. Expert Table Tennis describes the standard Falkenberg sequence as backhand, forehand from the backhand corner, then wide forehand.
 
 References:
@@ -70,6 +99,9 @@ References:
 - https://www.experttabletennis.com/the-falkenberg-drill/
 - https://www.newgy.com/blogs/coaching-tips
 - https://www.newgy.com/files/s/files/1/2677/3302/files/newgy_robo_pong_training_manual_74f5fe53-ef96-4786-8752-399bef2c9f20_2644323985325488869.pdf
+- https://www.ittf.com/2020/04/11/stay-home-train-serve/
+- https://newsarchive.tabletennisengland.co.uk/news/archived/service-and-spin/
+- https://newsarchive.tabletennisengland.co.uk/news/archived/return-of-serve/
 
 ## Robustness assumptions
 

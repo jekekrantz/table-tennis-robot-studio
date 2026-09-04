@@ -10,6 +10,7 @@
   --accent: #62a8ff;
   --accent-2: #9ac8ff;
   --shot: #2d8cff;
+  --serve: #e98c4a;
   --random: #a66cff;
   --drill: #32bda2;
   --counter: #e4a84c;
@@ -247,6 +248,7 @@ button { color: inherit; }
 .flow-node.drop-target { border-color:var(--warning); box-shadow:0 0 0 4px color-mix(in srgb,var(--warning),transparent 65%); }
 .node-band { height:7px; border-radius:11px 11px 0 0; }
 .flow-node.shot .node-band { background:var(--shot); }
+.flow-node.serve .node-band { background:var(--serve); }
 .flow-node.random .node-band { background:var(--random); }
 .flow-node.drill .node-band { background:var(--drill); }
 .flow-node.counter .node-band { background:var(--counter); }
@@ -267,7 +269,11 @@ button { color: inherit; }
 .trajectory-safe { color:#8ce0b2; }
 .trajectory-warning { color:#f3c66c; }
 .trajectory-miss { color:#ff9aa2; }
-.trajectory-second-bounce { color:#a9c9ff; }
+.trajectory-second-bounce { color:#ff9ed5; }
+.trajectory-third-bounce { color:#ffe08a; }
+.trajectory-bounce-legend { display:flex; flex-wrap:wrap; gap:7px 12px; margin:7px 0 9px; color:#cbd4df; font-size:.67rem; font-weight:700; }
+.trajectory-bounce-legend span { display:inline-flex; align-items:center; gap:5px; }
+.trajectory-bounce-legend i { display:grid; place-items:center; width:17px; height:17px; border:1.5px solid #fff; border-radius:50%; background:var(--bounce-color); color:#081018; font-size:.6rem; font-style:normal; font-weight:900; line-height:1; }
 
 .port {
   position:absolute; z-index:9; width:16px; height:16px; border:2px solid #d6dfe9; border-radius:50%; background:#202938;
@@ -444,8 +450,8 @@ button { color: inherit; }
 }
 .mini-top-trajectory { height:98px; }
 .mini-side-trajectory { height:48px; }
-.flow-node.shot .node-body { padding-bottom:8px; }
-.flow-node.shot .node-summary { margin-top:6px; line-height:1.34; }
+.flow-node.shot .node-body,.flow-node.serve .node-body { padding-bottom:8px; }
+.flow-node.shot .node-summary,.flow-node.serve .node-summary { margin-top:6px; line-height:1.34; }
 
 
 .set-stepper {
@@ -518,7 +524,7 @@ button { color: inherit; }
   border-color:#38465a;
   background:#18202b;
 }
-.flow-node.shot .node-summary {
+.flow-node.shot .node-summary,.flow-node.serve .node-summary {
   margin-top:6px;
   line-height:1.2;
 }
@@ -1868,10 +1874,10 @@ textarea { font:inherit; color:inherit; }
 .spin-direction-symbol.topspin { color:#84d8a7; }
 .spin-direction-symbol.underspin { color:#a5b9ff; }
 .spin-direction-symbol.no-spin { color:#8d98a7; }
-.flow-node.shot .mini-trajectory-grid { gap:4px; margin-top:4px; }
-.flow-node.shot .mini-top-trajectory { height:72px; }
-.flow-node.shot .mini-side-trajectory { height:38px; }
-.flow-node.shot .clearance-chip { margin-top:3px; padding:2px 5px; }
+.flow-node.shot .mini-trajectory-grid,.flow-node.serve .mini-trajectory-grid { gap:4px; margin-top:4px; }
+.flow-node.shot .mini-top-trajectory,.flow-node.serve .mini-top-trajectory { height:72px; }
+.flow-node.shot .mini-side-trajectory,.flow-node.serve .mini-side-trajectory { height:38px; }
+.flow-node.shot .clearance-chip,.flow-node.serve .clearance-chip { margin-top:3px; padding:2px 5px; }
 
 /* Robot screen */
 .robot-page-grid { display:grid; grid-template-columns:minmax(280px,.8fr) minmax(360px,1.2fr); gap:16px; }
@@ -1900,6 +1906,7 @@ textarea { font:inherit; color:inherit; }
 .add-type-card { min-height:86px; border:1px solid var(--border); border-radius:12px; background:var(--panel-2); display:flex; align-items:center; gap:12px; padding:12px; text-align:left; cursor:pointer; }
 .add-type-card:hover { border-color:#587099; background:#252e3c; }
 .add-type-icon { width:38px; height:38px; border-radius:10px; display:grid; place-items:center; background:#233149; font-size:1.1rem; }
+.serve-tool .add-type-icon { background:color-mix(in srgb,var(--serve),transparent 62%); color:#ffd9bd; }
 .add-type-card strong,.add-type-card small { display:block; }.add-type-card small { margin-top:4px; color:var(--muted); }
 .add-node-config-panel { margin-top:16px; }
 .new-shot-preview { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0; }
@@ -1967,15 +1974,30 @@ textarea { font:inherit; color:inherit; }
   .session-adjustment .tuning-slider-row.compact { grid-template-columns:46px minmax(120px,1fr) 46px; }
   .session-adjustment .tuning-slider-row.compact button,.session-adjustment .tuning-slider-row.compact .tuning-range { min-height:46px; }
   .run-secondary-actions { grid-template-columns:1fr; }
-  .editor-screen { height:calc(100dvh - 56px - var(--primary-nav-height)); padding:0; }
-  .editor-screen-header { min-height:62px; padding:7px 8px; }
+  .editor-screen { height:calc(100dvh - 56px - var(--primary-nav-height)); padding:0; display:grid; grid-template-rows:auto minmax(0,1fr); }
+  .editor-screen-header {
+    min-height:0;
+    margin:0;
+    padding:7px 8px;
+    display:grid;
+    grid-template-columns:42px 40px minmax(0,1fr) 40px 40px auto;
+    grid-template-rows:auto auto;
+    gap:4px 8px;
+  }
+  .editor-screen-header #editorBackBtn { grid-column:1; grid-row:1; }
+  .editor-screen-header #drillDetailsBtn { grid-column:2; grid-row:1; }
+  .editor-screen-header #aiDrillBtn { grid-column:4; grid-row:1; }
+  .editor-screen-header #editorShareBtn { grid-column:5; grid-row:1; }
+  .editor-screen-header #editorRunBtn { grid-column:6; grid-row:1; }
+  .editor-screen-header .screen-title-grow { grid-column:1 / -1; grid-row:2; }
+  .editor-screen-header .screen-title-grow p { display:none; }
   .editor-screen-header .button { padding:7px 8px; font-size:.68rem; }
   .editor-screen-header #drillDetailsBtn { font-size:0; width:40px; }
   .editor-screen-header #drillDetailsBtn::before { content:"✎"; font-size:1rem; }
   .editor-screen-header #aiDrillBtn,.editor-screen-header #editorShareBtn { font-size:0; width:40px; min-width:40px; }
   .editor-screen-header #aiDrillBtn::before { content:"✨"; font-size:1rem; }
   .editor-screen-header #editorShareBtn::before { content:"↗"; font-size:1rem; }
-  .editor-workspace { height:calc(100% - 62px); display:block; position:relative; }
+  .editor-workspace { height:auto; min-height:0; display:block; position:relative; }
   .editor-workspace .canvas-shell { height:100%; grid-template-rows:44px 1fr; }
   .canvas-toolbar { grid-template-columns:auto minmax(0,1fr) auto; padding:4px 7px; }
   .canvas-toolbar #modeText { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.64rem; }

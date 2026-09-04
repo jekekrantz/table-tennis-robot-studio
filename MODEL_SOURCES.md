@@ -36,8 +36,11 @@ baseline.
 
 ## Ball-table contact model
 
-The shot-creation and drill-editor previews continue past a first on-table
-landing using Section III-C, equations (6)-(20), of Conti et al.:
+The shot/serve creation and drill-editor previews continue past a first on-table
+landing using Section III-C, equations (6)-(20), of Conti et al. Serve previews
+apply the contact model again at the receiver's first bounce and therefore show
+three free-flight segments. The first post-contact flight evaluates net crossing
+and the legal receiver-side contact:
 
 - instantaneous point contact with sliding/rolling regimes;
 - dynamic friction coefficient 0.25 and thin-shell inertia ratio 3/2;
@@ -107,8 +110,10 @@ Guided calibration uses the fixed pivot-chain release point, distance/incidence-
 - The launch state still depends on the current Nova speed/spin calibration.
 - Physical head orientation is not yet converted to a fully verified 3D spin axis.
 - Spin is held constant during free flight.
-- The bounce model does not change first-landing prediction, tuning, or guided
-  calibration; it is currently used only by shot/drill trajectory previews.
+- The bounce model does not change ordinary-shot first-landing prediction or
+  guided calibration. Serve preview, validation, and variation use the
+  post-contact net crossing and receiver-side first bounce; display then applies
+  the model once more for the receiver-side second-bounce arc.
 - Robot alignment, ball wear and wheel contamination still require empirical
   calibration and safety margins.
 

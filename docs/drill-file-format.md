@@ -39,16 +39,16 @@ Portable drills use human-readable JSON and are shared by file import/export, UR
 }
 ```
 
-The wrapper requires `format`, `formatVersion`, and a complete `drill`. Import treats the data as untrusted and validates node types, sizes and shot parameter ranges before showing a preview. Imported drills receive a fresh local identity and never silently overwrite existing data.
+The wrapper requires `format`, `formatVersion`, and a complete `drill`. Import treats the data as untrusted and validates node types, sizes and ball parameter ranges before showing a preview. Imported drills receive a fresh local identity and never silently overwrite existing data.
 
-Current shot ranges exposed to portable/AI data are:
+Current Shot and Serve ranges exposed to portable/AI data are:
 
 - `speedMps`: 1..20
 - `spinRps`: -120..120
 - `elevationDeg`: -20..45
 - `aimDeg`: -60..60
 
-Version 1 allows the same current graph node types as the app (`shot`, `random`, `drill`, `counter`) and caps payload/node/edge sizes to avoid pathological imports. Unknown optional wrapper metadata can be ignored, but unsupported `formatVersion` values fail with a controlled error.
+Version 1 allows the same current graph node types as the app (`shot`, `serve`, `random`, `drill`, `counter`) and caps payload/node/edge sizes to avoid pathological imports. A `serve` uses the same semantic launch parameters as a `shot`, while the app validates and previews its required robot-side bounce, net crossing, and player-side bounce. Unknown optional wrapper metadata can be ignored, but unsupported `formatVersion` values fail with a controlled error.
 
 Shot `variation` is optional. Placement values are half-widths around the nominal modeled landing point. Clearance is measured from the top of the physical net to the bottom of the ball. Speed and spin ranges are physical launch values. Imported variation ranges are validated before the drill preview is shown.
 

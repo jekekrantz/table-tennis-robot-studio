@@ -26,3 +26,5 @@ Built-in drills are read-only. Manual Edit and AI Apply both prompt/create a per
 ## External AI request behavior
 
 The generated request tells the external assistant to use ordinary table-tennis semantics, make sensible assumptions, avoid raw motor/protocol values, preserve unspecified behavior during edits, and return one complete `table-tennis-robot-studio/drill` wrapper. The importer tolerates harmless prose or fenced JSON around the final object, but the object must still pass local validation.
+
+Serve requests use the dedicated `serve` node type rather than approximating a serve as a normal shot. Both the local helper and generated external request use the validated serve-oriented default and preserve Serve nodes during edits.

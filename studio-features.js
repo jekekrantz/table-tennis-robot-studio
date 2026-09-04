@@ -71,7 +71,8 @@
   function openShareDialog() {
     try {
       const portable = portableForActive(); const d = portable.drill;
-      $('shareSummary').innerHTML = `<strong>${escapeHtml(portable.name)}</strong><span>${d.nodes.filter(n => n.type === 'shot').length} shot nodes · ${d.nodes.length} total nodes</span>`;
+      const balls=d.nodes.filter(n=>n.type==='shot'||n.type==='serve'); const serves=balls.filter(n=>n.type==='serve');
+      $('shareSummary').innerHTML = `<strong>${escapeHtml(portable.name)}</strong><span>${balls.length} ball nodes${serves.length?` · ${serves.length} serves`:''} · ${d.nodes.length} total nodes</span>`;
       $('shareNativeBtn').hidden = typeof navigator.share !== 'function';
       $('shareStatus').textContent = 'Links use the URL fragment, so the drill payload is not normally sent to the web server.';
       showDialog(shareDialog);
@@ -95,7 +96,7 @@
     const check = Core.validatePortableDrill(portable); if (!check.valid) throw new Error(check.errors[0]);
     pendingPortable = portable; pendingPortableSource = source;
     const d = portable.drill; $('portableImportName').textContent = portable.name; $('portableImportDescription').textContent = portable.description || 'Portable Table Tennis Robot Studio drill.';
-    $('portableImportStats').innerHTML = `<span>${d.nodes.filter(n => n.type === 'shot').length} shots</span><span>${d.nodes.length} nodes</span><span>${d.settings?.repetitions <= 0 ? '∞' : d.settings?.repetitions ?? 1} repetitions</span>`;
+    $('portableImportStats').innerHTML = `<span>${d.nodes.filter(n => n.type === 'shot'||n.type === 'serve').length} balls</span><span>${d.nodes.filter(n => n.type === 'serve').length} serves</span><span>${d.nodes.length} nodes</span><span>${d.settings?.repetitions <= 0 ? '∞' : d.settings?.repetitions ?? 1} repetitions</span>`;
     showDialog(importDialog);
   }
   $('portableImportConfirmBtn').addEventListener('click', () => {
@@ -140,7 +141,7 @@
   const aiImportInput = h('input', { type: 'file', accept: '.ttdrill,.json,application/json', hidden: true }); document.body.appendChild(aiImportInput);
 
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function newShot(id, label, params, x, y) { return { id, type: 'shot', label, x, y, params: { speedMps: clamp(params.speedMps, 1, 20), spinRps: clamp(params.spinRps, -120, 120), elevationDeg: clamp(params.elevationDeg, -20, 45), aimDeg: clamp(params.aimDeg, -60, 60) } }; }
+  function newShot(id, label, params, x, y) { return { id, type: params.type==='serve'?'serve':'shot', label, x, y, params: { speedMps: clamp(params.speedMps, 1, 20), spinRps: clamp(params.spinRps, -120, 120), elevationDeg: clamp(params.elevationDeg, -20, 45), aimDeg: clamp(params.aimDeg, -60, 60) } }; }
   function makeLinearDrill(name, description, shots, delay = 0.9) {
     const nodes = shots.map((s, i) => newShot(`shot-${Date.now()}-${i}`, s.label || `Ball ${i+1}`, s, 260 + i*270, 260));
     const edges = nodes.slice(0,-1).map((n,i) => ({ id:`edge-${Date.now()}-${i}`, source:n.id, sourceSlot:'next', target:nodes[i+1].id, weight:1, delaySeconds:delay }));
@@ -153,12 +154,19 @@
     let drill = current && !asksForFreshDrill ? clone(current) : null;
     const summary=[];
     if (!drill) {
-      if (p.includes('falkenberg')) { drill = makeLinearDrill('Falkenberg practice','Classic movement pattern: backhand, forehand from backhand corner, wide forehand.',[{label:'Backhand',speedMps:7.0,spinRps:20,elevationDeg:9,aimDeg:-10},{label:'Forehand from BH corner',speedMps:7.2,spinRps:22,elevationDeg:9,aimDeg:-4},{label:'Wide forehand',speedMps:7.5,spinRps:22,elevationDeg:8.5,aimDeg:14}],0.9); summary.push('Created a three-ball Falkenberg-style footwork pattern.'); }
+      if (p.includes('serve')) { drill = makeLinearDrill('Serve practice','Serve feed with three rendered arcs: server bounce, receiver first bounce, then receiver second bounce or the display limit.',[{type:'serve',label:'Serve',speedMps:5.0,spinRps:-8,elevationDeg:-16,aimDeg:0}],1); summary.push('Created a serve practice drill with a dedicated Serve node.'); }
+      else if (p.includes('falkenberg')) { drill = makeLinearDrill('Falkenberg practice','Classic movement pattern: backhand, forehand from backhand corner, wide forehand.',[{label:'Backhand',speedMps:7.0,spinRps:20,elevationDeg:9,aimDeg:-10},{label:'Forehand from BH corner',speedMps:7.2,spinRps:22,elevationDeg:9,aimDeg:-4},{label:'Wide forehand',speedMps:7.5,spinRps:22,elevationDeg:8.5,aimDeg:14}],0.9); summary.push('Created a three-ball Falkenberg-style footwork pattern.'); }
       else if (p.includes('backspin') || p.includes('underspin') || p.includes('opening')) { drill = makeLinearDrill('Backspin opening practice','Start against underspin, then recover to a topspin ball.',[{label:'Underspin',speedMps:5.0,spinRps:-22,elevationDeg:13,aimDeg:-4},{label:'Underspin variation',speedMps:5.2,spinRps:-18,elevationDeg:12.5,aimDeg:6},{label:'Recovery topspin',speedMps:7.0,spinRps:20,elevationDeg:9,aimDeg:0}],1.05); summary.push('Created an opening drill with two underspin feeds and a recovery topspin.'); }
       else if (p.includes('warm') || p.includes('alternate')) { drill = makeLinearDrill('Alternating warm-up','Comfortable alternating forehand/backhand warm-up.',[{label:'Backhand',speedMps:5.8,spinRps:8,elevationDeg:10.5,aimDeg:-8},{label:'Forehand',speedMps:5.8,spinRps:8,elevationDeg:10.5,aimDeg:8}],1.05); drill.settings.repetitions=0; summary.push('Created an indefinitely repeating two-point warm-up.'); }
       else { drill = makeLinearDrill('Two-point consistency','A simple controllable forehand/backhand consistency drill.',[{label:'Backhand',speedMps:6.2,spinRps:12,elevationDeg:10,aimDeg:-8},{label:'Forehand',speedMps:6.2,spinRps:12,elevationDeg:10,aimDeg:8}],1); summary.push('Created a balanced two-point starting drill.'); }
     }
-    const shots = drill.nodes.filter(n => n.type === 'shot');
+    if (current && /\badd\b.*\bserve\b/.test(p) && !drill.nodes.some(n=>n.type==='serve')) {
+      const id=`serve-${Date.now()}`; const serve=newShot(id,'Serve',{type:'serve',speedMps:5,spinRps:-8,elevationDeg:-16,aimDeg:0},260+drill.nodes.length*270,260);
+      const terminal=drill.nodes.find(n=>['shot','serve','drill'].includes(n.type)&&!drill.edges.some(e=>e.source===n.id)); drill.nodes.push(serve);
+      if(terminal)drill.edges.push({id:`edge-${Date.now()}-serve`,source:terminal.id,sourceSlot:'next',target:id,weight:1,delaySeconds:1});
+      if(!drill.startNodeId)drill.startNodeId=id; summary.push('Added a dedicated Serve node.');
+    }
+    const shots = drill.nodes.filter(n => n.type === 'shot' || n.type === 'serve');
     const pct = p.match(/(\d+(?:\.\d+)?)\s*%\s*(?:faster|more speed)/);
     if (pct) { const factor=1+Number(pct[1])/100; shots.forEach(n=>n.params.speedMps=clamp(n.params.speedMps*factor,1,20)); summary.push(`Increased ball speed by ${pct[1]}%.`); }
     if (p.includes('slower')) { shots.forEach(n=>n.params.speedMps=clamp(n.params.speedMps*.9,1,20)); summary.push('Reduced ball speed by about 10%.'); }
@@ -179,7 +187,7 @@
     aiState.proposalIntent=intent || (api.getActiveDrill() ? 'edit' : 'create');
     $('aiProposalSummary').textContent=summary||`Ready to ${aiState.proposalIntent === 'create' ? 'create' : 'update'} “${portable.name}”.`;
     $('aiApplyBtn').textContent=aiState.proposalIntent === 'create' ? 'Create drill' : 'Apply changes';
-    const shots=portable.drill.nodes.filter(n=>n.type==='shot'); $('aiProposalDetails').innerHTML=`<div><strong>${escapeHtml(portable.name)}</strong><span>${shots.length} shot nodes · ${portable.drill.edges.length} connections</span></div><ul>${shots.slice(0,6).map(s=>`<li>${escapeHtml(s.label)} · ${s.params.speedMps.toFixed(1)} m/s · ${s.params.spinRps.toFixed(0)} rps · aim ${s.params.aimDeg.toFixed(1)}°</li>`).join('')}</ul>`;
+    const shots=portable.drill.nodes.filter(n=>n.type==='shot'||n.type==='serve'); const serves=shots.filter(n=>n.type==='serve'); $('aiProposalDetails').innerHTML=`<div><strong>${escapeHtml(portable.name)}</strong><span>${shots.length} ball nodes${serves.length?` · ${serves.length} serves`:''} · ${portable.drill.edges.length} connections</span></div><ul>${shots.slice(0,6).map(s=>`<li>${escapeHtml(s.label)} · ${s.type==='serve'?'serve · ':''}${s.params.speedMps.toFixed(1)} m/s · ${s.params.spinRps.toFixed(0)} rps · aim ${s.params.aimDeg.toFixed(1)}°</li>`).join('')}</ul>`;
     $('aiProposal').hidden=false; $('aiStatus').textContent='Proposal passed local structure and range validation.';
   }
   function openAiDialog() { aiState.proposalIntent='edit'; $('aiDrillPrompt').value=''; $('aiProposal').hidden=true; $('aiApplyBtn').textContent='Apply changes'; $('aiStatus').textContent=api.isActiveBuiltIn()?'This is a built-in drill. Ask for a change to copy it first, or explicitly ask for a new drill.':'Describe what you want to create or change.'; showDialog(aiDialog); }

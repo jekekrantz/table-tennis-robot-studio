@@ -5,6 +5,12 @@ const Advisors=require('./debug-advisor.js');
 const drill={id:'d1',name:'Round trip',description:'test',tags:['x'],robotPoseReference:'base_back',robotPose:{x:0,y:0,yawDeg:0},startNodeId:'s1',settings:{repetitions:3,delayBetweenSets:1},nodes:[{id:'s1',type:'shot',label:'Ball',x:300,y:260,params:{speedMps:6,spinRps:10,elevationDeg:10,aimDeg:0}}],edges:[]};
 const portable=Core.makePortableDrill(drill,{createdAt:'2026-08-30T00:00:00Z'});
 assert(Core.validatePortableDrill(portable).valid);
+const serve=Core.makePortableDrill({...drill,startNodeId:'v1',nodes:[{id:'v1',type:'serve',label:'Serve',x:300,y:260,params:{speedMps:5,spinRps:-8,elevationDeg:-16,aimDeg:0}}]});
+assert(Core.validatePortableDrill(serve).valid);
+assert.strictEqual(Core.deserializePortableDrill(Core.serializePortableDrill(serve)).drill.nodes[0].type,'serve');
+const serveAiRequest=Core.buildExternalAiRequest({userRequest:'make a serve drill'});
+assert(serveAiRequest.includes('"type":"serve"'));
+assert(serveAiRequest.includes('"elevationDeg":-16'));
 const varied=Core.makePortableDrill({...drill,nodes:[{...drill.nodes[0],variation:{enabled:true,placement:{depthCm:15,lateralCm:20},clearance:{minCm:8,maxCm:12},speed:{minMps:5.4,maxMps:6.8},spin:{minRps:4,maxRps:16}}}]});
 assert(Core.validatePortableDrill(varied).valid);
 const invalidVariation=JSON.parse(JSON.stringify(varied));invalidVariation.drill.nodes[0].variation.speed={minMps:9,maxMps:4};
@@ -25,4 +31,4 @@ const events=Array.from({length:400},(_,i)=>({kind:'tx',message:String(i)}));eve
 assert(Core.validateAdvisorResponse({type:'ask_user',question:'x'}).valid);
 assert(!Core.validateAdvisorResponse({type:'eval_js',code:'alert(1)'}).valid);
 const local=new Advisors.LocalGuidedAdvisor(pack);assert.strictEqual(local.next({currentTestId:null}).type,'propose_test');
-console.log('PASS sharing/AI/debugger feature logic');
+console.log('PASS sharing/AI/serve/debugger feature logic');

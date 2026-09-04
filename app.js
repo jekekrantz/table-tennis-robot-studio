@@ -74,6 +74,7 @@
     moveDrillSaveBtn: $("moveDrillSaveBtn"),
     drillNameInput: $("drillNameInput"),
     addShotBtn: $("addShotBtn"),
+    addServeBtn: $("addServeBtn"),
     addRandomBtn: $("addRandomBtn"),
     addDrillNodeBtn: $("addDrillNodeBtn"),
     addCounterBtn: $("addCounterBtn"),
@@ -591,11 +592,19 @@
     return `${clean} ${i}`;
   }
 
+  function isBallNodeType(type) {
+    return type === "shot" || type === "serve";
+  }
+
+  function isBallNode(node) {
+    return isBallNodeType(node?.type);
+  }
+
   function uniqueShotName(drill, base = "Shot", excludeId = null) {
     const clean = String(base || "Shot").trim() || "Shot";
     const used = new Set(
       drill.nodes
-        .filter(node => node.type === "shot" && node.id !== excludeId)
+        .filter(node => isBallNode(node) && node.id !== excludeId)
         .map(node => node.label.toLowerCase())
     );
     if (!used.has(clean.toLowerCase())) return clean;
@@ -616,6 +625,17 @@
     };
   }
 
+  function makeServe(drill, label = "Serve") {
+    return {
+      id: makeId("serve"),
+      type: "serve",
+      label: uniqueShotName(drill, label),
+      x: 300,
+      y: 260,
+      params: { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 },
+    };
+  }
+
   function makeRandom(label = "Weighted random") {
     return { id: makeId("random"), type: "random", label, x: 300, y: 260 };
   }
@@ -628,7 +648,7 @@
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  const DEFAULT_LIBRARY_VERSION = 6;
+  const DEFAULT_LIBRARY_VERSION = 7;
 
   const DEFAULT_VARIATION_PROFILES = Object.freeze({
     neutral: Object.freeze({ depthCm: 10, lateralCm: 12, clearanceDeltaCm: 2, speedDeltaMps: .5, spinDeltaRps: 2 }),
@@ -638,6 +658,8 @@
     deep: Object.freeze({ depthCm: 7, lateralCm: 7, clearanceDeltaCm: 1.5, speedDeltaMps: .5, spinDeltaRps: 5 }),
     spin: Object.freeze({ depthCm: 10, lateralCm: 10, clearanceDeltaCm: 2, speedDeltaMps: .55, spinDeltaRps: 8 }),
     fast: Object.freeze({ depthCm: 6, lateralCm: 7, clearanceDeltaCm: 1.5, speedDeltaMps: .45, spinDeltaRps: 4 }),
+    serveShort: Object.freeze({ depthCm: 4, lateralCm: 4, clearanceDeltaCm: .8, speedDeltaMps: .18, spinDeltaRps: 2 }),
+    serveFast: Object.freeze({ depthCm: 5, lateralCm: 5, clearanceDeltaCm: 1, speedDeltaMps: .25, spinDeltaRps: 3 }),
   });
 
   // Re-solved for the fixed pivot-chain release geometry with the back of the base
@@ -753,6 +775,41 @@
     },
   });
 
+  // These serve presets are modeled from release through both table contacts.
+  // The names describe only spin axes the current robot/flight model can express.
+  const DEFAULT_SERVE_PRESETS = Object.freeze({
+    shortBackspinBackhand: {
+      label: "Short backspin to backhand",
+      variationProfile: "serveShort",
+      params: { speedMps: 4.6, spinRps: -18, elevationDeg: -16, aimDeg: -8 },
+      target: { firstXM: .89, firstYM: -.09, secondXM: 2.05, secondYM: -.25, thirdXM: 2.62, thirdYM: -.34, netClearanceCm: 4.1 },
+    },
+    shortBackspinForehand: {
+      label: "Short backspin to forehand",
+      variationProfile: "serveShort",
+      params: { speedMps: 4.6, spinRps: -18, elevationDeg: -16, aimDeg: 8 },
+      target: { firstXM: .89, firstYM: .09, secondXM: 2.05, secondYM: .25, thirdXM: 2.62, thirdYM: .34, netClearanceCm: 4.1 },
+    },
+    shortNoSpinMiddle: {
+      label: "Short no-spin to middle",
+      variationProfile: "serveShort",
+      params: { speedMps: 4.6, spinRps: 0, elevationDeg: -16, aimDeg: 0 },
+      target: { firstXM: .87, firstYM: 0, secondXM: 1.97, secondYM: 0, thirdXM: 2.69, thirdYM: 0, netClearanceCm: 4.7 },
+    },
+    fastLongTopspinBackhand: {
+      label: "Fast long topspin to backhand",
+      variationProfile: "serveFast",
+      params: { speedMps: 6.2, spinRps: 12, elevationDeg: -18, aimDeg: -8 },
+      target: { firstXM: .86, firstYM: -.09, secondXM: 2.45, secondYM: -.31, thirdClipped: true, netClearanceCm: 7.5 },
+    },
+    fastLongTopspinForehand: {
+      label: "Fast long topspin to forehand",
+      variationProfile: "serveFast",
+      params: { speedMps: 6.2, spinRps: 12, elevationDeg: -18, aimDeg: 8 },
+      target: { firstXM: .86, firstYM: .09, secondXM: 2.45, secondYM: .31, thirdClipped: true, netClearanceCm: 7.5 },
+    },
+  });
+
   function variationForPreset(preset) {
     const profile = DEFAULT_VARIATION_PROFILES[preset.variationProfile];
     if (!profile) return null;
@@ -787,6 +844,15 @@
     const shot = presetShot(drill, key, label);
     shot.variation = variationForPreset(DEFAULT_SHOT_PRESETS[key]);
     return shot;
+  }
+
+  function presetServe(drill, key, label = null, varied = false) {
+    const preset = DEFAULT_SERVE_PRESETS[key];
+    if (!preset) throw new Error(`Unknown built-in serve preset ${key}`);
+    const serve = makeServe(drill, label || preset.label);
+    serve.params = { ...preset.params };
+    if (varied) serve.variation = variationForPreset(preset);
+    return serve;
   }
 
   function layoutSequence(nodes) {
@@ -1017,6 +1083,109 @@
     return drill;
   }
 
+  function singleServeDrill(name, presetKey, { repetitions = 24, intervalSeconds = 1.15, varied = false } = {}) {
+    const drill = defaultDrill(name);
+    drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
+    const serve = presetServe(drill, presetKey, null, varied);
+    serve.x = 180; serve.y = 300;
+    drill.nodes.push(serve);
+    drill.startNodeId = serve.id;
+    return drill;
+  }
+
+  function serveFollowUpDrill(name, serveKey, shotKeys, {
+    serveLabel = null,
+    shotLabels = [],
+    repetitions = 12,
+    receiveSeconds = 1.05,
+    rallySeconds = .8,
+    varied = true,
+  } = {}) {
+    const drill = defaultDrill(name);
+    drill.settings = { repetitions, delayBetweenSets: receiveSeconds };
+    const serve = presetServe(drill, serveKey, serveLabel, varied);
+    const shots = shotKeys.map((key, index) => (varied ? variedPresetShot : presetShot)(drill, key, shotLabels[index] || null));
+    const nodes = [serve, ...shots];
+    layoutSequence(nodes);
+    drill.nodes.push(...nodes);
+    drill.startNodeId = serve.id;
+    nodes.slice(0, -1).forEach((node, index) => {
+      drill.edges.push({
+        id: makeId("edge"), source: node.id, sourceSlot: "next", target: nodes[index + 1].id,
+        weight: 1, delaySeconds: index === 0 ? receiveSeconds : rallySeconds,
+      });
+    });
+    return drill;
+  }
+
+  function randomServeDrill(name, choices, {
+    repetitions = 24,
+    intervalSeconds = 1.15,
+    randomLabel = "Read the serve",
+  } = {}) {
+    const drill = defaultDrill(name);
+    drill.settings = { repetitions, delayBetweenSets: intervalSeconds };
+    const random = makeRandom(randomLabel);
+    random.x = 140; random.y = 330;
+    drill.nodes.push(random);
+    drill.startNodeId = random.id;
+    choices.forEach((choice, index) => {
+      const serve = presetServe(drill, choice.key, choice.label || null, true);
+      serve.x = 520; serve.y = 90 + index * 220;
+      drill.nodes.push(serve);
+      drill.edges.push({
+        id: makeId("edge"), source: random.id, sourceSlot: "branch", target: serve.id,
+        weight: choice.weight ?? 1, delaySeconds: 0,
+      });
+    });
+    return drill;
+  }
+
+  function mixedServeThirdBallDrill() {
+    const drill = defaultDrill("Serve receive: Mixed serve + random third ball");
+    drill.settings = { repetitions: 15, delayBetweenSets: 1.05 };
+    const serveChoice = makeRandom("Choose serve family");
+    serveChoice.x = 100; serveChoice.y = 330;
+    const serves = [
+      presetServe(drill, "shortBackspinBackhand", "Short backspin · backhand", true),
+      presetServe(drill, "shortNoSpinMiddle", "Short no-spin · middle", true),
+      presetServe(drill, "fastLongTopspinBackhand", "Fast long topspin · backhand", true),
+    ];
+    serves.forEach((serve, index) => { serve.x = 430; serve.y = 80 + index * 245; });
+    const thirdBall = makeRandom("Third ball placement");
+    thirdBall.x = 770; thirdBall.y = 330;
+    const shots = [
+      variedPresetShot(drill, "topspinBackhand", "Third ball · backhand"),
+      variedPresetShot(drill, "topspinElbow", "Third ball · elbow"),
+      variedPresetShot(drill, "topspinForehand", "Third ball · forehand"),
+    ];
+    shots.forEach((shot, index) => { shot.x = 1110; shot.y = 80 + index * 245; });
+    drill.nodes.push(serveChoice, ...serves, thirdBall, ...shots);
+    drill.startNodeId = serveChoice.id;
+    drill.edges.push(
+      ...serves.map((serve, index) => ({ id: makeId("edge"), source: serveChoice.id, sourceSlot: "branch", target: serve.id, weight: [3,2,2][index], delaySeconds: 0 })),
+      ...serves.map(serve => ({ id: makeId("edge"), source: serve.id, sourceSlot: "next", target: thirdBall.id, weight: 1, delaySeconds: 1.05 })),
+      ...shots.map((shot, index) => ({ id: makeId("edge"), source: thirdBall.id, sourceSlot: "branch", target: shot.id, weight: [3,2,3][index], delaySeconds: 0 })),
+    );
+    return drill;
+  }
+
+  function serveCombinationDrill(patterns) {
+    const drill = defaultDrill("Serve receive: Combination mix");
+    drill.settings = { repetitions: 12, delayBetweenSets: 1.15 };
+    const random = makeRandom("Choose a serve + follow-up pattern");
+    random.x = 130; random.y = 330;
+    drill.nodes.push(random);
+    drill.startNodeId = random.id;
+    patterns.forEach((entry, index) => {
+      const node = makeDrillNode(entry.label, entry.drill.id);
+      node.x = 540; node.y = 100 + index * 210;
+      drill.nodes.push(node);
+      drill.edges.push({ id: makeId("edge"), source: random.id, sourceSlot: "branch", target: node.id, weight: entry.weight ?? 1, delaySeconds: 0 });
+    });
+    return drill;
+  }
+
   function makeSampleLibrary() {
     // Common coaching patterns: alternating FH/BH, 2-2, Falkenberg/two-one,
     // systematic side-to-side footwork, semi-random placement, and three-spot
@@ -1108,6 +1277,40 @@
       { drill: weightedRally, label: "Weighted rally", weight: 4 },
     ]);
 
+    const serveShortBackhand = singleServeDrill("Serve: Short backspin to backhand", "shortBackspinBackhand", { varied: true });
+    const serveShortForehand = singleServeDrill("Serve: Short backspin to forehand", "shortBackspinForehand", { varied: true });
+    const serveNoSpin = singleServeDrill("Serve: Short no-spin to middle", "shortNoSpinMiddle", { varied: true });
+    const serveFastLong = singleServeDrill("Serve: Fast long topspin to backhand", "fastLongTopspinBackhand", { repetitions: 20, intervalSeconds: 1.05, varied: true });
+    const backspinThirdBall = serveFollowUpDrill(
+      "Serve receive: Short backspin → third-ball attack",
+      "shortBackspinBackhand",
+      ["topspinElbow", "deepTopspinForehand"],
+      { serveLabel: "Short backspin serve", shotLabels: ["Third ball to elbow", "Follow wide forehand"] }
+    );
+    const fastLongPressure = serveFollowUpDrill(
+      "Serve receive: Fast long → backhand pressure",
+      "fastLongTopspinBackhand",
+      ["topspinBackhand", "topspinElbow"],
+      { serveLabel: "Fast long serve", shotLabels: ["Backhand pressure", "Switch to elbow"], receiveSeconds: .95 }
+    );
+    const spinRecognition = randomServeDrill("Serve receive: Backspin / no-spin recognition", [
+      { key: "shortBackspinBackhand", label: "Short backspin", weight: 1 },
+      { key: "shortNoSpinMiddle", label: "Short no-spin", weight: 1 },
+    ], { randomLabel: "Read backspin or no-spin" });
+    const lengthRecognition = randomServeDrill("Serve receive: Short or fast-long random", [
+      { key: "shortBackspinForehand", label: "Short backspin · forehand", weight: 2 },
+      { key: "shortNoSpinMiddle", label: "Short no-spin · middle", weight: 2 },
+      { key: "fastLongTopspinBackhand", label: "Fast long topspin · backhand", weight: 1 },
+      { key: "fastLongTopspinForehand", label: "Fast long topspin · forehand", weight: 1 },
+    ], { randomLabel: "Read length, spin and placement" });
+    const mixedServeThirdBall = mixedServeThirdBallDrill();
+    const serveCombination = serveCombinationDrill([
+      { drill: backspinThirdBall, label: "Backspin + third ball", weight: 3 },
+      { drill: fastLongPressure, label: "Fast long + pressure", weight: 2 },
+      { drill: spinRecognition, label: "Backspin / no-spin", weight: 2 },
+      { drill: mixedServeThirdBall, label: "Mixed serve + random third ball", weight: 3 },
+    ]);
+
     const shotDrills = [
       singleShotDrill("Shot: No-spin center", "noSpinCenter"),
       singleShotDrill("Shot: Short no-spin", "shortNoSpin", { intervalSeconds: .9 }),
@@ -1145,6 +1348,16 @@
         backhandSwitch,
         weightedRally,
         matchMix,
+        serveShortBackhand,
+        serveShortForehand,
+        serveNoSpin,
+        serveFastLong,
+        backspinThirdBall,
+        fastLongPressure,
+        spinRecognition,
+        lengthRecognition,
+        mixedServeThirdBall,
+        serveCombination,
         ...shotDrills,
       ],
     };
@@ -1153,6 +1366,7 @@
 
   const BUILT_IN_FOLDER_DEFS = Object.freeze([
     { id: "builtin-shots", name: "Shots", parentId: "builtin-root" },
+    { id: "builtin-serve-receive", name: "Serve / receive", parentId: "builtin-root" },
     { id: "builtin-footwork", name: "Footwork", parentId: "builtin-root" },
     { id: "builtin-placement", name: "Placement", parentId: "builtin-root" },
     { id: "builtin-spin", name: "Spin", parentId: "builtin-root" },
@@ -1195,7 +1409,7 @@
   });
 
   function builtInDisplayName(name) {
-    return String(name || "").replace(/^(?:Drill|Shot|Match):\s*/, "");
+    return String(name || "").replace(/^(?:Drill|Shot|Match|Serve receive|Serve):\s*/, "");
   }
 
   function stableBuiltInId(name) {
@@ -1212,13 +1426,17 @@
     const stableIds = new Map(sample.drills.map(drill => [drill.id, stableBuiltInId(drill.name)]));
     const drills = sample.drills.map(drill => {
       drill.id = stableIds.get(drill.id);
-      drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name] || "builtin-random";
+      drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name]
+        || (/^Serve(?: receive)?:/.test(drill.name) ? "builtin-serve-receive" : "builtin-random");
       drill.builtIn = true;
       const folderName = BUILT_IN_FOLDER_DEFS.find(folder => folder.id === drill.libraryFolderId)?.name || "Training";
-      const hasShotVariation = drill.nodes.some(node => node.type === "shot" && node.variation?.enabled);
-      drill.tags = [...new Set([folderName.toLowerCase(), drill.name.startsWith("Match:") ? "match-like" : "training"].filter(Boolean))];
-      drill.description = drill.description || (drill.name.startsWith("Match:")
+      const hasShotVariation = drill.nodes.some(node => isBallNode(node) && node.variation?.enabled);
+      const matchLike = drill.name.startsWith("Match:") || drill.name.startsWith("Serve receive:");
+      drill.tags = [...new Set([folderName.toLowerCase(), matchLike ? "match-like" : "training"].filter(Boolean))];
+      drill.description = drill.description || (matchLike
         ? "Match-like robot pattern with realistic placement, shot and timing variation."
+        : drill.name.startsWith("Serve:")
+          ? "Modeled serve feed with controlled variation through three flight segments."
         : folderName === "Shots"
           ? "Repeatable single-shot feed for technique and calibration-aware practice."
           : hasShotVariation
@@ -1412,7 +1630,7 @@
     drill.id = String(raw?.id || makeId("drill"));
     const rawNodes = Array.isArray(raw?.nodes) ? raw.nodes : [];
     drill.nodes = rawNodes
-      .filter(n => ["shot", "random", "drill", "counter"].includes(n?.type))
+      .filter(n => ["shot", "serve", "random", "drill", "counter"].includes(n?.type))
       .map(n => {
         const common = {
           id: String(n.id || makeId(n.type)),
@@ -1421,7 +1639,7 @@
           x: clamp(n.x, 0, SURFACE_WIDTH - NODE_WIDTH, 200),
           y: clamp(n.y, MIN_NODE_Y, SURFACE_HEIGHT - 200, 200),
         };
-        if (n.type === "shot") {
+        if (isBallNodeType(n.type)) {
           const p = n.params || {};
           common.params = {
             speedMps: clamp(p.speedMps, 1, 20, 8),
@@ -1660,7 +1878,9 @@
     if (!drill) return "Select a drill from the library to start a session.";
     if (drill.description) return drill.description;
     const tags = Array.isArray(drill.tags) && drill.tags.length ? ` · ${drill.tags.join(" · ")}` : "";
-    return `${drill.nodes.filter(node => node.type === "shot").length} shot node${drill.nodes.filter(node => node.type === "shot").length === 1 ? "" : "s"}${tags}`;
+    const ballCount = drill.nodes.filter(isBallNode).length;
+    const serveCount = drill.nodes.filter(node => node.type === "serve").length;
+    return `${ballCount} ball node${ballCount === 1 ? "" : "s"}${serveCount ? ` · ${serveCount} serve${serveCount === 1 ? "" : "s"}` : ""}${tags}`;
   }
 
   function drillPose(drill = activeDrill()) {
@@ -1933,6 +2153,7 @@
 
     els.drillNameInput.disabled = builtIn;
     els.addShotBtn.disabled = builtIn;
+    els.addServeBtn.disabled = builtIn;
     els.addRandomBtn.disabled = builtIn;
     els.addDrillNodeBtn.disabled = builtIn;
     els.addCounterBtn.disabled = builtIn;
@@ -1966,7 +2187,7 @@
   }
 
   function estimatedNodeHeight(drill, node) {
-    if (node.type === "shot") return 222;
+    if (isBallNode(node)) return 222;
     if (node.type === "random") return Math.max(112, 74 + (outgoing(drill, node.id).length + 1) * 27);
     if (node.type === "counter") return 116;
     return 112;
@@ -2139,7 +2360,7 @@
       }
       return { x: pos.x + NODE_WIDTH / 2, y: pos.y + h };
     }
-    if (node.type === "shot" || node.type === "drill") return { x: pos.x + NODE_WIDTH, y: pos.y + h / 2 };
+    if (isBallNode(node) || node.type === "drill") return { x: pos.x + NODE_WIDTH, y: pos.y + h / 2 };
     if (node.type === "counter") {
       const actualSlot = slot || edge?.sourceSlot || "A";
       return { x: pos.x + NODE_WIDTH, y: pos.y + (actualSlot === "A" ? 51 : 86) };
@@ -2231,15 +2452,15 @@
       title.textContent = node.label;
       const kind = document.createElement("span");
       kind.className = "node-kind";
-      kind.textContent = node.type === "shot" ? "Shot" : node.type === "random" ? "Random" : node.type === "drill" ? "Sub-drill" : "Repeater";
+      kind.textContent = node.type === "shot" ? "Shot" : node.type === "serve" ? "Serve" : node.type === "random" ? "Random" : node.type === "drill" ? "Sub-drill" : "Repeater";
       titleRow.append(title, kind);
       body.appendChild(titleRow);
 
       const summary = document.createElement("div");
       summary.className = "node-summary";
-      if (node.type === "shot") {
+      if (isBallNode(node)) {
         const p = node.params;
-        const prediction = predictTrajectory(p, null, { includePostBounce: true });
+        const prediction = predictTrajectory(p, null, trajectoryOptionsForNode(node, true));
         summary.innerHTML = `
           <div class="shot-metrics">
             <span class="shot-metric speed-metric" title="Ball speed"><span class="metric-icon speed-icon" aria-hidden="true"><span class="speed-ball"></span></span><span class="shot-metric-value">${fmt(p.speedMps,1)}</span><span class="shot-metric-unit">m/s</span></span>
@@ -2294,7 +2515,7 @@
   }
 
   function renderOutputPorts(drill, node, article) {
-    if (node.type === "shot" || node.type === "drill") {
+    if (isBallNode(node) || node.type === "drill") {
       const edge = outgoing(drill, node.id)[0] ?? null;
       article.appendChild(makePort(drill, node, edge, "next", false));
       return;
@@ -2897,8 +3118,10 @@
       drill = created;
     }
     let node;
-    if (type === "shot") {
-      node = makeShot(drill, String(draft.label || "Shot"));
+    if (isBallNodeType(type)) {
+      node = type === "serve"
+        ? makeServe(drill, String(draft.label || "Serve"))
+        : makeShot(drill, String(draft.label || "Shot"));
       node.params = {
         speedMps: clamp(draft.speedMps, 1, 20, node.params.speedMps),
         spinRps: clamp(draft.spinRps, -120, 120, node.params.spinRps),
@@ -2952,33 +3175,37 @@
     els.addNodeDialog.showModal();
   }
 
-  function newShotPreviewHtml(params) {
-    const prediction = predictTrajectory(params, null, { includePostBounce: true });
-    return `<div class="new-shot-preview"><div><small>Top view</small>${topTrajectorySvg(prediction, 600, 250)}</div><div><small>Side view</small>${sideTrajectorySvg(prediction, 600, 230)}</div></div>`;
+  function newShotPreviewHtml(params, type = "shot") {
+    const prediction = predictTrajectory(params, null, { includePostBounce: true, serve: type === "serve" });
+    return `${trajectoryLegendHtml(prediction)}<div class="new-shot-preview"><div><small>Top view</small>${topTrajectorySvg(prediction, 600, 250)}</div><div><small>Side view</small>${sideTrajectorySvg(prediction, 600, 230)}</div></div>`;
   }
 
   function openAddNodeConfig(type) {
     addNodeDraftType = type;
     els.addNodeChoicePanel.hidden = true;
     els.addNodeConfigPanel.hidden = false;
-    const titles = { shot: "Add shot", random: "Add random choice", counter: "Add repeat / loop", drill: "Add sub-drill" };
+    const titles = { shot: "Add shot", serve: "Add serve", random: "Add random choice", counter: "Add repeat / loop", drill: "Add sub-drill" };
     els.addNodeDialogTitle.textContent = titles[type] || "Add node";
     els.addNodeDialogSubtitle.textContent = "Set the step, then add it.";
-    if (type === "shot") {
-      const p = { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 };
+    if (isBallNodeType(type)) {
+      const serve = type === "serve";
+      const p = serve
+        ? { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 }
+        : { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 };
       els.addNodeConfigPanel.innerHTML = `
-        <label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Shot"></label>
+        <label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="${serve ? "Serve" : "Shot"}"></label>
+        ${serve ? `<p class="helper">A legal modeled serve must bounce on the robot side, clear the net, then bounce on the player side. The preview continues through the receiver's second bounce.</p>` : ""}
         <div class="shot-parameter-stack">
           <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="-0.1">−</button><span class="input-with-unit"><input id="newShotSpeedField" class="shot-number-input" type="number" inputmode="decimal" min="1" max="20" step="0.01" data-decimals="2" value="${fmt(p.speedMps,2)}"><small>m/s</small></span><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="0.1">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="-1">−</button><span class="input-with-unit"><input id="newShotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.1" data-decimals="1" value="0"><small>rps</small></span><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="1">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="-1">−</button><span class="input-with-unit"><input id="newShotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.1" data-decimals="1" value="${fmt(p.spinRps,1)}"><small>rps</small></span><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="1">+</button></span></label>
           <label class="field shot-parameter-row"><span>Elevation</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotElevationField" data-delta="-0.5">−</button><span class="input-with-unit"><input id="newShotElevationField" class="shot-number-input" type="number" inputmode="decimal" min="-20" max="45" step="0.1" data-decimals="1" value="${fmt(p.elevationDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotElevationField" data-delta="0.5">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="-0.5">−</button><span class="input-with-unit"><input id="newShotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" data-decimals="1" value="0"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="0.5">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="-0.5">−</button><span class="input-with-unit"><input id="newShotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" data-decimals="1" value="${fmt(p.aimDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="0.5">+</button></span></label>
         </div>
-        <div id="newShotPreview">${newShotPreviewHtml(p)}</div>
-        <div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add shot</button></div>`;
+        <div id="newShotPreview">${newShotPreviewHtml(p, type)}</div>
+        <div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add ${serve ? "serve" : "shot"}</button></div>`;
       const refresh = () => {
-        const params = { speedMps: finite($("newShotSpeedField")?.value, p.speedMps), spinRps: finite($("newShotSpinField")?.value, 0), elevationDeg: finite($("newShotElevationField")?.value, 12.5), aimDeg: finite($("newShotAimField")?.value, 0) };
-        $("newShotPreview").innerHTML = newShotPreviewHtml(params);
+        const params = { speedMps: finite($("newShotSpeedField")?.value, p.speedMps), spinRps: finite($("newShotSpinField")?.value, p.spinRps), elevationDeg: finite($("newShotElevationField")?.value, p.elevationDeg), aimDeg: finite($("newShotAimField")?.value, p.aimDeg) };
+        $("newShotPreview").innerHTML = newShotPreviewHtml(params, type);
       };
       ["newShotSpeedField","newShotSpinField","newShotElevationField","newShotAimField"].forEach(id => $(id)?.addEventListener("input", refresh));
       ["newShotSpeedField","newShotSpinField","newShotElevationField","newShotAimField"].forEach(id => $(id)?.addEventListener("change", event => {
@@ -3005,7 +3232,7 @@
     $("cancelCreateNodeBtn")?.addEventListener("click", () => { els.addNodeDialog.close(); });
     $("confirmCreateNodeBtn")?.addEventListener("click", () => {
       const draft = { label: $("newNodeNameField")?.value?.trim() || titles[type] };
-      if (type === "shot") Object.assign(draft, { speedMps: rounded(finite($("newShotSpeedField")?.value, 5.84), 2), spinRps: rounded(finite($("newShotSpinField")?.value, 0), 1), elevationDeg: rounded(finite($("newShotElevationField")?.value, 10.3), 1), aimDeg: rounded(finite($("newShotAimField")?.value, 0), 1) });
+      if (isBallNodeType(type)) Object.assign(draft, { speedMps: rounded(finite($("newShotSpeedField")?.value, type === "serve" ? 5.0 : 5.84), 2), spinRps: rounded(finite($("newShotSpinField")?.value, type === "serve" ? -8 : 0), 1), elevationDeg: rounded(finite($("newShotElevationField")?.value, type === "serve" ? -16 : 10.3), 1), aimDeg: rounded(finite($("newShotAimField")?.value, 0), 1) });
       if (type === "counter") draft.startCount = finite($("newCounterStartField")?.value, 2);
       if (type === "drill") draft.referencedDrillId = $("newReferencedDrillField")?.value || null;
       addNode(type, draft);
@@ -3076,7 +3303,7 @@
   }
 
   function renderNodeInspector(drill, node) {
-    const typeName = node.type === "shot" ? "Single shot" : node.type === "random" ? "Weighted randomization" : node.type === "drill" ? "Reusable sub-drill" : "Repeater";
+    const typeName = node.type === "shot" ? "Single shot" : node.type === "serve" ? "Serve" : node.type === "random" ? "Weighted randomization" : node.type === "drill" ? "Reusable sub-drill" : "Repeater";
     let html = `
       <div class="inspector-heading">
         <div><h2>${escapeHtml(node.label)}</h2><p class="inspector-subtitle">${typeName}</p></div>
@@ -3085,7 +3312,7 @@
       <label class="field"><span>Name</span><input id="nodeNameField" type="text" maxlength="90" value="${attr(node.label)}"></label>
     `;
 
-    if (node.type === "shot") html += shotInspectorHtml(node);
+    if (isBallNode(node)) html += shotInspectorHtml(node);
     else if (node.type === "random") html += randomInspectorHtml(drill, node);
     else if (node.type === "drill") html += drillNodeInspectorHtml(drill, node);
     else html += counterInspectorHtml(drill, node);
@@ -3093,7 +3320,7 @@
     html += incomingHtml(drill, node);
     els.inspectorContent.innerHTML = html;
     bindCommonInspector(drill, node);
-    if (node.type === "shot") bindShotInspector(drill, node);
+    if (isBallNode(node)) bindShotInspector(drill, node);
     else if (node.type === "random") bindRandomInspector(drill, node);
     else if (node.type === "drill") bindDrillNodeInspector(drill, node);
     else bindCounterInspector(drill, node);
@@ -3101,18 +3328,20 @@
 
   function shotInspectorHtml(node) {
     const p = node.params;
-    const prediction = predictTrajectory(p, null, { includePostBounce: true });
+    const serve = node.type === "serve";
+    const prediction = predictTrajectory(p, null, trajectoryOptionsForNode(node, true));
     const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM) : null;
     const nominalClearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
     return `
-      <div class="compact-info-row"><span>Shot parameters</span><details class="info-disclosure"><summary aria-label="About shot parameters">i</summary><div class="info-popover">Negative spin means underspin; positive spin means topspin. Rotations per second describe the ball directly.</div></details></div>
-      ${liveTuningInlineHtml(p)}
+      <div class="compact-info-row"><span>${serve ? "Serve" : "Shot"} parameters</span><details class="info-disclosure"><summary aria-label="About ${serve ? "serve" : "shot"} parameters">i</summary><div class="info-popover">Negative spin means underspin; positive spin means topspin. Rotations per second describe the ball directly.${serve ? " The first bounce must be before the net and the next after it; the preview then follows a third arc to the receiver's second bounce or the display limit." : ""}</div></details></div>
+      ${liveTuningInlineHtml(p, node.type)}
       <div class="shot-parameter-stack">
         <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.1" aria-label="Decrease ball speed by 0.1 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" class="shot-number-input" type="number" inputmode="decimal" min="1" max="20" step="0.01" data-decimals="2" value="${fmt(p.speedMps,2)}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.1" aria-label="Increase ball speed by 0.1 metres per second">+</button></span></label>
         <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-1" aria-label="Decrease ball rotation by 1 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.1" data-decimals="1" value="${fmt(p.spinRps,1)}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="1" aria-label="Increase ball rotation by 1 rotation per second">+</button></span></label>
         <label class="field shot-parameter-row"><span>Elevation</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotElevationField" data-step-delta="-0.5" aria-label="Decrease elevation by 0.5 degrees">−</button><span class="input-with-unit"><input id="shotElevationField" class="shot-number-input" type="number" inputmode="decimal" min="-20" max="45" step="0.1" data-decimals="1" value="${fmt(p.elevationDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-step-target="shotElevationField" data-step-delta="0.5" aria-label="Increase elevation by 0.5 degrees">+</button></span></label>
         <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotAimField" data-step-delta="-0.5" aria-label="Aim 0.5 degrees left">−</button><span class="input-with-unit"><input id="shotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" data-decimals="1" value="${fmt(p.aimDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-step-target="shotAimField" data-step-delta="0.5" aria-label="Aim 0.5 degrees right">+</button></span></label>
       </div>
+      ${trajectoryLegendHtml(prediction)}
       <div class="shot-view-stack">
         <div><p class="helper">Predicted top view</p>${topTrajectorySvg(prediction, 600, 280)}</div>
         <div><p class="helper">Predicted side view</p>${sideTrajectorySvg(prediction, 600, 300)}</div>
@@ -3120,7 +3349,7 @@
       <div class="landing-card">${landingDescription(prediction)}</div>
       ${novaEstimateHtml(p)}
       <details class="shot-variation-section"${variation ? " open" : ""}>
-        <summary><span><strong>Shot variation</strong><small>Sample only physically solved shots</small></span><input id="shotVariationEnabled" type="checkbox"${variation ? " checked" : ""} aria-label="Enable shot variation"></summary>
+        <summary><span><strong>${serve ? "Serve" : "Shot"} variation</strong><small>Sample only physically solved ${serve ? "serves" : "shots"}</small></span><input id="shotVariationEnabled" type="checkbox"${variation ? " checked" : ""} aria-label="Enable ${serve ? "serve" : "shot"} variation"></summary>
         <div class="shot-variation-body">
           <div class="compact-info-row"><span>Variation ranges</span><details class="info-disclosure"><summary aria-label="About shot variation">i</summary><div class="info-popover">Landing and net clearance are sampled as outcomes. Speed, spin, elevation and aim are solved together; impossible samples are skipped instead of pushed to a boundary.</div></details></div>
           <div class="field-grid two">
@@ -3134,7 +3363,7 @@
             <label class="field"><span>Max spin</span><span class="input-with-unit"><input id="variationSpinMaxField" type="number" min="-120" max="120" step="1" value="${variation?.spin.maxRps ?? fmt(Math.min(120,p.spinRps+5),0)}"><small>rps</small></span></label>
           </div>
           <button id="testShotVariationBtn" class="button ghost wide" type="button"${variation ? "" : " disabled"}>Test 12 varied shots</button>
-          <p id="shotVariationTestResult" class="helper" aria-live="polite">${variation ? "Tap Test to measure feasibility and solve time on this device." : "Enable variation to configure and test this shot family."}</p>
+          <p id="shotVariationTestResult" class="helper" aria-live="polite">${variation ? "Tap Test to measure feasibility and solve time on this device." : `Enable variation to configure and test this ${serve ? "serve" : "shot"} family.`}</p>
         </div>
       </details>
       <section class="connection-section">
@@ -3250,8 +3479,8 @@
     });
     $("nodeNameField")?.addEventListener("change", event => {
       const requested = event.target.value.trim() || typeDefaultName(node.type);
-      node.label = node.type === "shot" ? uniqueShotName(drill, requested, node.id) : requested;
-      if (node.type === "shot" && node.label !== requested) toast(`Shot renamed to “${node.label}” to keep names unique.`);
+      node.label = isBallNode(node) ? uniqueShotName(drill, requested, node.id) : requested;
+      if (isBallNode(node) && node.label !== requested) toast(`Ball renamed to “${node.label}” to keep ball names unique.`);
       commit();
     });
     els.inspectorContent.querySelectorAll(".incoming-edge-button").forEach(button => button.addEventListener("click", () => {
@@ -3269,14 +3498,15 @@
       if (!event.target.checked) {
         node.variation = null;
       } else {
-        const prediction = predictTrajectory(node.params);
+        const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
         const clearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
+        const serve = node.type === "serve";
         node.variation = ShotVariation.normalizeVariation({
           enabled: true,
-          placement: { depthCm: 15, lateralCm: 20 },
+          placement: { depthCm: serve ? 4 : 15, lateralCm: serve ? 6 : 20 },
           clearance: { minCm: clearanceCm, maxCm: clearanceCm },
-          speed: { minMps: node.params.speedMps - .6, maxMps: node.params.speedMps + .6 },
-          spin: { minRps: node.params.spinRps - 5, maxRps: node.params.spinRps + 5 },
+          speed: { minMps: node.params.speedMps - (serve ? .25 : .6), maxMps: node.params.speedMps + (serve ? .25 : .6) },
+          spin: { minRps: node.params.spinRps - (serve ? 2 : 5), maxRps: node.params.spinRps + (serve ? 2 : 5) },
         }, node.params, prediction.net?.clearanceM);
       }
       shotVariationCache.clear();
@@ -3427,7 +3657,7 @@
   }
 
   function typeDefaultName(type) {
-    return type === "shot" ? "Shot" : type === "random" ? "Weighted random" : type === "drill" ? "Sub-drill" : "Repeater";
+    return type === "shot" ? "Shot" : type === "serve" ? "Serve" : type === "random" ? "Weighted random" : type === "drill" ? "Sub-drill" : "Repeater";
   }
 
   function validateDrill(drill) {
@@ -3438,11 +3668,15 @@
 
     const seenShotNames = new Set();
     for (const node of drill.nodes) {
-      if (node.type === "shot") {
+      if (isBallNode(node)) {
         const key = node.label.toLowerCase();
-        if (seenShotNames.has(key)) errors.push(`Shot name “${node.label}” is not unique.`);
+        if (seenShotNames.has(key)) errors.push(`Ball name “${node.label}” is not unique.`);
         seenShotNames.add(key);
         if (outgoing(drill, node.id).length > 1) errors.push(`“${node.label}” may have only one outgoing path.`);
+        if (node.type === "serve") {
+          const warning = trajectoryPlanWarning(node.label, predictTrajectory(node.params, null, trajectoryOptionsForNode(node)));
+          if (warning) warnings.push(warning.replace(" The shot will still be sent.", ""));
+        }
       }
       if (node.type === "drill") {
         if (!node.referencedDrillId) errors.push(`“${node.label}” does not reference a drill.`);
@@ -3781,8 +4015,9 @@
     return ratio;
   }
 
-  function simulatePostBounce(landing, impactVelocity, incomingOmega, calibration) {
+  function simulatePostBounce(landing, impactVelocity, incomingOmega, calibration, { trackNet = false } = {}) {
     const table = calibration.table;
+    const netX = table.length / 2;
     const ballRadius = calibration.physics.ballDiameterM / 2;
     const contact = TableBounce.applyTableBounce(impactVelocity, incomingOmega, ballRadius);
     let position = { x: landing.x, y: landing.y, z: ballRadius };
@@ -3792,6 +4027,7 @@
     let step = 0;
     let secondBounce = null;
     let clipped = false;
+    let net = { crossed: false, hit: false, z: null, y: null, clearanceM: null };
     const points = [{ ...position, t: landing.t }];
     const sampleEvery = Math.max(1, Math.round(.018 / calibration.timeStep));
 
@@ -3803,6 +4039,23 @@
       velocity = advanced.velocity;
       elapsed += calibration.timeStep;
       step += 1;
+
+      if (trackNet && !net.crossed && crossedPlane(previous.x, position.x, netX)) {
+        const ratio = (netX - previous.x) / (position.x - previous.x || 1);
+        const crossing = interpolateVector(previous, position, ratio);
+        const clearanceM = crossing.z - ballRadius - table.netHeight;
+        net = {
+          crossed: true,
+          hit: Math.abs(crossing.y) <= table.width / 2 + ballRadius && clearanceM < 0,
+          z: crossing.z,
+          y: crossing.y,
+          clearanceM,
+        };
+        if (net.hit) {
+          points.push({ ...crossing, x: netX, t: landing.t + elapsed - calibration.timeStep + ratio * calibration.timeStep });
+          break;
+        }
+      }
 
       const boundaryRatio = postBounceBoundaryRatio(previous, position, table, .5);
       const outside = position.x < -.5 || position.x > table.length + .5
@@ -3827,7 +4080,12 @@
       if (position.z < -1.2) break;
     }
 
-    return { points, secondBounce, clipped, contact };
+    return { points, secondBounce, clipped, contact, net, omega };
+  }
+
+  function trajectoryOptionsForNode(node, includePostBounce = false) {
+    const serve = node?.type === "serve";
+    return { serve, includePostBounce: includePostBounce || serve };
   }
 
   function predictTrajectory(params, calibration = null, options = {}) {
@@ -3937,19 +4195,50 @@
     else if (net.hit) status = "net";
     else if (onTable) status = "table";
     else if (landing) status = "miss";
-    const postBounce = options.includePostBounce && status === "table" && impactVelocity
-      ? simulatePostBounce(landing, impactVelocity, omega, c)
+    const postBounce = (options.includePostBounce || options.serve) && status === "table" && impactVelocity
+      ? simulatePostBounce(landing, impactVelocity, omega, c, { trackNet: Boolean(options.serve) })
       : null;
+    const firstFlightNet = net;
+    if (options.serve) net = postBounce?.net || { crossed: false, hit: false, z: null, y: null, clearanceM: null };
+    const firstBounceValid = Boolean(onTable && landing.x < netX);
+    const netValid = Boolean(firstBounceValid && !firstFlightNet.crossed && net.crossed && !net.hit);
+    const secondBounceValid = Boolean(
+      postBounce?.secondBounce
+      && postBounce.secondBounce.x >= netX
+      && postBounce.secondBounce.x <= table.length
+      && Math.abs(postBounce.secondBounce.y) <= table.width / 2
+    );
+    const thirdArc = options.serve && secondBounceValid
+      ? simulatePostBounce(postBounce.secondBounce, postBounce.secondBounce.impactVelocity, postBounce.omega, c)
+      : null;
+    const receiverSecondBounceValid = Boolean(
+      thirdArc?.secondBounce
+      && thirdArc.secondBounce.x >= netX
+      && thirdArc.secondBounce.x <= table.length
+      && Math.abs(thirdArc.secondBounce.y) <= table.width / 2
+    );
+    const serve = options.serve ? {
+      valid: firstBounceValid && netValid && secondBounceValid,
+      firstBounceValid,
+      netValid,
+      secondBounceValid,
+      receiverSecondBounceValid,
+      firstFlightCrossedNet: firstFlightNet.crossed,
+    } : null;
     const finalAero = aerodynamicState(velocity, omega, c);
     return {
       points,
       postBouncePoints: postBounce?.points || [],
       secondBounce: postBounce?.secondBounce || null,
       postBounceClipped: Boolean(postBounce?.clipped),
+      thirdArcPoints: thirdArc?.points || [],
+      thirdBounce: thirdArc?.secondBounce || null,
+      thirdArcClipped: Boolean(thirdArc?.clipped),
       landing,
       onTable,
       status,
       net,
+      serve,
       table,
       ballRadius,
       diagnostics: {
@@ -3980,6 +4269,26 @@
 
   function landingDescription(prediction) {
     const clearance = clearanceHtml(prediction);
+    if (prediction.serve) {
+      if (!prediction.landing) return `<strong class="trajectory-miss">Invalid modeled serve</strong> · no first bounce was found.`;
+      const first = prediction.serve.firstBounceValid ? "robot-side first bounce" : "first bounce is not on the robot side";
+      const net = prediction.serve.netValid ? `${fmt(prediction.net.clearanceM * 100,1)} cm net clearance` : prediction.net.hit ? "net contact" : "net not legally crossed after the first bounce";
+      const second = prediction.serve.secondBounceValid
+        ? `receiver-side first bounce at x ${fmt(prediction.secondBounce.x,2)} m, y ${fmt(prediction.secondBounce.y,2)} m`
+        : prediction.secondBounce
+          ? `second table contact is outside the receiver side at x ${fmt(prediction.secondBounce.x,2)} m, y ${fmt(prediction.secondBounce.y,2)} m`
+          : "no receiver-side first bounce";
+      const third = prediction.serve.receiverSecondBounceValid
+        ? `Receiver-side second bounce at x ${fmt(prediction.thirdBounce.x,2)} m, y ${fmt(prediction.thirdBounce.y,2)} m.`
+        : prediction.thirdBounce
+          ? `Receiver-side second bounce would be outside the table at x ${fmt(prediction.thirdBounce.x,2)} m, y ${fmt(prediction.thirdBounce.y,2)} m.`
+          : prediction.thirdArcClipped
+            ? "Third arc continues to the 0.5 m display limit outside the table."
+            : "No receiver-side second bounce is predicted.";
+      const result = prediction.serve.valid ? "Valid modeled serve" : "Invalid modeled serve";
+      const className = prediction.serve.valid ? "trajectory-safe" : "trajectory-miss";
+      return `<strong class="${className}">${result}</strong> · ${first} at x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m.<br>${net} · ${second}.<br><span class="trajectory-third-bounce">${third}</span><br><small>Bounce placement is approximate; the published contact fit used specific balls and table hardware.</small>`;
+    }
     if (prediction.status === "edge") return `<strong class="trajectory-miss">Predicted table-edge contact</strong>.`;
     if (prediction.status === "net") return `<strong class="trajectory-miss">Predicted net contact</strong> · ${clearance}.`;
     if (!prediction.landing) return `<strong class="trajectory-warning">No landing found</strong> · ${clearance}.`;
@@ -3998,6 +4307,11 @@
 
   function trajectoryPlanWarning(label, prediction) {
     if (!prediction) return `“${label}”: the trajectory model could not predict a landing. The shot will still be sent.`;
+    if (prediction.serve && !prediction.serve.valid) {
+      if (!prediction.serve.firstBounceValid) return `“${label}”: modeled first serve bounce is not on the robot side. The shot will still be sent.`;
+      if (!prediction.serve.netValid) return `“${label}”: modeled serve does not legally clear the net after its first bounce. The shot will still be sent.`;
+      return `“${label}”: modeled receiver-side first serve bounce is not on the table. The shot will still be sent.`;
+    }
     if (prediction.status === "net") return `“${label}”: modeled to hit the net. The shot will still be sent.`;
     if (prediction.status === "edge") return `“${label}”: modeled to contact a table edge. The shot will still be sent.`;
     if (!prediction.landing) return `“${label}”: no modeled landing was found. The shot will still be sent.`;
@@ -4024,13 +4338,24 @@
 
   function topBounds(prediction, calibration, margin = .28) {
     const table = calibration.table;
-    const allPoints = prediction.points.concat(prediction.postBouncePoints || []);
+    const allPoints = prediction.points.concat(prediction.postBouncePoints || [], prediction.thirdArcPoints || []);
     const xs = allPoints.map(p => p.x).concat([0, table.length, calibration.pose.x]);
     const ys = allPoints.map(p => p.y).concat([-table.width/2, table.width/2, calibration.pose.y]);
     return { minX: Math.min(...xs) - margin, maxX: Math.max(...xs) + margin, minY: Math.min(...ys) - margin, maxY: Math.max(...ys) + margin };
   }
 
-  const SECOND_BOUNCE_COLOR = "#8bb8ff";
+  const SECOND_BOUNCE_COLOR = "#ff79c6";
+  const THIRD_BOUNCE_COLOR = "#ffd166";
+  const trajectoryColor = prediction => prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
+  function trajectoryLegendHtml(prediction) {
+    if (!prediction?.postBouncePoints?.length) return "";
+    const firstLabel = prediction.serve ? "Server bounce" : "First bounce";
+    const secondLabel = prediction.serve ? "Receiver first bounce" : "Second bounce";
+    const third = prediction.thirdArcPoints?.length
+      ? `<span><i style="--bounce-color:${THIRD_BOUNCE_COLOR}">3</i>Receiver second bounce</span>`
+      : "";
+    return `<div class="trajectory-bounce-legend" aria-label="Trajectory colors"><span><i style="--bounce-color:${trajectoryColor(prediction)}">1</i>${firstLabel}</span><span><i style="--bounce-color:${SECOND_BOUNCE_COLOR}">2</i>${secondLabel}</span>${third}</div>`;
+  }
   const trajectoryPath = (points, tr, verticalAxis = "y") => points.map((point, index) =>
     `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point[verticalAxis]),2)}`
   ).join(" ");
@@ -4039,18 +4364,21 @@
     const c = library.calibration;
     const table = c.table;
     const tr = metricTransform(width, height, topBounds(prediction, c, .24), 18);
-    const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
+    const color = trajectoryColor(prediction);
     const path = trajectoryPath(prediction.points, tr);
     const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr);
+    const thirdArc = trajectoryPath(prediction.thirdArcPoints || [], tr);
     const rx = tr.sx(c.pose.x), ry = tr.sy(c.pose.y);
-    return `<svg class="shot-top-view" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted top view with first and second bounce positions">
+    return `<svg class="shot-top-view" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted top view with all rendered bounce positions">
       <rect x="${tr.sx(0)}" y="${tr.sy(table.width/2)}" width="${tr.sx(table.length)-tr.sx(0)}" height="${tr.sy(-table.width/2)-tr.sy(table.width/2)}" rx="4" fill="#183e58" stroke="#7fa2bb" stroke-width="2"/>
       <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(table.width/2)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(-table.width/2)}" stroke="#d4dbe5" stroke-width="3"/>
-      <path d="${path}" fill="none" stroke="${color}" stroke-width="4"/>
-      ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="4"/>` : ""}
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+      ${thirdArc ? `<path d="${thirdArc}" fill="none" stroke="${THIRD_BOUNCE_COLOR}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
       <circle cx="${rx}" cy="${ry}" r="7" fill="#32bda2" stroke="#d5fff6" stroke-width="2"/>
-      ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="6" fill="${color}"/>` : ""}
-      ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.secondBounce.y)}" r="6" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
+      ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>` : ""}
+      ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.secondBounce.y)}" r="7" fill="${SECOND_BOUNCE_COLOR}" stroke="#fff" stroke-width="2"/>` : ""}
+      ${prediction.thirdBounce ? `<circle cx="${tr.sx(prediction.thirdBounce.x)}" cy="${tr.sy(prediction.thirdBounce.y)}" r="7" fill="${THIRD_BOUNCE_COLOR}" stroke="#fff" stroke-width="2"/>` : ""}
     </svg>`;
   }
 
@@ -4058,7 +4386,7 @@
     const table = calibration.table;
     const xPad = Math.max(.06, table.length * .025);
     const yPad = Math.max(.05, table.width * .035);
-    const postPoints = prediction?.postBouncePoints || [];
+    const postPoints = (prediction?.postBouncePoints || []).concat(prediction?.thirdArcPoints || []);
     const xs = postPoints.map(point => point.x).concat([0, table.length, calibration.pose.x]);
     const ys = postPoints.map(point => point.y).concat([-table.width / 2, table.width / 2, calibration.pose.y]);
     return {
@@ -4075,20 +4403,23 @@
     const width = 188, height = 98;
     const bounds = miniPreviewBounds(c, prediction);
     const tr = metricTransform(width, height, bounds, 3);
-    const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
+    const color = trajectoryColor(prediction);
     const clipId = `mini-top-${Math.random().toString(36).slice(2)}`;
     const path = trajectoryPath(prediction.points, tr);
     const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr);
+    const thirdArc = trajectoryPath(prediction.thirdArcPoints || [], tr);
     return `<svg class="mini-trajectory mini-top-trajectory" viewBox="0 0 ${width} ${height}" aria-label="Predicted top view with bounce positions">
       <defs><clipPath id="${clipId}"><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="5"/></clipPath></defs>
       <g clip-path="url(#${clipId})">
         <rect x="${tr.sx(0)}" y="${tr.sy(table.width/2)}" width="${tr.sx(table.length)-tr.sx(0)}" height="${tr.sy(-table.width/2)-tr.sy(table.width/2)}" fill="#17384e" stroke="#7897ad" stroke-width="1"/>
         <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(table.width/2)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(-table.width/2)}" stroke="#c9d2dc" stroke-width="1.5"/>
-        <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>
-        ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="2"/>` : ""}
+        <path d="${path}" fill="none" stroke="${color}" stroke-width="2.25" stroke-linecap="round"/>
+        ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="3.5" stroke-linecap="round"/>` : ""}
+        ${thirdArc ? `<path d="${thirdArc}" fill="none" stroke="${THIRD_BOUNCE_COLOR}" stroke-width="3.5" stroke-linecap="round"/>` : ""}
         <circle cx="${tr.sx(c.pose.x)}" cy="${tr.sy(c.pose.y)}" r="3.5" fill="#32bda2"/>
-        ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="3" fill="${color}"/>` : ""}
-        ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.secondBounce.y)}" r="3" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
+        ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="4" fill="${color}" stroke="#fff" stroke-width="1"/>` : ""}
+        ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.secondBounce.y)}" r="4" fill="${SECOND_BOUNCE_COLOR}" stroke="#fff" stroke-width="1"/>` : ""}
+        ${prediction.thirdBounce ? `<circle cx="${tr.sx(prediction.thirdBounce.x)}" cy="${tr.sy(prediction.thirdBounce.y)}" r="4" fill="${THIRD_BOUNCE_COLOR}" stroke="#fff" stroke-width="1"/>` : ""}
       </g>
     </svg>`;
   }
@@ -4103,23 +4434,26 @@
     const visibleMaxZ = Math.max(
       (prediction.points[0]?.z ?? .24) + .05,
       table.netHeight + .06,
-      Math.min(.85, Math.max(...prediction.points.concat(prediction.postBouncePoints || []).map(point => point.z)) + .035)
+      Math.min(.85, Math.max(...prediction.points.concat(prediction.postBouncePoints || [], prediction.thirdArcPoints || []).map(point => point.z)) + .035)
     );
     const bounds = { minX, maxX, minY: -.015, maxY: visibleMaxZ };
     const tr = metricTransform(width, height, bounds, 2);
-    const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
+    const color = trajectoryColor(prediction);
     const clipId = `mini-side-${Math.random().toString(36).slice(2)}`;
     const path = trajectoryPath(prediction.points, tr, "z");
     const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr, "z");
+    const thirdArc = trajectoryPath(prediction.thirdArcPoints || [], tr, "z");
     return `<svg class="mini-trajectory mini-side-trajectory" viewBox="0 0 ${width} ${height}" aria-label="Predicted side view with bounce positions">
       <defs><clipPath id="${clipId}"><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="5"/></clipPath></defs>
       <g clip-path="url(#${clipId})">
         <line x1="${tr.sx(0)}" y1="${tr.sy(0)}" x2="${tr.sx(table.length)}" y2="${tr.sy(0)}" stroke="#7890aa" stroke-width="2"/>
         <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(0)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(table.netHeight)}" stroke="#d2d9e2" stroke-width="1.5"/>
-        <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>
-        ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="2"/>` : ""}
-        ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.ballRadius)}" r="2.5" fill="${color}"/>` : ""}
-        ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="2.5" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
+        <path d="${path}" fill="none" stroke="${color}" stroke-width="2.25" stroke-linecap="round"/>
+        ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="3.5" stroke-linecap="round"/>` : ""}
+        ${thirdArc ? `<path d="${thirdArc}" fill="none" stroke="${THIRD_BOUNCE_COLOR}" stroke-width="3.5" stroke-linecap="round"/>` : ""}
+        ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.ballRadius)}" r="3.5" fill="${color}" stroke="#fff" stroke-width="1"/>` : ""}
+        ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="3.5" fill="${SECOND_BOUNCE_COLOR}" stroke="#fff" stroke-width="1"/>` : ""}
+        ${prediction.thirdBounce ? `<circle cx="${tr.sx(prediction.thirdBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="3.5" fill="${THIRD_BOUNCE_COLOR}" stroke="#fff" stroke-width="1"/>` : ""}
       </g>
     </svg>`;
   }
@@ -4127,25 +4461,28 @@
   function sideTrajectorySvg(prediction, width = 760, height = 330) {
     const c = library.calibration;
     const table = c.table;
-    const allPoints = prediction.points.concat(prediction.postBouncePoints || []);
+    const allPoints = prediction.points.concat(prediction.postBouncePoints || [], prediction.thirdArcPoints || []);
     const xs = allPoints.map(p => p.x).concat([c.pose.x, 0, table.length]);
     const maxZ = Math.max(prediction.points[0]?.z ?? .24, ...allPoints.map(p => p.z), table.netHeight) + .12;
     const bounds = { minX: Math.min(...xs) - .25, maxX: Math.max(...xs) + .25, minY: -.08, maxY: maxZ };
     const tr = metricTransform(width, height, bounds, 24);
-    const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
+    const color = trajectoryColor(prediction);
     const path = trajectoryPath(prediction.points, tr, "z");
     const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr, "z");
+    const thirdArc = trajectoryPath(prediction.thirdArcPoints || [], tr, "z");
     const surfaceY = tr.sy(0);
     const netHeightLabel = Math.abs(table.netHeight - regulationTable().netHeight) > 1e-6
       ? `<text x="${tr.sx(table.length/2)+8}" y="${tr.sy(table.netHeight)-6}" fill="#d7dee7" font-size="12">${fmt(table.netHeight*100,2)} cm net</text>`
       : "";
-    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Scale-accurate side trajectory with first and second bounce positions">
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Scale-accurate side trajectory with all rendered bounce positions">
       <line x1="${tr.sx(0)}" y1="${surfaceY}" x2="${tr.sx(table.length)}" y2="${surfaceY}" stroke="#7890aa" stroke-width="6"/>
       <line x1="${tr.sx(table.length/2)}" y1="${surfaceY}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(table.netHeight)}" stroke="#d2d9e2" stroke-width="4"/>
-      <path d="${path}" fill="none" stroke="${color}" stroke-width="4"/>
-      ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="4"/>` : ""}
-      ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.ballRadius)}" r="6" fill="${color}"/>` : ""}
-      ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="6" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+      ${thirdArc ? `<path d="${thirdArc}" fill="none" stroke="${THIRD_BOUNCE_COLOR}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+      ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.ballRadius)}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>` : ""}
+      ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="7" fill="${SECOND_BOUNCE_COLOR}" stroke="#fff" stroke-width="2"/>` : ""}
+      ${prediction.thirdBounce ? `<circle cx="${tr.sx(prediction.thirdBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="7" fill="${THIRD_BOUNCE_COLOR}" stroke="#fff" stroke-width="2"/>` : ""}
       ${netHeightLabel}
     </svg>`;
   }
@@ -5728,7 +6065,7 @@
   function calibrationAtPose(pose) {
     return { ...library.calibration, pose: { ...pose } };
   }
-  function adjustedShotForRuntime(baseParams, drillId = activeDrill()?.id) {
+  function adjustedShotForRuntime(baseParams, drillId = activeDrill()?.id, nodeType = "shot") {
     const params = {
       speedMps: finite(baseParams?.speedMps, 8),
       spinRps: finite(baseParams?.spinRps, 0),
@@ -5741,17 +6078,18 @@
     const poseChanged = poseNeedsCompensation(referencePose, currentPose);
     const referenceCalibration = calibrationAtPose(referencePose);
     const currentCalibration = calibrationAtPose(currentPose);
-    const basePrediction = predictTrajectory(params, referenceCalibration);
+    const predictionOptions = { serve: nodeType === "serve" };
+    const basePrediction = predictTrajectory(params, referenceCalibration, predictionOptions);
     if (!liveTrajectoryTuningIsActive() && !poseChanged) {
       return { params, basePrediction, prediction: basePrediction, landingErrorM: 0, clearanceErrorM: 0, targetClearanceM: basePrediction?.net?.clearanceM ?? null, warnings: [], changed: false, feasible: true, evaluations: 0, poseCompensated: false };
     }
-    const cacheKey = JSON.stringify([drillId, params, liveTuning, referencePose, currentPose, library.calibration.nova, library.calibration.physics]);
+    const cacheKey = JSON.stringify([drillId, nodeType, params, liveTuning, referencePose, currentPose, library.calibration.nova, library.calibration.physics]);
     const cached = liveTuningCache.get(cacheKey);
     if (cached) return cached;
     const result = DrillAdjustments.applyShotTuning(
       params,
       liveTuning,
-      candidate => predictTrajectory(candidate, currentCalibration),
+      candidate => predictTrajectory(candidate, currentCalibration, predictionOptions),
       { ...liveTuningOptions(), basePrediction, forceSolve: poseChanged, preserveClearance: poseChanged }
     );
     result.poseCompensated = poseChanged;
@@ -5765,9 +6103,9 @@
     if (!drill) return null;
     if (selection?.kind === "node") {
       const selected = getNode(drill, selection.id);
-      if (selected?.type === "shot") return selected;
+      if (isBallNode(selected)) return selected;
     }
-    return drill.nodes.find(node => node.type === "shot") || null;
+    return drill.nodes.find(isBallNode) || null;
   }
 
   function renderLiveTuning() {
@@ -5804,8 +6142,8 @@
       return;
     }
     els.liveTuningImpactLabel.textContent = `All balls · example: ${shot.label}`;
-    const result = adjustedShotForRuntime(shot.params, drill.id);
-    const base = result.basePrediction || predictTrajectory(shot.params, calibrationAtPose(drillPose(drill)));
+    const result = adjustedShotForRuntime(shot.params, drill.id, shot.type);
+    const base = result.basePrediction || predictTrajectory(shot.params, calibrationAtPose(drillPose(drill)), trajectoryOptionsForNode(shot));
     const tuned = result.prediction || base;
     const baseClearance = base?.net?.clearanceM;
     const tunedClearance = tuned?.net?.clearanceM;
@@ -5859,26 +6197,26 @@
     renderInspector();
   }
 
-  function liveTuningInlineHtml(baseParams) {
+  function liveTuningInlineHtml(baseParams, nodeType = "shot") {
     if (!liveTrajectoryTuningIsActive()) return "";
-    const result = adjustedShotForRuntime(baseParams);
+    const result = adjustedShotForRuntime(baseParams, activeDrill()?.id, nodeType);
     const shift = Number.isFinite(result.landingErrorM) ? `${fmt(result.landingErrorM * 100,1)} cm` : "unknown";
     return `<div class="live-tuning-inline"><strong>Live tuning is active.</strong> Effective shot: ${fmt(result.params.speedMps,2)} m/s · ${signed(result.params.spinRps,1)} rps · ${signed(result.params.elevationDeg,1)}°. Modeled landing shift: ${shift}. Stored values below are unchanged.</div>`;
   }
 
-  function variationEnvironment(drillId, runtime = false) {
+  function variationEnvironment(drillId, runtime = false, nodeType = "shot") {
     const drill = getDrill(drillId) || activeDrill();
     const calibration = calibrationAtPose(runtime ? currentRobotPose() : drillPose(drill));
     return {
       calibration,
-      evaluate: params => predictTrajectory(params, calibration),
+      evaluate: params => predictTrajectory(params, calibration, { serve: nodeType === "serve" }),
     };
   }
 
   function variationCacheEntry(shot, baseParams, runtime = false) {
     if (!shot.variation?.enabled) return null;
-    const environment = variationEnvironment(shot.drillId, runtime);
-    const cacheKey = JSON.stringify([runtime, shot.drillId, shot.nodeId, baseParams, shot.variation, environment.calibration]);
+    const environment = variationEnvironment(shot.drillId, runtime, shot.nodeType || shot.type);
+    const cacheKey = JSON.stringify([runtime, shot.drillId, shot.nodeId, shot.nodeType || shot.type, baseParams, shot.variation, environment.calibration]);
     let entry = shotVariationCache.get(cacheKey);
     if (entry) return entry;
     const prepared = ShotVariation.prepare(baseParams, shot.variation, environment.evaluate);
@@ -5906,7 +6244,7 @@
   function profileShotVariation(node, count = 12) {
     if (!node?.variation?.enabled) return { ok: false, reason: "Shot variation is not enabled." };
     const owner = allDrills().find(drill => drill.nodes.some(candidate => candidate.id === node.id)) || activeDrill();
-    const environment = variationEnvironment(owner?.id);
+    const environment = variationEnvironment(owner?.id, false, node.type);
     const started = performance.now();
     const prepared = ShotVariation.prepare(node.params, node.variation, environment.evaluate);
     if (!prepared.ok) return { ok: false, reason: prepared.reason };
@@ -5968,7 +6306,7 @@
       }
 
       let edge = null;
-      if (node.type === "shot") {
+      if (isBallNode(node)) {
         // Keep the compiled traversal immutable and based on stored drill values.
         // Live tuning is layered over every shot later, when the robot execution
         // plan is built. That makes retuning non-destructive and lets a running
@@ -5977,6 +6315,7 @@
           drillId,
           nodeId: node.id,
           label: node.label,
+          nodeType: node.type,
           params: { ...node.params },
           baseParams: { ...node.params },
           variation: node.variation?.enabled ? structuredClone(node.variation) : null,
@@ -6072,11 +6411,11 @@
       // Pose compensation and every active live modifier share one solve. This
       // avoids order-dependent stacking and uses each sub-drill's authored pose.
       const directPrediction = baseShot.skipRuntimeAdjustments
-        ? predictTrajectory(baseShot.params, calibrationAtPose(currentRobotPose()))
+        ? predictTrajectory(baseShot.params, calibrationAtPose(currentRobotPose()), { serve: baseShot.nodeType === "serve" })
         : null;
       const adjusted = baseShot.skipRuntimeAdjustments
         ? { params: { ...baseShot.params }, basePrediction: directPrediction, prediction: directPrediction, warnings: [], changed: false, feasible: true, evaluations: 0 }
-        : adjustedShotForRuntime(baseShot.params, baseShot.drillId);
+        : adjustedShotForRuntime(baseShot.params, baseShot.drillId, baseShot.nodeType);
       const runtimeVariationShot = baseShot.variation?.enabled
         ? { ...baseShot, variation: variationShiftedToEffectiveShot(baseShot.variation, baseShot.params, adjusted) }
         : baseShot;
@@ -6094,7 +6433,7 @@
       if (adjusted.warnings?.length) warnings.push(...adjusted.warnings.map(message => `“${shot.label}”: ${message}`));
       if (!adjusted.feasible) warnings.push(`“${shot.label}”: the requested pose/live adjustment could not preserve its modeled landing closely enough; the closest representable result will be sent.`);
       if (variation.error) warnings.push(`“${shot.label}”: ${variation.error} The nominal adjusted shot will be sent instead.`);
-      const trajectoryWarning = trajectoryPlanWarning(shot.label, variation.result?.prediction || adjusted.prediction || predictTrajectory(shot.params, calibrationAtPose(currentRobotPose())));
+      const trajectoryWarning = trajectoryPlanWarning(shot.label, variation.result?.prediction || adjusted.prediction || predictTrajectory(shot.params, calibrationAtPose(currentRobotPose()), { serve: shot.nodeType === "serve" }));
       if (trajectoryWarning) warnings.push(trajectoryWarning);
       const preflight = robotShotPreflight(shot);
       errors.push(...preflight.errors);
@@ -6840,7 +7179,8 @@
     }
     els.previewStats.replaceChildren();
     for (const value of [
-      `${context.events.filter(e => e.kind === "shot").length} shots`,
+      `${context.events.filter(e => e.kind === "shot" || e.kind === "serve").length} balls`,
+      `${context.events.filter(e => e.kind === "serve").length} serves`,
       `${context.events.filter(e => e.kind === "random").length} random choices`,
       `${context.events.filter(e => e.kind === "subdrill").length} sub-drill calls`,
     ]) {
@@ -6865,11 +7205,11 @@
     while (node && context.events.length < limit) {
       resetRepeatersTriggeredBySimulation(drill, node, context, repeaters);
       let edge = null;
-      if (node.type === "shot") {
-        const adjusted = adjustedShotForRuntime(node.params, drillId);
+      if (isBallNode(node)) {
+        const adjusted = adjustedShotForRuntime(node.params, drillId, node.type);
         const p = adjusted.params;
         const suffix = adjusted.changed ? ` · live tuning · elev ${signed(p.elevationDeg,1)}°` : "";
-        context.events.push({ kind: "shot", title: node.label, detail: `${fmt(p.speedMps,1)} m/s · ${spinWords(p.spinRps)}${suffix}` });
+        context.events.push({ kind: node.type, title: node.label, detail: `${fmt(p.speedMps,1)} m/s · ${spinWords(p.spinRps)}${suffix}` });
         edge = outgoing(drill, node.id)[0] ?? null;
       } else if (node.type === "random") {
         edge = weightedChoice(outgoing(drill, node.id));
@@ -7002,7 +7342,7 @@
     if (!compiled.shots.length) { toast("This drill has no playable sequence to save."); return; }
     const effective = [];
     for (const shot of compiled.shots) {
-      const adjustment = adjustedShotForRuntime(shot.params, shot.drillId);
+      const adjustment = adjustedShotForRuntime(shot.params, shot.drillId, shot.nodeType);
       if (!adjustment.feasible) {
         toast(`Cannot save: “${shot.label}” is not feasible from the current position and adjustments.`);
         return;
@@ -7018,7 +7358,7 @@
       delayBetweenSets: tunedDelaySeconds(source.settings.delayBetweenSets),
     };
     saved.nodes = effective.map(({ shot, adjustment }, index) => ({
-      id: makeId("shot"), type: "shot", label: shot.label,
+      id: makeId(shot.nodeType || "shot"), type: shot.nodeType || "shot", label: shot.label,
       x: 150 + (index % 4) * 320, y: 220 + Math.floor(index / 4) * 230,
       params: { ...adjustment.params },
       variation: variationShiftedToEffectiveShot(shot.variation, shot.params, adjustment),
@@ -7771,6 +8111,7 @@ STATUS
     els.addNodeMenuBtn?.addEventListener("click", openAddNodeMenu);
     els.closeAddNodeDialogBtn?.addEventListener("click", () => els.addNodeDialog.close());
     els.addShotBtn.addEventListener("click", () => openAddNodeConfig("shot"));
+    els.addServeBtn.addEventListener("click", () => openAddNodeConfig("serve"));
     els.addRandomBtn.addEventListener("click", () => openAddNodeConfig("random"));
     els.addDrillNodeBtn.addEventListener("click", () => openAddNodeConfig("drill"));
     els.addCounterBtn.addEventListener("click", () => openAddNodeConfig("counter"));

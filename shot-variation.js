@@ -67,6 +67,7 @@
   }
 
   function outcome(prediction) {
+    if (prediction?.serve && !prediction.serve.valid) return null;
     if (!prediction?.landing || !prediction?.net?.crossed || !Number.isFinite(prediction.net.clearanceM)) return null;
     return [prediction.landing.x, prediction.landing.y, prediction.net.clearanceM];
   }

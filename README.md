@@ -21,7 +21,7 @@ The user-facing navigation is organized around intent rather than editor interna
 
 1. **Library** is the start page. Tapping a drill opens **Run**; the pencil action opens **Edit**. **New drill** creates an empty `START → END` drill and opens the editor.
 2. **Run** contains Play/Stop, repetitions, delay between repetitions, persistent player tuning, current-vs-authored robot pose, preview, saving the effective setup, and an **Edit drill** action.
-3. **Edit** contains the graph. Every drill has a structural START and at least one terminating END path. On phones the graph is laid out vertically with branch siblings separated into collision-free rows; read-only built-ins use a deterministic horizontal layered layout on desktop. Node cards size themselves to their rendered contents, and shot cards keep compact speed/spin metrics on one line. The floating `+` opens a configure-before-create menu for shots, random choices, repeaters and sub-drills.
+3. **Edit** contains the graph. Every drill has a structural START and at least one terminating END path. On phones the graph is laid out vertically with branch siblings separated into collision-free rows; read-only built-ins use a deterministic horizontal layered layout on desktop. Node cards size themselves to their rendered contents, and ball cards keep compact speed/spin metrics on one line. The floating `+` opens a configure-before-create menu for shots, serves, random choices, repeaters and sub-drills.
 4. Node/connection **Details** are a separate screen on phones and a side pane on desktop, so editing controls never cover the graph. Drill name, description, tags, folder and expected robot pose live in **Drill details** rather than on the canvas.
 5. **Robot** is global. It owns Connect/Disconnect, diagnostics, calibration and model/geometry settings. The compact Nova status in the top bar opens the same Robot page.
 
@@ -29,14 +29,14 @@ Back arrows pop navigation history; close buttons dismiss only the current dialo
 
 ## Current capabilities
 
-- Visual drill graph with shots, weighted-random branches, sub-drills and repeaters.
+- Visual drill graph with shots, serves, weighted-random branches, sub-drills and repeaters.
 - Per-drill repetition count and delay between repetitions.
 - Local browser persistence plus JSON import/export.
 - Web Bluetooth connection, authentication and state-aware Nova control.
 - Real Start/Stop execution with Ready-state gating and heartbeat handling.
 - Event-driven one-slot streaming for continuous per-ball updates without ordinary reset boundaries.
 - Physical shot inputs in m/s, rps and degrees, converted to Nova parameters.
-- Physically constrained per-shot variation in landing position, net clearance, speed and spin, used selectively by random, match-like and variable-practice drills.
+- Physically constrained per-ball variation in landing position, net clearance, speed and spin; Serve samples must also retain a legal second bounce.
 - Persisted manual SE(2) robot-position calibration with uncertainty-aware verification targets based on table lines and net geometry.
 - One bounded runtime solve combines robot-position compensation with live speed, spin and clearance adjustments; the source drill remains unchanged and the effective result can be saved as a new drill.
 - Trajectory preview using a published aerodynamic free-flight model with ITTF ball parameters.
@@ -175,7 +175,7 @@ Real Play currently permits physical head orientation types `0` and `4`. Side/mi
 
 ## Default training library
 
-A fresh install now starts with a practical shot-and-drill library instead of the old graph-editor demonstration examples. It includes common topspin, backspin, no-spin and fast/deep feeds plus forehand/backhand alternating, 2-2, Falkenberg, three-point and semi-random/random footwork patterns. Built-in shot parameters were solved with the current default trajectory model from the centered robot position and use conservative table-edge and net-clearance margins.
+A fresh install now starts with a practical shot-and-drill library instead of the old graph-editor demonstration examples. It includes common topspin, backspin, no-spin and fast/deep feeds plus forehand/backhand alternating, 2-2, Falkenberg, three-point and semi-random/random footwork patterns. A dedicated Serve / receive folder adds short backspin, short no-spin and fast-long topspin serves, third-ball follow-ups, recognition/randomness drills and a combination mix. Built-in shot and serve parameters were solved with the current default trajectory model from the centered robot position and use conservative table-edge and net-clearance margins.
 
 Built-in drills are read-only and update with the app. **My drills** are stored independently, so updating built-ins never overwrites custom work. Older saved default presets are migrated out of browser storage while modified/custom drills are kept under My drills. Calibration is preserved during migration.
 
@@ -189,6 +189,7 @@ sampled independently for each set.
 Flow semantics:
 
 - **Single shot** → one Nova ball record.
+- **Serve** → one Nova ball record, with a modeled robot-side first bounce, post-bounce net crossing and receiver-side first bounce; its preview continues through a third arc to the receiver-side second bounce or the 0.5 m outside-table limit.
 - **Weighted random** → choose one outgoing branch by relative weight.
 - **Sub-drill** → execute the referenced drill, then return to the parent.
 - **Repeater** → local counter with Repeat/Finish outputs.
@@ -223,7 +224,9 @@ The trajectory preview uses the aerodynamic free-flight model from Conti et al.
 (2026), with ITTF ball and table values, constant angular velocity during the first
 flight segment, drag and Magnus forces, and numerical integration. Shot creation
 and drill-editor previews also use the paper's table-contact model to show the
-second arc and projected second bounce, capped at 0.5 m outside the table. The
+second arc and projected second bounce, capped at 0.5 m outside the table. Serve
+previews add the third arc from the receiver's first bounce to the receiver's
+second bounce (or that same outside-table limit). The
 post-bounce result is marked as approximate because the fitted residuals are
 specific to the paper's ball and table hardware.
 

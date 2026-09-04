@@ -28,6 +28,7 @@ for expected in [
     "libraryScreen", "runScreen", "editorScreen", "robotScreen",
     "mobileLibraryNavBtn", "mobileRunNavBtn", "mobileEditNavBtn", "mobileRobotNavBtn",
     "addNodeDialog", "drillDetailsDialog", "addNodeMenuBtn", "runEditDrillBtn",
+    "addServeBtn",
     "editorRunBtn", "robotDiagnosticsBtn", "protocolDebugBtn", "protocolDebugDialog",
     "protocolDebugEditor", "protocolDebugRunBtn", "protocolDebugStopScriptBtn",
     "protocolDebugStopNovaBtn", "protocolDebugFileInput", "robotDialogContext",
@@ -52,9 +53,17 @@ for obsolete_script in (
 if "deploy the complete release" not in html.lower():
     raise SystemExit("runtime bundle fallback must explain incomplete deployments")
 
-if app.count("{ includePostBounce: true }") != 3:
-    raise SystemExit("post-bounce simulation must remain scoped to shot creation and drill/editor previews")
-for token in ("postBouncePoints", "secondBounce", "postBounceClipped", 'SECOND_BOUNCE_COLOR = "#8bb8ff"'):
+for token in ('type === "serve"', 'function makeServe', 'trajectoryOptionsForNode',
+              'firstBounceValid', 'netValid', 'secondBounceValid',
+              'Valid modeled serve', 'addNode(type, draft)'):
+    if token not in app:
+        raise SystemExit(f"Missing first-class Serve integration: {token}")
+if '["shot", "serve", "random", "drill", "counter"]' not in app:
+    raise SystemExit("Serve must be accepted by saved/imported drill sanitization")
+if "['shot','serve','random','drill','counter']" not in core:
+    raise SystemExit("Serve must be accepted by portable drill validation")
+for token in ("postBouncePoints", "secondBounce", "postBounceClipped", "thirdArcPoints", "thirdBounce", "thirdArcClipped",
+              'SECOND_BOUNCE_COLOR = "#ff79c6"', 'THIRD_BOUNCE_COLOR = "#ffd166"', "trajectory-bounce-legend"):
     if token not in app:
         raise SystemExit(f"Missing post-bounce trajectory integration: {token}")
 if 'Math.abs(table.netHeight - regulationTable().netHeight) > 1e-6' not in app:
@@ -126,6 +135,8 @@ if 'distanceTrajectorySvg(' in app:
     raise SystemExit("Obsolete one-dimensional landing-distance visualization remains")
 if 'params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 }' not in app:
     raise SystemExit("New-shot default must use the re-solved safe center no-spin ball")
+if 'params: { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 }' not in app:
+    raise SystemExit("New-serve default must model two legal table bounces with a post-bounce net crossing")
 
 # Continuous playback: one active record slot, advanced by real ball events.
 for token in (
@@ -224,6 +235,11 @@ for name in (
     "Match: Short backhand underspin → forehand recovery", "Match: Short receive → random long attack",
     "Match: Backhand exchange → switch", "Match: Weighted rally", "Match: Random pattern mix",
     "Drill: Variable topspin rally", "Drill: Variable short receive",
+    "Serve: Short backspin to backhand", "Serve: Short no-spin to middle",
+    "Serve: Fast long topspin to backhand", "Serve receive: Short backspin → third-ball attack",
+    "Serve receive: Fast long → backhand pressure", "Serve receive: Backspin / no-spin recognition",
+    "Serve receive: Short or fast-long random", "Serve receive: Mixed serve + random third ball",
+    "Serve receive: Combination mix",
 ):
     if name not in app:
         raise SystemExit(f"Missing built-in training preset: {name}")
@@ -235,18 +251,21 @@ if '>Restore defaults</button>' in html:
 for token in ("Built-in", "My drills", "Copy to My drills", "New folder"):
     if token not in html:
         raise SystemExit(f"Missing separated-library UI: {token}")
+if 'name: "Serve / receive"' not in app:
+    raise SystemExit("Missing built-in Serve / receive folder")
 for token in ("makeBuiltInCatalog", "sanitizeLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
     if token not in app:
         raise SystemExit(f"Missing separated-library model: {token}")
-for token in ('const DEFAULT_LIBRARY_VERSION = 6;', 'DEFAULT_VARIATION_PROFILES',
+for token in ('const DEFAULT_LIBRARY_VERSION = 7;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
               'variationProfile: "shortNeutral"', 'variationProfile: "short"', 'variationProfile: "rally"',
               'variationProfile: "deep"', 'variationProfile: "spin"',
-              'variationProfile: "fast"', 'function variedPresetShot',
+              'variationProfile: "fast"', 'variationProfile: "serveShort"', 'variationProfile: "serveFast"',
+              'function variedPresetShot', 'function presetServe',
               'shot.variation = variationForPreset(DEFAULT_SHOT_PRESETS[key]);'):
     if token not in app:
         raise SystemExit(f"Built-in library variation integration missing: {token}")
-if app.count('variationProfile:') != 18:
-    raise SystemExit("Every built-in shot preset must select exactly one variation profile")
+if app.count('variationProfile:') != 23:
+    raise SystemExit("Every built-in shot and serve preset must select exactly one variation profile")
 for token in ('labels: ["Variable topspin"], varied: true',
               'randomLabel: "Variable short underspin"',
               'const shotFactory = varied ? variedPresetShot : presetShot;'):
