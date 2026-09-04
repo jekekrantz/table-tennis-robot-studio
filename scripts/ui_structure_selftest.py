@@ -104,9 +104,10 @@ for token in (
         raise SystemExit(f"Missing robust calibration/export behavior: {token}")
 
 # Shot editor and semantic presentation.
-for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.05"',
-              'data-step-target="shotSpinField"', 'data-step-delta="0.5"',
+for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.1"',
+              'data-step-target="shotSpinField"', 'data-step-delta="1"',
               'data-step-target="shotElevationField"', 'data-step-target="shotAimField"',
+              'data-step-delta="0.5"', 'data-decimals="2"', 'data-decimals="1"',
               'Predicted top view', 'topTrajectorySvg(prediction, 600, 280)',
               'class="shot-parameter-stack"', 'class="field shot-parameter-row"',
               'Shot variation', 'testShotVariationBtn', 'variationDepthField',
@@ -138,7 +139,8 @@ if 'every ball, including sub-drills' not in html:
     raise SystemExit("Live tuning dialog must explain all-ball scope")
 for token in ('data-tuning-range="pacePct"', 'data-tuning-range="clearancePct"',
               'data-tuning-range="speedPct"', 'data-tuning-range="spinPct"',
-              'data-tuning-delta="1"', 'class="info-disclosure"'):
+              'data-tuning-delta="1"', 'type="range" min="-50" max="100" step="1"',
+              'class="info-disclosure"'):
     if token not in html:
         raise SystemExit(f"Missing compact live-tuning control: {token}")
 for token in ('LIVE_TUNING_STORAGE_KEY', 'saveLiveTuningPreference', 'loadLiveTuningPreference'):
