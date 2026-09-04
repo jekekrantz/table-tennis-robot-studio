@@ -430,6 +430,157 @@ async def run_single_slot_test(args: argparse.Namespace, trace: Trace) -> None:
         trace.add("INFO", "disconnected")
 
 
+async def run_fixed_shots(args: argparse.Namespace, trace: Trace) -> None:
+    """Run a bounded number of identical, straight-ahead feed cycles."""
+    client, session = await prepare_session(args, trace)
+    try:
+        await session.authenticate()
+        await ensure_ready(session)
+        await session.heartbeat()
+        record = ball_record(
+            wheel_a=args.wheels,
+            wheel_b=args.wheels,
+            pitch_deg=args.pitch,
+            yaw_deg=0.0,
+            frequency_hz=args.frequency,
+        )
+        await session.request(
+            start_packet([record], mode=1, value=args.shot_count),
+            0x81,
+            f"START {args.shot_count} identical straight-ahead cycles",
+        )
+        for completed in range(1, args.shot_count + 1):
+            await session.next_ball_event(timeout=max(4.0, 2.5 / args.frequency))
+            trace.add("MARK", f"observed drain cycle {completed}/{args.shot_count}")
+        await session.wait_ready(8.0)
+        trace.add("RESULT", f"drain completed exactly {args.shot_count} notified cycles")
+    finally:
+        if client.is_connected and session.last_status and session.last_status[0] != 3:
+            trace.add("WARN", "drain did not finish Ready; attempting STOP")
+            try:
+                await session.stop()
+            except Exception as error:
+                trace.add("ERROR", f"cleanup STOP failed: {error}")
+        if client.is_connected:
+            await client.disconnect()
+        trace.add("INFO", "disconnected")
+
+
+async def run_low_wheel_sweep(args: argparse.Namespace, trace: Trace) -> None:
+    """Probe sub-400 raw values on one wheel with isolated empty feed cycles."""
+    client, session = await prepare_session(args, trace)
+    tested: list[int] = []
+    try:
+        await session.authenticate()
+        await ensure_ready(session)
+        await session.heartbeat()
+        for low_wheel in (400, 300, 200, 100, 0):
+            record = ball_record(
+                wheel_a=args.wheels,
+                wheel_b=low_wheel,
+                pitch_deg=args.pitch,
+                yaw_deg=0.0,
+                frequency_hz=args.frequency,
+            )
+            trace.add("MARK", f"probing wheel A={args.wheels}, wheel B={low_wheel}")
+            await session.request(
+                start_packet([record], mode=1, value=1),
+                0x81,
+                f"START isolated low-wheel cycle B={low_wheel}",
+            )
+            await session.next_ball_event(timeout=max(4.0, 2.5 / args.frequency))
+            await session.wait_ready(8.0)
+            tested.append(low_wheel)
+            trace.add("RESULT", f"wheel B={low_wheel} accepted and completed in Ready")
+            await asyncio.sleep(0.75)
+        trace.add("RESULT", f"low-wheel sweep accepted all values: {tested}")
+    finally:
+        if client.is_connected and session.last_status and session.last_status[0] != 3:
+            trace.add("WARN", "low-wheel sweep exited outside Ready; attempting STOP")
+            try:
+                await session.stop()
+            except Exception as error:
+                trace.add("ERROR", f"cleanup STOP failed: {error}")
+        if client.is_connected:
+            await client.disconnect()
+        trace.add("INFO", "disconnected")
+
+
+async def run_high_wheel_probe(args: argparse.Namespace, trace: Trace) -> None:
+    """Try exactly one raw unit above the community maximum."""
+    client, session = await prepare_session(args, trace)
+    probe_value = 7501
+    try:
+        await session.authenticate()
+        await ensure_ready(session)
+        await session.heartbeat()
+        record = ball_record(
+            wheel_a=probe_value,
+            wheel_b=probe_value,
+            pitch_deg=args.pitch,
+            yaw_deg=0.0,
+            frequency_hz=args.frequency,
+        )
+        await session.request(
+            start_packet([record], mode=1, value=1),
+            0x81,
+            f"START isolated high-wheel cycle A=B={probe_value}",
+        )
+        await session.next_ball_event(timeout=max(4.0, 2.5 / args.frequency))
+        await session.wait_ready(8.0)
+        trace.add("RESULT", f"A=B={probe_value} accepted and completed in Ready")
+    finally:
+        if client.is_connected and session.last_status and session.last_status[0] != 3:
+            trace.add("WARN", "high-wheel probe exited outside Ready; attempting STOP")
+            try:
+                await session.stop()
+            except Exception as error:
+                trace.add("ERROR", f"cleanup STOP failed: {error}")
+        if client.is_connected:
+            await client.disconnect()
+        trace.add("INFO", "disconnected")
+
+
+async def run_high_wheel_sweep(args: argparse.Namespace, trace: Trace) -> None:
+    """Probe a short, bounded range above the community maximum."""
+    client, session = await prepare_session(args, trace)
+    tested: list[int] = []
+    try:
+        await session.authenticate()
+        await ensure_ready(session)
+        await session.heartbeat()
+        for probe_value in range(args.high_start, args.high_stop + 1, args.high_step):
+            record = ball_record(
+                wheel_a=probe_value,
+                wheel_b=probe_value,
+                pitch_deg=args.pitch,
+                yaw_deg=0.0,
+                frequency_hz=args.frequency,
+            )
+            trace.add("MARK", f"probing equal wheels A=B={probe_value}")
+            await session.request(
+                start_packet([record], mode=1, value=1),
+                0x81,
+                f"START isolated high-wheel cycle A=B={probe_value}",
+            )
+            await session.next_ball_event(timeout=max(4.0, 2.5 / args.frequency))
+            await session.wait_ready(8.0)
+            tested.append(probe_value)
+            trace.add("RESULT", f"A=B={probe_value} accepted and completed in Ready")
+            await asyncio.sleep(1.0)
+        trace.add("RESULT", f"high-wheel sweep accepted all values: {tested}")
+    finally:
+        if client.is_connected and session.last_status and session.last_status[0] != 3:
+            trace.add("WARN", "high-wheel sweep exited outside Ready; attempting STOP")
+            try:
+                await session.stop()
+            except Exception as error:
+                trace.add("ERROR", f"cleanup STOP failed: {error}")
+        if client.is_connected:
+            await client.disconnect()
+        trace.add("INFO", "disconnected")
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument(
@@ -441,6 +592,10 @@ def parser() -> argparse.ArgumentParser:
             "endless-update-test",
             "combo-update-test",
             "single-slot-test",
+            "drain-test",
+            "low-wheel-sweep",
+            "high-wheel-probe",
+            "high-wheel-sweep",
         ),
         nargs="?",
         default="probe",
@@ -456,13 +611,16 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--update-after", type=float, default=4.0)
     result.add_argument("--observe-seconds", type=float, default=8.0)
     result.add_argument("--shot-count", type=int, default=6)
+    result.add_argument("--high-start", type=int, default=7600)
+    result.add_argument("--high-stop", type=int, default=8000)
+    result.add_argument("--high-step", type=int, default=100)
     return result
 
 
 async def main() -> int:
     args = parser().parse_args()
-    if not 400 <= args.wheels <= 7500:
-        raise SystemExit("--wheels must be within 400..7500")
+    if not 100 <= args.wheels <= 7500:
+        raise SystemExit("--wheels must be within 100..7500")
     if not 1 <= args.first_count <= 9 or not 1 <= args.update_count <= 9:
         raise SystemExit("record counts must be within 1..9")
     if not 0.5 <= args.frequency <= 1.5:
@@ -471,12 +629,26 @@ async def main() -> int:
         raise SystemExit("timing arguments are outside bounded diagnostic limits")
     if not 2 <= args.shot_count <= 50:
         raise SystemExit("--shot-count must be within 2..50")
+    if not 7501 <= args.high_start <= args.high_stop <= 10000:
+        raise SystemExit("high-wheel range must satisfy 7501 <= start <= stop <= 10000")
+    if not 1 <= args.high_step <= 500:
+        raise SystemExit("--high-step must be within 1..500")
+    if len(range(args.high_start, args.high_stop + 1, args.high_step)) > 10:
+        raise SystemExit("high-wheel sweep is limited to 10 steps")
     trace = Trace(args.trace)
     try:
         if args.mode == "probe":
             await run_probe(args, trace)
         elif args.mode == "single-slot-test":
             await run_single_slot_test(args, trace)
+        elif args.mode == "drain-test":
+            await run_fixed_shots(args, trace)
+        elif args.mode == "low-wheel-sweep":
+            await run_low_wheel_sweep(args, trace)
+        elif args.mode == "high-wheel-probe":
+            await run_high_wheel_probe(args, trace)
+        elif args.mode == "high-wheel-sweep":
+            await run_high_wheel_sweep(args, trace)
         else:
             is_endless = args.mode == "endless-update-test"
             is_multi_combo = args.mode == "combo-update-test"

@@ -25,7 +25,7 @@ assert(Math.abs(A.delayWithPace(1, { pacePct: 5 }) - 1 / 1.05) < 1e-12);
 assert(Math.abs(A.delayWithPace(1, { pacePct: -5 }) - 1 / 0.95) < 1e-12);
 assert.strictEqual(A.delayWithPace(1, { pacePct: 100 }), 0.5, "+100% pace should halve delays");
 assert.strictEqual(A.delayWithPace(1, { pacePct: -50 }), 2, "-50% pace should double delays");
-assert.deepStrictEqual(A.normalizeTuning({ speedPct: 7, pacePct: -53 }), { pacePct: -50, clearancePct: 0, spinPct: 0, speedPct: 8 });
+assert.deepStrictEqual(A.normalizeTuning({ speedPct: 7, pacePct: -53 }), { pacePct: -50, clearancePct: 0, spinPct: 0, speedPct: 7 });
 assert.deepStrictEqual(
   A.normalizeTuning({ pacePct: 999, clearancePct: -999, spinPct: 999, speedPct: -999 }),
   { pacePct: 100, clearancePct: -100, spinPct: 300, speedPct: -50 },

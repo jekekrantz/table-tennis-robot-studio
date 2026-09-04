@@ -25,7 +25,8 @@ assert.strictEqual(LaunchModel.isRawCalibrated(1999, model), false);
 assert.strictEqual(LaunchModel.isRawCalibrated(2000, model), true);
 assert.strictEqual(LaunchModel.isRawCalibrated(3000, model), true);
 assert.strictEqual(LaunchModel.isRawCalibrated(3001, model), false);
-assert.strictEqual(LaunchModel.clampRawToHardware(200), 400);
+assert.strictEqual(LaunchModel.clampRawToHardware(50), 100);
+assert.strictEqual(LaunchModel.clampRawToHardware(200), 200);
 assert.strictEqual(LaunchModel.clampRawToHardware(9000), 7500);
 
 // Nova speed-level scaling is a separate coordinate transform and must honor app settings.

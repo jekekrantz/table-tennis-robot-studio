@@ -104,8 +104,9 @@ for token in (
         raise SystemExit(f"Missing robust calibration/export behavior: {token}")
 
 # Shot editor and semantic presentation.
-for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.1"',
-              'data-step-target="shotSpinField"', 'data-step-delta="1"',
+for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.05"',
+              'data-step-target="shotSpinField"', 'data-step-delta="0.5"',
+              'data-step-target="shotElevationField"', 'data-step-target="shotAimField"',
               'Predicted top view', 'topTrajectorySvg(prediction, 600, 280)',
               'class="shot-parameter-stack"', 'class="field shot-parameter-row"',
               'Shot variation', 'testShotVariationBtn', 'variationDepthField',
@@ -133,11 +134,22 @@ if 'playbackResponsiveTuning' in app:
 for token in ("adjustedShotForRuntime", "tunedDelaySeconds", "Live tuning is active", "source drill stays unchanged"):
     if token not in app and token not in html:
         raise SystemExit(f"Missing live tuning integration: {token}")
-if 'Every ball, including balls from sub-drills' not in html:
+if 'every ball, including sub-drills' not in html:
     raise SystemExit("Live tuning dialog must explain all-ball scope")
+for token in ('data-tuning-range="pacePct"', 'data-tuning-range="clearancePct"',
+              'data-tuning-range="speedPct"', 'data-tuning-range="spinPct"',
+              'data-tuning-delta="1"', 'class="info-disclosure"'):
+    if token not in html:
+        raise SystemExit(f"Missing compact live-tuning control: {token}")
 for token in ('LIVE_TUNING_STORAGE_KEY', 'saveLiveTuningPreference', 'loadLiveTuningPreference'):
     if token not in app:
         raise SystemExit(f"Live tuning must persist outside drill storage: {token}")
+for token in ('function trajectoryPlanWarning', 'modeled to hit the net',
+              'The nominal adjusted shot will be sent instead', 'const trajectoryWarning'):
+    if token not in app:
+        raise SystemExit(f"Missing non-blocking trajectory feedback: {token}")
+if 'if (!adjusted.feasible) errors.push' in app or 'if (variation.error) errors.push' in app:
+    raise SystemExit("Modeled trajectory feasibility must warn rather than block a representable command")
 
 # Robot position is set directly on a table, then refined from observed first bounces.
 for token in (
@@ -245,7 +257,7 @@ if 'navigateApp("library", { push: false })' not in app:
 for token in ('description: ""', 'tags: []', 'robotPose: { x: 0, y: 0, yawDeg: 0 }'):
     if token not in app:
         raise SystemExit(f"Missing drill metadata model: {token}")
-if 'configure it first' not in app.lower():
+if 'set the step, then add it' not in app.lower():
     raise SystemExit("Add-node flow must configure before creating")
 if 'renderSyntheticEndpoints' not in app or 'START' not in app or 'END' not in app:
     raise SystemExit("Editor must always render synthetic Start and End nodes")

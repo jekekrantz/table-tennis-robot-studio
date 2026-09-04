@@ -6,10 +6,10 @@
   "use strict";
 
   const TUNING_SPECS = Object.freeze({
-    pacePct: Object.freeze({ step: 5, min: -50, max: 100 }),
-    clearancePct: Object.freeze({ step: 5, min: -100, max: 200 }),
-    spinPct: Object.freeze({ step: 5, min: -100, max: 300 }),
-    speedPct: Object.freeze({ step: 2, min: -50, max: 50 }),
+    pacePct: Object.freeze({ step: 1, min: -50, max: 100 }),
+    clearancePct: Object.freeze({ step: 1, min: -100, max: 200 }),
+    spinPct: Object.freeze({ step: 1, min: -100, max: 300 }),
+    speedPct: Object.freeze({ step: 1, min: -50, max: 50 }),
   });
   const DEFAULT_TUNING = Object.freeze({ pacePct: 0, clearancePct: 0, spinPct: 0, speedPct: 0 });
 

@@ -1285,6 +1285,11 @@
     return Number.isFinite(number) ? number : fallback;
   }
 
+  function rounded(value, digits = 0) {
+    const scale = 10 ** digits;
+    return Math.round((finite(value, 0) + Number.EPSILON) * scale) / scale;
+  }
+
   function sanitizeCalibration(raw = {}) {
     const base = defaultCalibration();
     const pose = raw.pose || {};
@@ -1314,7 +1319,7 @@
     const guidedShots = Array.isArray(guidedRaw.shots) ? guidedRaw.shots.map((shot, index) => ({
       id: String(shot?.id || `cal-${index + 1}`),
       index,
-      rawSpeed: clamp(shot?.rawSpeed, 400, 7500, 2025),
+      rawSpeed: clamp(shot?.rawSpeed, 100, 7500, 2025),
       elevationDeg: clamp(shot?.elevationDeg, -20, 60, 10),
       distanceCm: shot?.distanceCm === null || shot?.distanceCm === "" || shot?.distanceCm === undefined ? null : finite(shot.distanceCm, null),
       netClearanceCm: shot?.netClearanceCm === null || shot?.netClearanceCm === "" || shot?.netClearanceCm === undefined ? null : finite(shot.netClearanceCm, null),
@@ -1384,8 +1389,8 @@
         elevationMinDeg: clamp(guidedRaw.elevationMinDeg, -20, 60, guidedBase.elevationMinDeg),
         elevationMaxDeg: clamp(guidedRaw.elevationMaxDeg, -20, 60, guidedBase.elevationMaxDeg),
         elevationCount: Math.round(clamp(guidedRaw.elevationCount, 2, 12, guidedBase.elevationCount)),
-        speedMinRaw: Math.round(clamp(guidedRaw.speedMinRaw, 400, 7500, guidedBase.speedMinRaw)),
-        speedMaxRaw: Math.round(clamp(guidedRaw.speedMaxRaw, 400, 7500, guidedBase.speedMaxRaw)),
+        speedMinRaw: Math.round(clamp(guidedRaw.speedMinRaw, 100, 7500, guidedBase.speedMinRaw)),
+        speedMaxRaw: Math.round(clamp(guidedRaw.speedMaxRaw, 100, 7500, guidedBase.speedMaxRaw)),
         speedCount: Math.round(clamp(guidedRaw.speedCount, 2, 8, guidedBase.speedCount)),
         currentIndex: Math.max(0, Math.round(finite(guidedRaw.currentIndex, 0))),
         shots: guidedShots,
@@ -2957,16 +2962,16 @@
     els.addNodeConfigPanel.hidden = false;
     const titles = { shot: "Add shot", random: "Add random choice", counter: "Add repeat / loop", drill: "Add sub-drill" };
     els.addNodeDialogTitle.textContent = titles[type] || "Add node";
-    els.addNodeDialogSubtitle.textContent = "Configure it first. Nothing is added until you press Add.";
+    els.addNodeDialogSubtitle.textContent = "Set the step, then add it.";
     if (type === "shot") {
       const p = { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 };
       els.addNodeConfigPanel.innerHTML = `
         <label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Shot"></label>
         <div class="shot-parameter-stack">
-          <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="-0.1">−</button><span class="input-with-unit"><input id="newShotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="0.1">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="-1">−</button><span class="input-with-unit"><input id="newShotSpinField" type="number" min="-120" max="120" step="1" value="0"><small>rps</small></span><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="1">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Elevation</span><span class="input-with-unit"><input id="newShotElevationField" type="number" min="-20" max="45" step="0.5" value="12.5"><small>°</small></span></label>
-          <label class="field shot-parameter-row"><span>Aim left/right</span><span class="input-with-unit"><input id="newShotAimField" type="number" min="-60" max="60" step="0.5" value="0"><small>°</small></span></label>
+          <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="-0.05">−</button><span class="input-with-unit"><input id="newShotSpeedField" class="shot-number-input" type="number" inputmode="decimal" min="1" max="20" step="0.05" value="${fmt(p.speedMps,2)}"><small>m/s</small></span><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="0.05">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="-0.5">−</button><span class="input-with-unit"><input id="newShotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.5" value="0"><small>rps</small></span><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="0.5">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Elevation</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotElevationField" data-delta="-0.1">−</button><span class="input-with-unit"><input id="newShotElevationField" class="shot-number-input" type="number" inputmode="decimal" min="-20" max="45" step="0.1" value="${fmt(p.elevationDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotElevationField" data-delta="0.1">+</button></span></label>
+          <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="-0.1">−</button><span class="input-with-unit"><input id="newShotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" value="0"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="0.1">+</button></span></label>
         </div>
         <div id="newShotPreview">${newShotPreviewHtml(p)}</div>
         <div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add shot</button></div>`;
@@ -2978,7 +2983,8 @@
       els.addNodeConfigPanel.querySelectorAll("[data-create-step]").forEach(button => button.addEventListener("click", () => {
         const input = $(button.dataset.createStep); if (!input) return;
         const next = finite(input.value, 0) + finite(button.dataset.delta, 0);
-        input.value = String(Math.min(finite(input.max, Infinity), Math.max(finite(input.min, -Infinity), next)));
+        const decimals = (input.step.split(".")[1] || "").length;
+        input.value = rounded(Math.min(finite(input.max, Infinity), Math.max(finite(input.min, -Infinity), next)), decimals).toFixed(decimals);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }));
     } else if (type === "random") {
@@ -2991,7 +2997,7 @@
     $("cancelCreateNodeBtn")?.addEventListener("click", () => { els.addNodeDialog.close(); });
     $("confirmCreateNodeBtn")?.addEventListener("click", () => {
       const draft = { label: $("newNodeNameField")?.value?.trim() || titles[type] };
-      if (type === "shot") Object.assign(draft, { speedMps: finite($("newShotSpeedField")?.value, 5.97), spinRps: finite($("newShotSpinField")?.value, 0), elevationDeg: finite($("newShotElevationField")?.value, 12.5), aimDeg: finite($("newShotAimField")?.value, 0) });
+      if (type === "shot") Object.assign(draft, { speedMps: rounded(finite($("newShotSpeedField")?.value, 5.84), 2), spinRps: rounded(finite($("newShotSpinField")?.value, 0), 1), elevationDeg: rounded(finite($("newShotElevationField")?.value, 10.3), 1), aimDeg: rounded(finite($("newShotAimField")?.value, 0), 1) });
       if (type === "counter") draft.startCount = finite($("newCounterStartField")?.value, 2);
       if (type === "drill") draft.referencedDrillId = $("newReferencedDrillField")?.value || null;
       addNode(type, draft);
@@ -3091,13 +3097,13 @@
     const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM) : null;
     const nominalClearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
     return `
-      <p class="spin-explainer"><strong>Spin:</strong> negative values mean underspin; positive values mean topspin. Rotations per second describe the ball directly.</p>
+      <div class="compact-info-row"><span>Shot parameters</span><details class="info-disclosure"><summary aria-label="About shot parameters">i</summary><div class="info-popover">Negative spin means underspin; positive spin means topspin. Rotations per second describe the ball directly.</div></details></div>
       ${liveTuningInlineHtml(p)}
       <div class="shot-parameter-stack">
-        <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.1" aria-label="Decrease ball speed by 0.1 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" type="number" min="1" max="20" step="0.1" value="${p.speedMps}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.1" aria-label="Increase ball speed by 0.1 metres per second">+</button></span></label>
-        <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-1" aria-label="Decrease ball rotation by 1 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" type="number" min="-120" max="120" step="1" value="${p.spinRps}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="1" aria-label="Increase ball rotation by 1 rotation per second">+</button></span></label>
-        <label class="field shot-parameter-row"><span>Elevation</span><span class="input-with-unit"><input id="shotElevationField" type="number" min="-20" max="45" step="0.5" value="${p.elevationDeg}"><small>°</small></span></label>
-        <label class="field shot-parameter-row"><span>Aim left/right</span><span class="input-with-unit"><input id="shotAimField" type="number" min="-60" max="60" step="0.5" value="${p.aimDeg}"><small>°</small></span></label>
+        <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.05" aria-label="Decrease ball speed by 0.05 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" class="shot-number-input" type="number" inputmode="decimal" min="1" max="20" step="0.05" value="${fmt(p.speedMps,2)}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.05" aria-label="Increase ball speed by 0.05 metres per second">+</button></span></label>
+        <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-0.5" aria-label="Decrease ball rotation by 0.5 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.5" value="${fmt(p.spinRps,1)}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="0.5" aria-label="Increase ball rotation by 0.5 rotation per second">+</button></span></label>
+        <label class="field shot-parameter-row"><span>Elevation</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotElevationField" data-step-delta="-0.1" aria-label="Decrease elevation by 0.1 degrees">−</button><span class="input-with-unit"><input id="shotElevationField" class="shot-number-input" type="number" inputmode="decimal" min="-20" max="45" step="0.1" value="${fmt(p.elevationDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-step-target="shotElevationField" data-step-delta="0.1" aria-label="Increase elevation by 0.1 degrees">+</button></span></label>
+        <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotAimField" data-step-delta="-0.1" aria-label="Aim 0.1 degrees left">−</button><span class="input-with-unit"><input id="shotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" value="${fmt(p.aimDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-step-target="shotAimField" data-step-delta="0.1" aria-label="Aim 0.1 degrees right">+</button></span></label>
       </div>
       <div class="shot-view-stack">
         <div><p class="helper">Predicted top view</p>${topTrajectorySvg(prediction, 600, 280)}</div>
@@ -3108,7 +3114,7 @@
       <details class="shot-variation-section"${variation ? " open" : ""}>
         <summary><span><strong>Shot variation</strong><small>Sample only physically solved shots</small></span><input id="shotVariationEnabled" type="checkbox"${variation ? " checked" : ""} aria-label="Enable shot variation"></summary>
         <div class="shot-variation-body">
-          <p class="helper">Landing position and net clearance are sampled as outcomes. Speed, spin, elevation and aim are solved together on the feasible shot manifold. Invalid targets are rejected, never clamped.</p>
+          <div class="compact-info-row"><span>Variation ranges</span><details class="info-disclosure"><summary aria-label="About shot variation">i</summary><div class="info-popover">Landing and net clearance are sampled as outcomes. Speed, spin, elevation and aim are solved together; impossible samples are skipped instead of pushed to a boundary.</div></details></div>
           <div class="field-grid two">
             <label class="field"><span>Landing depth spread</span><span class="input-with-unit"><input id="variationDepthField" type="number" min="0" max="120" step="1" value="${variation?.placement.depthCm ?? 15}"><small>± cm</small></span></label>
             <label class="field"><span>Lateral spread</span><span class="input-with-unit"><input id="variationLateralField" type="number" min="0" max="120" step="1" value="${variation?.placement.lateralCm ?? 20}"><small>± cm</small></span></label>
@@ -3247,10 +3253,10 @@
   }
 
   function bindShotInspector(drill, node) {
-    bindNumberField("shotSpeedField", value => node.params.speedMps = clamp(value, 1, 20, 8));
-    bindNumberField("shotSpinField", value => node.params.spinRps = clamp(value, -120, 120, 0));
-    bindNumberField("shotElevationField", value => node.params.elevationDeg = clamp(value, -20, 45, 4));
-    bindNumberField("shotAimField", value => node.params.aimDeg = clamp(value, -60, 60, 0));
+    bindNumberField("shotSpeedField", value => node.params.speedMps = rounded(clamp(value, 1, 20, 8), 2));
+    bindNumberField("shotSpinField", value => node.params.spinRps = rounded(clamp(value, -120, 120, 0), 1));
+    bindNumberField("shotElevationField", value => node.params.elevationDeg = rounded(clamp(value, -20, 45, 4), 1));
+    bindNumberField("shotAimField", value => node.params.aimDeg = rounded(clamp(value, -60, 60, 0), 1));
     $("shotVariationEnabled")?.addEventListener("change", event => {
       if (!event.target.checked) {
         node.variation = null;
@@ -3529,8 +3535,8 @@
     const swapped = calibration.rotationType >= 4;
     const desiredWheelA = swapped ? baseRaw - delta : baseRaw + delta;
     const desiredWheelB = swapped ? baseRaw + delta : baseRaw - delta;
-    const wheelA = Math.floor(clamp(desiredWheelA, 400, 7500, 400));
-    const wheelB = Math.floor(clamp(desiredWheelB, 400, 7500, 400));
+    const wheelA = Math.floor(clamp(desiredWheelA, 100, 7500, 100));
+    const wheelB = Math.floor(clamp(desiredWheelB, 100, 7500, 100));
     const baseRawLimited = Math.abs(baseRaw - requestedRaw) > .01;
     const wheelRawLimited = Math.abs(wheelA - desiredWheelA) > 1.01 || Math.abs(wheelB - desiredWheelB) > 1.01;
     const hardwareLimited = baseRawLimited || wheelRawLimited;
@@ -3549,8 +3555,8 @@
     const estimate = estimatedNovaSettings(params);
     const warnings = [];
     if (estimate.speedExtrapolated && estimate.calibratedRange) warnings.push(`Speed uses linear extrapolation outside the measured calibration range (${fmt(estimate.calibratedRange.minMps,1)}–${fmt(estimate.calibratedRange.maxMps,1)} m/s).`);
-    if (estimate.baseRawLimited) warnings.push("Requested speed requires a base raw input outside 400…7500; the base command is clipped at the hardware boundary.");
-    if (estimate.wheelRawLimited) warnings.push("The requested spin differential pushes an individual wheel outside 400…7500 raw; individual wheel commands are clipped and the displayed modeled speed/spin reflect the clipped commands.");
+    if (estimate.baseRawLimited) warnings.push("Requested speed requires a base raw input outside 100…7500; the base command is clipped at the hardware boundary.");
+    if (estimate.wheelRawLimited) warnings.push("The requested spin differential pushes an individual wheel outside 100…7500 raw; individual wheel commands are clipped and the displayed modeled speed/spin reflect the clipped commands.");
     if (estimate.limited) warnings.push(`Requested spin exceeds the Spinsight-derived capability at this speed (${fmt(estimate.maxSpinRps,1)} rps maximum); the spin command is clamped.`);
     return `<div class="nova-estimate">
       <span>Estimated Nova settings</span>
@@ -3884,6 +3890,15 @@
     const className = prediction.onTable ? "trajectory-safe" : "trajectory-miss";
     const result = prediction.onTable ? "Predicted on the table" : "Predicted outside the table";
     return `<strong class="${className}">${result}</strong> · x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m, flight ${fmt(prediction.landing.t,2)} s.<br>${clearance}`;
+  }
+
+  function trajectoryPlanWarning(label, prediction) {
+    if (!prediction) return `“${label}”: the trajectory model could not predict a landing. The shot will still be sent.`;
+    if (prediction.status === "net") return `“${label}”: modeled to hit the net. The shot will still be sent.`;
+    if (prediction.status === "edge") return `“${label}”: modeled to contact a table edge. The shot will still be sent.`;
+    if (!prediction.landing) return `“${label}”: no modeled landing was found. The shot will still be sent.`;
+    if (!prediction.onTable) return `“${label}”: modeled to land outside the table at x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m. The shot will still be sent.`;
+    return null;
   }
 
   function metricTransform(width, height, bounds, padding = 20) {
@@ -4969,8 +4984,8 @@
     g.elevationMinDeg = clamp(els.guidedElevationMinInput.value, -20, 60, g.placement === "ground" ? 5 : 10);
     g.elevationMaxDeg = clamp(els.guidedElevationMaxInput.value, -20, 60, g.placement === "ground" ? 45 : 30);
     g.elevationCount = Math.round(clamp(els.guidedElevationCountInput.value, 2, 12, 5));
-    g.speedMinRaw = Math.round(clamp(els.guidedSpeedMinInput.value, 400, 7500, 2000));
-    g.speedMaxRaw = Math.round(clamp(els.guidedSpeedMaxInput.value, 400, 7500, 3000));
+    g.speedMinRaw = Math.round(clamp(els.guidedSpeedMinInput.value, 100, 7500, 2000));
+    g.speedMaxRaw = Math.round(clamp(els.guidedSpeedMaxInput.value, 100, 7500, 3000));
     g.speedCount = Math.round(clamp(els.guidedSpeedCountInput.value, 2, 8, g.placement === "ground" ? 6 : 3));
     return g;
   }
@@ -5642,6 +5657,10 @@
         runOutput.textContent = formatTuningPercent(liveTuning[key]);
         runOutput.closest(".session-adjustment")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
       });
+      document.querySelectorAll(`[data-tuning-range="${key}"]`).forEach(range => {
+        range.value = String(liveTuning[key]);
+        range.setAttribute("aria-valuetext", formatTuningPercent(liveTuning[key]));
+      });
     }
     const activeEntries = Object.entries(liveTuning).filter(([, value]) => Math.abs(value) > 1e-9);
     els.liveTuningBtn?.classList.toggle("active", activeEntries.length > 0);
@@ -5689,7 +5708,11 @@
   }
   function stepLiveTuning(key, delta) {
     if (!(key in liveTuning)) return;
-    liveTuning = DrillAdjustments.normalizeTuning({ ...liveTuning, [key]: liveTuning[key] + delta });
+    setLiveTuning(key, liveTuning[key] + delta);
+  }
+  function setLiveTuning(key, value) {
+    if (!(key in liveTuning)) return;
+    liveTuning = DrillAdjustments.normalizeTuning({ ...liveTuning, [key]: value });
     liveTuningCache.clear();
     saveLiveTuningPreference();
     requestImmediateLiveRetune();
@@ -5883,7 +5906,7 @@
       warnings.push(`“${shot.label}”: requested speed needs a base raw input outside ${hardwareRange.minRaw}…${hardwareRange.maxRaw}; the base command is clipped at the boundary.`);
     }
     if (estimate.wheelRawLimited) {
-      warnings.push(`“${shot.label}”: the spin differential pushes an individual wheel outside 400…7500 raw; individual wheel commands are clipped.`);
+      warnings.push(`“${shot.label}”: the spin differential pushes an individual wheel outside 100…7500 raw; individual wheel commands are clipped.`);
     }
     if (estimate.limited) {
       warnings.push(`“${shot.label}”: requested ${fmt(Math.abs(shot.params.spinRps),1)} rps exceeds the calibrated ${fmt(estimate.maxSpinRps,1)} rps capacity at this speed; spin is clamped.`);
@@ -5939,8 +5962,10 @@
         variationResult: variation.result || null,
       };
       if (adjusted.warnings?.length) warnings.push(...adjusted.warnings.map(message => `“${shot.label}”: ${message}`));
-      if (!adjusted.feasible) errors.push(`“${shot.label}”: no feasible trajectory was found for the current robot position and live adjustments.`);
-      if (variation.error) errors.push(`“${shot.label}”: ${variation.error}`);
+      if (!adjusted.feasible) warnings.push(`“${shot.label}”: the requested pose/live adjustment could not preserve its modeled landing closely enough; the closest representable result will be sent.`);
+      if (variation.error) warnings.push(`“${shot.label}”: ${variation.error} The nominal adjusted shot will be sent instead.`);
+      const trajectoryWarning = trajectoryPlanWarning(shot.label, variation.result?.prediction || adjusted.prediction || predictTrajectory(shot.params, calibrationAtPose(currentRobotPose())));
+      if (trajectoryWarning) warnings.push(trajectoryWarning);
       const preflight = robotShotPreflight(shot);
       errors.push(...preflight.errors);
       warnings.push(...preflight.warnings);
@@ -5957,8 +5982,8 @@
         warnings.push(`“${compiled.shots[index - 1].label}” → “${shot.label}”: ${fmt(timing.desiredDelay,2)} s exceeds the Nova's 2.00 s per-ball pre-pause; the flow will split batches and wait the remaining ${fmt(timing.extraHostDelay,2)} s in the controller.`);
       }
 
-      const wheelA = Math.trunc(clamp(preflight.estimate.wheelA, 400, 7500, 400));
-      const wheelB = Math.trunc(clamp(preflight.estimate.wheelB, 400, 7500, 400));
+      const wheelA = Math.trunc(clamp(preflight.estimate.wheelA, 100, 7500, 100));
+      const wheelB = Math.trunc(clamp(preflight.estimate.wheelB, 100, 7500, 100));
       const record = Protocol.packBallRecord({
         wheelA,
         wheelB,
@@ -7695,6 +7720,9 @@ STATUS
     }, { passive:false });
     document.querySelectorAll("[data-tuning-key][data-tuning-delta]").forEach(button => {
       button.addEventListener("click", () => stepLiveTuning(button.dataset.tuningKey, finite(button.dataset.tuningDelta, 0)));
+    });
+    document.querySelectorAll("[data-tuning-range]").forEach(range => {
+      range.addEventListener("input", () => setLiveTuning(range.dataset.tuningRange, finite(range.value, 0)));
     });
 
     els.graphViewport.addEventListener("pointerdown", onCanvasPointerDown);

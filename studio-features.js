@@ -112,7 +112,7 @@
 
   function installShareButtons() {
     const editorHeader = document.querySelector('.editor-screen-header');
-    if (editorHeader && !$('editorShareBtn')) editorHeader.insertBefore(h('button', { id: 'editorShareBtn', class: 'button compact ghost', type: 'button', text: 'Share', onclick: openShareDialog }), $('editorRunBtn'));
+    if (editorHeader && !$('editorShareBtn')) editorHeader.insertBefore(h('button', { id: 'editorShareBtn', class: 'button compact ghost', type: 'button', text: 'Share', 'aria-label': 'Share drill', onclick: openShareDialog }), $('editorRunBtn'));
     const actions = document.querySelector('.library-actions-row');
     if (actions && !$('portableImportBtn')) actions.prepend(h('button', { id: 'portableImportBtn', class: 'button ghost', type: 'button', text: 'Import .ttdrill', onclick: () => portableInput.click() }));
   }
@@ -214,7 +214,7 @@
   $('aiImportResultBtn').addEventListener('click',()=>aiImportInput.click()); aiImportInput.addEventListener('change',async()=>{const f=aiImportInput.files?.[0];aiImportInput.value='';if(!f)return;try{showAiProposal(JSON.parse(await f.text()),'Imported AI drill file.',{intent:promptRequestsFreshDrill($('aiDrillPrompt').value.trim())?'create':(api.getActiveDrill()?'edit':'create')});}catch(e){api.toast(e.message);}});
   const SpeechRecognition=globalThis.SpeechRecognition||globalThis.webkitSpeechRecognition;
   if(SpeechRecognition){const rec=new SpeechRecognition();rec.continuous=false;rec.interimResults=true;rec.lang=document.documentElement.lang||'en-US';aiState.recognition=rec;let base='';rec.onstart=()=>{aiState.listening=true;base=$('aiDrillPrompt').value.trim();$('aiMicBtn').textContent='■ Stop';$('aiSpeechHint').textContent='Listening… transcript will remain editable before Generate.';};rec.onresult=e=>{let spoken='';for(let i=e.resultIndex;i<e.results.length;i++)spoken+=e.results[i][0].transcript;$('aiDrillPrompt').value=[base,spoken].filter(Boolean).join(base?' ':'');};rec.onend=()=>{aiState.listening=false;$('aiMicBtn').textContent='🎙 Speak';$('aiSpeechHint').textContent='Speech stopped. Review the transcript, then press Generate.';};rec.onerror=e=>{$('aiSpeechHint').textContent=`Speech input stopped: ${e.error}. Typing still works.`;};$('aiMicBtn').addEventListener('click',()=>{try{aiState.listening?rec.stop():rec.start();}catch(_){}});}else{$('aiMicBtn').disabled=true;$('aiSpeechHint').textContent='Speech recognition is not available in this browser; type your request instead.';}
-  function installAiButton(){const header=document.querySelector('.editor-screen-header');if(header&&!$('aiDrillBtn'))header.insertBefore(h('button',{id:'aiDrillBtn',class:'button compact ghost',type:'button',text:'✨ AI assist',onclick:openAiDialog}),$('editorShareBtn')||$('editorRunBtn'));}
+  function installAiButton(){const header=document.querySelector('.editor-screen-header');if(header&&!$('aiDrillBtn'))header.insertBefore(h('button',{id:'aiDrillBtn',class:'button compact ghost',type:'button',text:'✨ AI assist','aria-label':'AI assist',onclick:openAiDialog}),$('editorShareBtn')||$('editorRunBtn'));}
 
   // ---------------------------------------------------------------------------
   // Guided Nova protocol debugger

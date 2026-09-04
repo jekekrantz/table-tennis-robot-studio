@@ -223,8 +223,8 @@
     const elevationMinDeg = finite(options.elevationMinDeg, setup.placement === "ground" ? 5 : 10);
     const elevationMaxDeg = finite(options.elevationMaxDeg, setup.placement === "ground" ? 45 : 30);
     const elevationCount = Math.round(clamp(options.elevationCount, 2, 12, 5));
-    const speedMinRaw = Math.round(clamp(options.speedMinRaw, 400, 7500, setup.placement === "ground" ? 2000 : 2000));
-    const speedMaxRaw = Math.round(clamp(options.speedMaxRaw, 400, 7500, setup.placement === "ground" ? 3000 : 3000));
+    const speedMinRaw = Math.round(clamp(options.speedMinRaw, 100, 7500, setup.placement === "ground" ? 2000 : 2000));
+    const speedMaxRaw = Math.round(clamp(options.speedMaxRaw, 100, 7500, setup.placement === "ground" ? 3000 : 3000));
     const speedCount = Math.round(clamp(options.speedCount, 2, 8, setup.placement === "ground" ? 6 : 3));
     const speedModel = normalizeSpeedModel(options.speedModel || USER_SEED_SPEED_MODEL);
     const elevations = linspace(elevationMinDeg, elevationMaxDeg, elevationCount);

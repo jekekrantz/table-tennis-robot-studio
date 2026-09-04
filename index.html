@@ -85,18 +85,18 @@
           </section>
 
           <section class="session-adjustments-card panel-card">
-            <div class="section-title-row"><div><h3>Player tuning</h3><p>Your preferred session feel. Applies to every ball without changing the source drill.</p></div><button id="liveTuningBtn" class="button compact ghost" type="button">Details</button></div>
+            <div class="section-title-row"><h3>Player tuning</h3><div class="section-title-actions"><details class="info-disclosure"><summary aria-label="About player tuning">i</summary><div class="info-popover">Adjusts every ball for this session without changing the source drill. Preferences stay on this device.</div></details><button id="liveTuningBtn" class="button compact ghost" type="button">Details</button></div></div>
             <div class="session-adjustment-list">
-              <div class="session-adjustment" data-run-tuning="pacePct"><div><strong>Pace</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="pacePct" data-tuning-delta="-5">−</button><output data-tuning-output="pacePct">0%</output><button type="button" data-tuning-key="pacePct" data-tuning-delta="5">+</button></div></div>
-              <div class="session-adjustment" data-run-tuning="clearancePct"><div><strong>Net clearance</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="clearancePct" data-tuning-delta="-5">−</button><output data-tuning-output="clearancePct">0%</output><button type="button" data-tuning-key="clearancePct" data-tuning-delta="5">+</button></div></div>
-              <div class="session-adjustment" data-run-tuning="speedPct"><div><strong>Speed</strong><small>2% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="speedPct" data-tuning-delta="-2">−</button><output data-tuning-output="speedPct">0%</output><button type="button" data-tuning-key="speedPct" data-tuning-delta="2">+</button></div></div>
-              <div class="session-adjustment" data-run-tuning="spinPct"><div><strong>Spin</strong><small>5% steps</small></div><div class="inline-tuning-stepper"><button type="button" data-tuning-key="spinPct" data-tuning-delta="-5">−</button><output data-tuning-output="spinPct">0%</output><button type="button" data-tuning-key="spinPct" data-tuning-delta="5">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="pacePct"><strong>Pace</strong><div class="tuning-slider-row compact"><button type="button" data-tuning-key="pacePct" data-tuning-delta="-1" aria-label="Decrease pace by 1 percent">−</button><label class="tuning-range"><input type="range" min="-50" max="100" step="5" value="0" data-tuning-range="pacePct" aria-label="Pace"><output data-tuning-output="pacePct">0%</output></label><button type="button" data-tuning-key="pacePct" data-tuning-delta="1" aria-label="Increase pace by 1 percent">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="clearancePct"><strong>Net clearance</strong><div class="tuning-slider-row compact"><button type="button" data-tuning-key="clearancePct" data-tuning-delta="-1" aria-label="Decrease net clearance by 1 percent">−</button><label class="tuning-range"><input type="range" min="-100" max="200" step="5" value="0" data-tuning-range="clearancePct" aria-label="Net clearance"><output data-tuning-output="clearancePct">0%</output></label><button type="button" data-tuning-key="clearancePct" data-tuning-delta="1" aria-label="Increase net clearance by 1 percent">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="speedPct"><strong>Speed</strong><div class="tuning-slider-row compact"><button type="button" data-tuning-key="speedPct" data-tuning-delta="-1" aria-label="Decrease speed by 1 percent">−</button><label class="tuning-range"><input type="range" min="-50" max="50" step="2" value="0" data-tuning-range="speedPct" aria-label="Speed"><output data-tuning-output="speedPct">0%</output></label><button type="button" data-tuning-key="speedPct" data-tuning-delta="1" aria-label="Increase speed by 1 percent">+</button></div></div>
+              <div class="session-adjustment" data-run-tuning="spinPct"><strong>Spin</strong><div class="tuning-slider-row compact"><button type="button" data-tuning-key="spinPct" data-tuning-delta="-1" aria-label="Decrease spin by 1 percent">−</button><label class="tuning-range"><input type="range" min="-100" max="300" step="5" value="0" data-tuning-range="spinPct" aria-label="Spin"><output data-tuning-output="spinPct">0%</output></label><button type="button" data-tuning-key="spinPct" data-tuning-delta="1" aria-label="Increase spin by 1 percent">+</button></div></div>
             </div>
             <p id="liveTuningSummary" class="session-adjustment-summary">No adjustments</p>
           </section>
 
           <section class="run-setup-card panel-card">
-            <div class="section-title-row"><div><h3>Robot setup</h3><p>The current position is compensated at runtime; the source drill stays unchanged.</p></div><button id="updateRobotPoseBtn" class="button compact primary" type="button">Calibrate pose</button></div>
+            <div class="section-title-row"><h3>Robot setup</h3><div class="section-title-actions"><details class="info-disclosure"><summary aria-label="About robot setup">i</summary><div class="info-popover">The current robot position is compensated at runtime. The source drill stays unchanged.</div></details><button id="updateRobotPoseBtn" class="button compact primary" type="button">Calibrate pose</button></div></div>
             <div id="runRobotSetup" class="robot-setup-summary"></div>
             <p id="runPoseStatus" class="session-adjustment-summary"></p>
             <div class="run-secondary-actions">
@@ -499,52 +499,29 @@ STOP</pre>
   <dialog id="liveTuningDialog" class="live-tuning-dialog">
     <div class="dialog-frame live-tuning-frame">
       <header>
-        <div>
-          <h2>Live tuning</h2>
-          <p>Player-level adjustments layered on top of every ball. They persist on this device, but are never stored inside a drill.</p>
-        </div>
+        <div class="dialog-title-with-info"><h2>Live tuning</h2><details class="info-disclosure"><summary aria-label="About live tuning">i</summary><div class="info-popover">Applies one combined adjustment to every ball, including sub-drills. Changes are remembered on this device and update a running drill without deliberately stopping it. The source drill is unchanged unless you save a copy.</div></details></div>
         <button id="closeLiveTuningBtn" class="icon-button" type="button" aria-label="Close">×</button>
       </header>
 
-      <div class="live-tuning-note">
-        <strong>Fine-tune the whole drill without rewriting it.</strong> Every ball, including balls from sub-drills, receives the same modifiers. Your tuning preference is remembered between browser sessions. During Play, changes update the active or already-queued shot pack with the same live command that keeps the rolling feed supplied—without deliberately stopping the drill.
-      </div>
-
       <div class="live-tuning-grid">
         <section class="tuning-control" data-tuning-control="pacePct">
-          <div class="tuning-copy"><strong>Pace</strong><small>5% steps · range −50% to +100%. +100% is twice the pace; −50% is half the pace.</small></div>
-          <div class="tuning-stepper">
-            <button type="button" data-tuning-key="pacePct" data-tuning-delta="-5" aria-label="Decrease pace by 5 percent">−</button>
-            <output id="tuningPaceValue">0%</output>
-            <button type="button" data-tuning-key="pacePct" data-tuning-delta="5" aria-label="Increase pace by 5 percent">+</button>
-          </div>
+          <div class="tuning-heading"><strong>Pace</strong><details class="info-disclosure"><summary aria-label="About pace">i</summary><div class="info-popover">Changes timing. +100% is twice the pace; −50% is half the pace.</div></details></div>
+          <div class="tuning-slider-row"><button type="button" data-tuning-key="pacePct" data-tuning-delta="-1" aria-label="Decrease pace by 1 percent">−</button><label class="tuning-range"><input type="range" min="-50" max="100" step="5" value="0" data-tuning-range="pacePct" aria-label="Pace"><output id="tuningPaceValue">0%</output></label><button type="button" data-tuning-key="pacePct" data-tuning-delta="1" aria-label="Increase pace by 1 percent">+</button></div>
         </section>
 
         <section class="tuning-control" data-tuning-control="clearancePct">
-          <div class="tuning-copy"><strong>Net clearance</strong><small>5% steps · range −100% to +200%. −100% targets about 0.2 cm over the net for realistic low/net-touch-prone balls. The solver changes elevation + speed while preserving landing and spin/speed ratio where possible.</small></div>
-          <div class="tuning-stepper">
-            <button type="button" data-tuning-key="clearancePct" data-tuning-delta="-5" aria-label="Decrease net clearance by 5 percent">−</button>
-            <output id="tuningClearanceValue">0%</output>
-            <button type="button" data-tuning-key="clearancePct" data-tuning-delta="5" aria-label="Increase net clearance by 5 percent">+</button>
-          </div>
+          <div class="tuning-heading"><strong>Net clearance</strong><details class="info-disclosure"><summary aria-label="About net clearance tuning">i</summary><div class="info-popover">Changes elevation and speed together while preserving landing and spin-to-speed ratio where possible. −100% targets about 0.2 cm over the net.</div></details></div>
+          <div class="tuning-slider-row"><button type="button" data-tuning-key="clearancePct" data-tuning-delta="-1" aria-label="Decrease net clearance by 1 percent">−</button><label class="tuning-range"><input type="range" min="-100" max="200" step="5" value="0" data-tuning-range="clearancePct" aria-label="Net clearance"><output id="tuningClearanceValue">0%</output></label><button type="button" data-tuning-key="clearancePct" data-tuning-delta="1" aria-label="Increase net clearance by 1 percent">+</button></div>
         </section>
 
         <section class="tuning-control" data-tuning-control="spinPct">
-          <div class="tuning-copy"><strong>Spin</strong><small>5% steps · range −100% to +300%. No-spin stays no-spin; spin shots can be made much heavier. Exit speed stays fixed and elevation compensates for landing.</small></div>
-          <div class="tuning-stepper">
-            <button type="button" data-tuning-key="spinPct" data-tuning-delta="-5" aria-label="Decrease spin by 5 percent">−</button>
-            <output id="tuningSpinValue">0%</output>
-            <button type="button" data-tuning-key="spinPct" data-tuning-delta="5" aria-label="Increase spin by 5 percent">+</button>
-          </div>
+          <div class="tuning-heading"><strong>Spin</strong><details class="info-disclosure"><summary aria-label="About spin tuning">i</summary><div class="info-popover">Changes spin magnitude while keeping exit speed fixed and compensating elevation for landing. A no-spin shot stays no-spin.</div></details></div>
+          <div class="tuning-slider-row"><button type="button" data-tuning-key="spinPct" data-tuning-delta="-1" aria-label="Decrease spin by 1 percent">−</button><label class="tuning-range"><input type="range" min="-100" max="300" step="5" value="0" data-tuning-range="spinPct" aria-label="Spin"><output id="tuningSpinValue">0%</output></label><button type="button" data-tuning-key="spinPct" data-tuning-delta="1" aria-label="Increase spin by 1 percent">+</button></div>
         </section>
 
         <section class="tuning-control" data-tuning-control="speedPct">
-          <div class="tuning-copy"><strong>Speed</strong><small>2% steps · range −50% to +50%. Spin stays fixed and elevation compensates to preserve landing where possible.</small></div>
-          <div class="tuning-stepper">
-            <button type="button" data-tuning-key="speedPct" data-tuning-delta="-2" aria-label="Decrease speed by 2 percent">−</button>
-            <output id="tuningSpeedValue">0%</output>
-            <button type="button" data-tuning-key="speedPct" data-tuning-delta="2" aria-label="Increase speed by 2 percent">+</button>
-          </div>
+          <div class="tuning-heading"><strong>Speed</strong><details class="info-disclosure"><summary aria-label="About speed tuning">i</summary><div class="info-popover">Changes exit speed while keeping spin fixed and compensating elevation to preserve landing where possible.</div></details></div>
+          <div class="tuning-slider-row"><button type="button" data-tuning-key="speedPct" data-tuning-delta="-1" aria-label="Decrease speed by 1 percent">−</button><label class="tuning-range"><input type="range" min="-50" max="50" step="2" value="0" data-tuning-range="speedPct" aria-label="Speed"><output id="tuningSpeedValue">0%</output></label><button type="button" data-tuning-key="speedPct" data-tuning-delta="1" aria-label="Increase speed by 1 percent">+</button></div>
         </section>
       </div>
 
@@ -614,7 +591,7 @@ STOP</pre>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-03.3" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-04.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {
