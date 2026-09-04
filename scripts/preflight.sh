@@ -10,7 +10,7 @@ for file in \
   app.js pongbot-protocol.js pongbot-ble.js selftest.js emergency-shutdown-selftest.js \
   robot-geometry.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
-  drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js protocol-debug.js protocol-debug-selftest.js \
+  drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js protocol-debug.js protocol-debug-selftest.js \
   studio-features-core.js studio-features-selftest.js debug-advisor.js studio-features.js \
   continuous-runtime-selftest.js vendor/qrcode.min.js tools/openai-companion.mjs; do
   node --check "$file"
@@ -37,6 +37,7 @@ echo "[8/14] Live drill-adjustment solver self-test"
 node drill-adjustments-selftest.js
 node pose-calibration-selftest.js
 node shot-variation-selftest.js
+node table-bounce-selftest.js
 
 echo "[9/14] Sharing / AI / debugger / continuous-runtime logic"
 node studio-features-selftest.js

@@ -32,6 +32,7 @@
   const DrillAdjustments = globalThis.DrillAdjustments;
   const PoseCalibration = globalThis.PoseCalibration;
   const ShotVariation = globalThis.ShotVariation;
+  const TableBounce = globalThis.TableBounce;
   const els = {
     repetitionsInput: $("repetitionsInput"),
     repetitionsDownBtn: $("repetitionsDownBtn"),
@@ -2238,7 +2239,7 @@
       summary.className = "node-summary";
       if (node.type === "shot") {
         const p = node.params;
-        const prediction = predictTrajectory(p);
+        const prediction = predictTrajectory(p, null, { includePostBounce: true });
         summary.innerHTML = `
           <div class="shot-metrics">
             <span class="shot-metric speed-metric" title="Ball speed"><span class="metric-icon speed-icon" aria-hidden="true"><span class="speed-ball"></span></span><span class="shot-metric-value">${fmt(p.speedMps,1)}</span><span class="shot-metric-unit">m/s</span></span>
@@ -2952,7 +2953,7 @@
   }
 
   function newShotPreviewHtml(params) {
-    const prediction = predictTrajectory(params);
+    const prediction = predictTrajectory(params, null, { includePostBounce: true });
     return `<div class="new-shot-preview"><div><small>Top view</small>${topTrajectorySvg(prediction, 600, 250)}</div><div><small>Side view</small>${sideTrajectorySvg(prediction, 600, 230)}</div></div>`;
   }
 
@@ -3100,7 +3101,7 @@
 
   function shotInspectorHtml(node) {
     const p = node.params;
-    const prediction = predictTrajectory(p);
+    const prediction = predictTrajectory(p, null, { includePostBounce: true });
     const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM) : null;
     const nominalClearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
     return `
@@ -3755,7 +3756,81 @@
     return { position: nextPosition, velocity: nextVelocity };
   }
 
-  function predictTrajectory(params, calibration = null) {
+  function interpolateVector(a, b, ratio) {
+    return {
+      x: a.x + ratio * (b.x - a.x),
+      y: a.y + ratio * (b.y - a.y),
+      z: a.z + ratio * (b.z - a.z),
+    };
+  }
+
+  function postBounceBoundaryRatio(previous, current, table, marginM = .5) {
+    const limits = [
+      ["x", -marginM], ["x", table.length + marginM],
+      ["y", -table.width / 2 - marginM], ["y", table.width / 2 + marginM],
+    ];
+    let ratio = 1;
+    for (const [axis, limit] of limits) {
+      const before = previous[axis];
+      const after = current[axis];
+      if ((before - limit) * (after - limit) <= 0 && before !== after) {
+        const candidate = (limit - before) / (after - before);
+        if (candidate > 1e-9 && candidate < ratio) ratio = candidate;
+      }
+    }
+    return ratio;
+  }
+
+  function simulatePostBounce(landing, impactVelocity, incomingOmega, calibration) {
+    const table = calibration.table;
+    const ballRadius = calibration.physics.ballDiameterM / 2;
+    const contact = TableBounce.applyTableBounce(impactVelocity, incomingOmega, ballRadius);
+    let position = { x: landing.x, y: landing.y, z: ballRadius };
+    let velocity = contact.velocity;
+    const omega = contact.omega;
+    let elapsed = 0;
+    let step = 0;
+    let secondBounce = null;
+    let clipped = false;
+    const points = [{ ...position, t: landing.t }];
+    const sampleEvery = Math.max(1, Math.round(.018 / calibration.timeStep));
+
+    while (elapsed < calibration.maxFlightTime && !secondBounce && !clipped) {
+      const previous = { ...position };
+      const previousVelocity = { ...velocity };
+      const advanced = rk4FlightStep(position, velocity, omega, calibration.timeStep, calibration);
+      position = advanced.position;
+      velocity = advanced.velocity;
+      elapsed += calibration.timeStep;
+      step += 1;
+
+      const boundaryRatio = postBounceBoundaryRatio(previous, position, table, .5);
+      const outside = position.x < -.5 || position.x > table.length + .5
+        || position.y < -table.width / 2 - .5 || position.y > table.width / 2 + .5;
+      if (outside) {
+        const endpoint = interpolateVector(previous, position, boundaryRatio);
+        points.push({ ...endpoint, t: landing.t + elapsed - calibration.timeStep + boundaryRatio * calibration.timeStep });
+        clipped = true;
+        break;
+      }
+
+      if (previous.z > ballRadius && position.z <= ballRadius && position.z < previous.z) {
+        const ratio = (previous.z - ballRadius) / (previous.z - position.z || 1);
+        secondBounce = {
+          ...interpolateVector(previous, position, ratio),
+          z: ballRadius,
+          t: landing.t + elapsed - calibration.timeStep + ratio * calibration.timeStep,
+          impactVelocity: interpolateVector(previousVelocity, velocity, ratio),
+        };
+      }
+      if (step % sampleEvery === 0 || secondBounce) points.push(secondBounce ? { ...secondBounce } : { ...position, t: landing.t + elapsed });
+      if (position.z < -1.2) break;
+    }
+
+    return { points, secondBounce, clipped, contact };
+  }
+
+  function predictTrajectory(params, calibration = null, options = {}) {
     const baseCalibration = calibration || library.calibration;
     const c = calibration ? baseCalibration : { ...baseCalibration, pose: { ...drillPose(activeDrill()) } };
     const table = c.table;
@@ -3791,11 +3866,13 @@
     let net = { crossed: false, hit: false, z: null, y: null, clearanceM: null };
     let t = 0;
     let step = 0;
+    let impactVelocity = null;
     const sampleEvery = Math.max(1, Math.round(.018 / c.timeStep));
     let groundEdgeBlocked = false;
 
     while (t < c.maxFlightTime && !landing) {
       const previous = { ...position };
+      const previousVelocity = { ...velocity };
       const advanced = rk4FlightStep(position, velocity, omega, c.timeStep, c);
       position = advanced.position;
       velocity = advanced.velocity;
@@ -3840,10 +3917,11 @@
             z: ballRadius,
             t: t - c.timeStep + ratio * c.timeStep,
           };
+          impactVelocity = interpolateVector(previousVelocity, velocity, ratio);
         }
       }
 
-      if (step % sampleEvery === 0 || landing) points.push({ ...position, t });
+      if (step % sampleEvery === 0 && !landing) points.push({ ...position, t });
       if (position.z < -1.2 || Math.abs(position.x) > 15 || Math.abs(position.y) > 10) break;
     }
 
@@ -3859,9 +3937,15 @@
     else if (net.hit) status = "net";
     else if (onTable) status = "table";
     else if (landing) status = "miss";
+    const postBounce = options.includePostBounce && status === "table" && impactVelocity
+      ? simulatePostBounce(landing, impactVelocity, omega, c)
+      : null;
     const finalAero = aerodynamicState(velocity, omega, c);
     return {
       points,
+      postBouncePoints: postBounce?.points || [],
+      secondBounce: postBounce?.secondBounce || null,
+      postBounceClipped: Boolean(postBounce?.clipped),
       landing,
       onTable,
       status,
@@ -3873,6 +3957,11 @@
         final: finalAero,
         massKg: c.physics.ballMassKg,
         diameterM: c.physics.ballDiameterM,
+        bounce: postBounce ? {
+          restitution: postBounce.contact.restitution,
+          alpha: postBounce.contact.alpha,
+          contactMode: postBounce.contact.contactMode,
+        } : null,
       },
     };
   }
@@ -3896,7 +3985,15 @@
     if (!prediction.landing) return `<strong class="trajectory-warning">No landing found</strong> · ${clearance}.`;
     const className = prediction.onTable ? "trajectory-safe" : "trajectory-miss";
     const result = prediction.onTable ? "Predicted on the table" : "Predicted outside the table";
-    return `<strong class="${className}">${result}</strong> · x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m, flight ${fmt(prediction.landing.t,2)} s.<br>${clearance}`;
+    const second = prediction.secondBounce
+      ? `<br><span class="trajectory-second-bounce">Second bounce estimate · x ${fmt(prediction.secondBounce.x,2)} m, y ${fmt(prediction.secondBounce.y,2)} m, ${fmt(prediction.secondBounce.t - prediction.landing.t,2)} s after the first.</span>`
+      : prediction.postBounceClipped
+        ? `<br><span class="trajectory-second-bounce">Post-bounce flight continues more than 0.5 m beyond the table.</span>`
+        : "";
+    const uncertainty = prediction.postBouncePoints?.length
+      ? `<br><small>Post-bounce placement is approximate; the published contact fit used specific balls and table hardware.</small>`
+      : "";
+    return `<strong class="${className}">${result}</strong> · x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m, flight ${fmt(prediction.landing.t,2)} s.<br>${clearance}${second}${uncertainty}`;
   }
 
   function trajectoryPlanWarning(label, prediction) {
@@ -3927,36 +4024,48 @@
 
   function topBounds(prediction, calibration, margin = .28) {
     const table = calibration.table;
-    const xs = prediction.points.map(p => p.x).concat([0, table.length, calibration.pose.x]);
-    const ys = prediction.points.map(p => p.y).concat([-table.width/2, table.width/2, calibration.pose.y]);
+    const allPoints = prediction.points.concat(prediction.postBouncePoints || []);
+    const xs = allPoints.map(p => p.x).concat([0, table.length, calibration.pose.x]);
+    const ys = allPoints.map(p => p.y).concat([-table.width/2, table.width/2, calibration.pose.y]);
     return { minX: Math.min(...xs) - margin, maxX: Math.max(...xs) + margin, minY: Math.min(...ys) - margin, maxY: Math.max(...ys) + margin };
   }
+
+  const SECOND_BOUNCE_COLOR = "#8bb8ff";
+  const trajectoryPath = (points, tr, verticalAxis = "y") => points.map((point, index) =>
+    `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point[verticalAxis]),2)}`
+  ).join(" ");
 
   function topTrajectorySvg(prediction, width = 600, height = 310) {
     const c = library.calibration;
     const table = c.table;
     const tr = metricTransform(width, height, topBounds(prediction, c, .24), 18);
     const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
-    const path = prediction.points.map((point, index) => `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point.y),2)}`).join(" ");
+    const path = trajectoryPath(prediction.points, tr);
+    const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr);
     const rx = tr.sx(c.pose.x), ry = tr.sy(c.pose.y);
-    return `<svg class="shot-top-view" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted top view and landing position">
+    return `<svg class="shot-top-view" viewBox="0 0 ${width} ${height}" role="img" aria-label="Predicted top view with first and second bounce positions">
       <rect x="${tr.sx(0)}" y="${tr.sy(table.width/2)}" width="${tr.sx(table.length)-tr.sx(0)}" height="${tr.sy(-table.width/2)-tr.sy(table.width/2)}" rx="4" fill="#183e58" stroke="#7fa2bb" stroke-width="2"/>
       <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(table.width/2)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(-table.width/2)}" stroke="#d4dbe5" stroke-width="3"/>
       <path d="${path}" fill="none" stroke="${color}" stroke-width="4"/>
+      ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="4"/>` : ""}
       <circle cx="${rx}" cy="${ry}" r="7" fill="#32bda2" stroke="#d5fff6" stroke-width="2"/>
       ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="6" fill="${color}"/>` : ""}
+      ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.secondBounce.y)}" r="6" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
     </svg>`;
   }
 
-  function miniPreviewBounds(calibration) {
+  function miniPreviewBounds(calibration, prediction = null) {
     const table = calibration.table;
     const xPad = Math.max(.06, table.length * .025);
     const yPad = Math.max(.05, table.width * .035);
+    const postPoints = prediction?.postBouncePoints || [];
+    const xs = postPoints.map(point => point.x).concat([0, table.length, calibration.pose.x]);
+    const ys = postPoints.map(point => point.y).concat([-table.width / 2, table.width / 2, calibration.pose.y]);
     return {
-      minX: Math.min(-xPad, calibration.pose.x - xPad),
-      maxX: Math.max(table.length + xPad, calibration.pose.x + xPad),
-      minY: Math.min(-table.width / 2 - yPad, calibration.pose.y - yPad),
-      maxY: Math.max(table.width / 2 + yPad, calibration.pose.y + yPad),
+      minX: Math.min(...xs) - xPad,
+      maxX: Math.max(...xs) + xPad,
+      minY: Math.min(...ys) - yPad,
+      maxY: Math.max(...ys) + yPad,
     };
   }
 
@@ -3964,19 +4073,22 @@
     const c = library.calibration;
     const table = c.table;
     const width = 188, height = 98;
-    const bounds = miniPreviewBounds(c);
+    const bounds = miniPreviewBounds(c, prediction);
     const tr = metricTransform(width, height, bounds, 3);
     const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
     const clipId = `mini-top-${Math.random().toString(36).slice(2)}`;
-    const path = prediction.points.map((point,index) => `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point.y),2)}`).join(" ");
-    return `<svg class="mini-trajectory mini-top-trajectory" viewBox="0 0 ${width} ${height}" aria-label="Predicted top view">
+    const path = trajectoryPath(prediction.points, tr);
+    const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr);
+    return `<svg class="mini-trajectory mini-top-trajectory" viewBox="0 0 ${width} ${height}" aria-label="Predicted top view with bounce positions">
       <defs><clipPath id="${clipId}"><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="5"/></clipPath></defs>
       <g clip-path="url(#${clipId})">
         <rect x="${tr.sx(0)}" y="${tr.sy(table.width/2)}" width="${tr.sx(table.length)-tr.sx(0)}" height="${tr.sy(-table.width/2)-tr.sy(table.width/2)}" fill="#17384e" stroke="#7897ad" stroke-width="1"/>
         <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(table.width/2)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(-table.width/2)}" stroke="#c9d2dc" stroke-width="1.5"/>
         <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>
+        ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="2"/>` : ""}
         <circle cx="${tr.sx(c.pose.x)}" cy="${tr.sy(c.pose.y)}" r="3.5" fill="#32bda2"/>
         ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.landing.y)}" r="3" fill="${color}"/>` : ""}
+        ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.secondBounce.y)}" r="3" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
       </g>
     </svg>`;
   }
@@ -3991,19 +4103,23 @@
     const visibleMaxZ = Math.max(
       (prediction.points[0]?.z ?? .24) + .05,
       table.netHeight + .06,
-      Math.min(.85, Math.max(...prediction.points.map(point => point.z)) + .035)
+      Math.min(.85, Math.max(...prediction.points.concat(prediction.postBouncePoints || []).map(point => point.z)) + .035)
     );
     const bounds = { minX, maxX, minY: -.015, maxY: visibleMaxZ };
     const tr = metricTransform(width, height, bounds, 2);
     const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
     const clipId = `mini-side-${Math.random().toString(36).slice(2)}`;
-    const path = prediction.points.map((point,index) => `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point.z),2)}`).join(" ");
-    return `<svg class="mini-trajectory mini-side-trajectory" viewBox="0 0 ${width} ${height}" aria-label="Predicted side view">
+    const path = trajectoryPath(prediction.points, tr, "z");
+    const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr, "z");
+    return `<svg class="mini-trajectory mini-side-trajectory" viewBox="0 0 ${width} ${height}" aria-label="Predicted side view with bounce positions">
       <defs><clipPath id="${clipId}"><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="5"/></clipPath></defs>
       <g clip-path="url(#${clipId})">
         <line x1="${tr.sx(0)}" y1="${tr.sy(0)}" x2="${tr.sx(table.length)}" y2="${tr.sy(0)}" stroke="#7890aa" stroke-width="2"/>
         <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(0)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(table.netHeight)}" stroke="#d2d9e2" stroke-width="1.5"/>
         <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>
+        ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="2"/>` : ""}
+        ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.ballRadius)}" r="2.5" fill="${color}"/>` : ""}
+        ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="2.5" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
       </g>
     </svg>`;
   }
@@ -4011,19 +4127,26 @@
   function sideTrajectorySvg(prediction, width = 760, height = 330) {
     const c = library.calibration;
     const table = c.table;
-    const xs = prediction.points.map(p => p.x).concat([c.pose.x, 0, table.length]);
-    const maxZ = Math.max(prediction.points[0]?.z ?? .24, ...prediction.points.map(p => p.z), table.netHeight) + .12;
+    const allPoints = prediction.points.concat(prediction.postBouncePoints || []);
+    const xs = allPoints.map(p => p.x).concat([c.pose.x, 0, table.length]);
+    const maxZ = Math.max(prediction.points[0]?.z ?? .24, ...allPoints.map(p => p.z), table.netHeight) + .12;
     const bounds = { minX: Math.min(...xs) - .25, maxX: Math.max(...xs) + .25, minY: -.08, maxY: maxZ };
     const tr = metricTransform(width, height, bounds, 24);
     const color = prediction.status === "table" ? "#55c98c" : prediction.status === "net" ? "#e76a73" : "#e4b85c";
-    const path = prediction.points.map((point,index) => `${index ? "L" : "M"} ${fmt(tr.sx(point.x),2)} ${fmt(tr.sy(point.z),2)}`).join(" ");
+    const path = trajectoryPath(prediction.points, tr, "z");
+    const secondArc = trajectoryPath(prediction.postBouncePoints || [], tr, "z");
     const surfaceY = tr.sy(0);
-    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Scale-accurate side trajectory">
+    const netHeightLabel = Math.abs(table.netHeight - regulationTable().netHeight) > 1e-6
+      ? `<text x="${tr.sx(table.length/2)+8}" y="${tr.sy(table.netHeight)-6}" fill="#d7dee7" font-size="12">${fmt(table.netHeight*100,2)} cm net</text>`
+      : "";
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Scale-accurate side trajectory with first and second bounce positions">
       <line x1="${tr.sx(0)}" y1="${surfaceY}" x2="${tr.sx(table.length)}" y2="${surfaceY}" stroke="#7890aa" stroke-width="6"/>
       <line x1="${tr.sx(table.length/2)}" y1="${surfaceY}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(table.netHeight)}" stroke="#d2d9e2" stroke-width="4"/>
       <path d="${path}" fill="none" stroke="${color}" stroke-width="4"/>
+      ${secondArc ? `<path d="${secondArc}" fill="none" stroke="${SECOND_BOUNCE_COLOR}" stroke-width="4"/>` : ""}
       ${prediction.landing ? `<circle cx="${tr.sx(prediction.landing.x)}" cy="${tr.sy(prediction.ballRadius)}" r="6" fill="${color}"/>` : ""}
-      <text x="${tr.sx(table.length/2)+8}" y="${tr.sy(table.netHeight)-6}" fill="#d7dee7" font-size="12">${fmt(table.netHeight*100,2)} cm net</text>
+      ${prediction.secondBounce ? `<circle cx="${tr.sx(prediction.secondBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="6" fill="${SECOND_BOUNCE_COLOR}"/>` : ""}
+      ${netHeightLabel}
     </svg>`;
   }
 
@@ -7937,6 +8060,7 @@ STATUS
       ["drill adjustments", DrillAdjustments],
       ["pose calibration", PoseCalibration],
       ["shot variation", ShotVariation],
+      ["table bounce", TableBounce],
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missingRuntimeModules.length) {
       throw new Error(`runtime deployment is incomplete; missing ${missingRuntimeModules.join(", ")}`);

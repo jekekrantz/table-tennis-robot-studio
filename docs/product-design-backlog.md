@@ -78,6 +78,9 @@ Serves are a core part of table tennis and should be represented explicitly rath
 
 ### Simulate and display post-bounce trajectories
 
+Implemented for shot creation and drill/drill-editor previews. Calibration
+views intentionally retain the first-flight-only display.
+
 Trajectory previews should continue through table impacts rather than stopping at the first bounce.
 
 - Add a physically meaningful ball-table bounce model, including the effects of incoming velocity and spin.

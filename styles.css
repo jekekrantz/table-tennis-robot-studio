@@ -267,6 +267,7 @@ button { color: inherit; }
 .trajectory-safe { color:#8ce0b2; }
 .trajectory-warning { color:#f3c66c; }
 .trajectory-miss { color:#ff9aa2; }
+.trajectory-second-bounce { color:#a9c9ff; }
 
 .port {
   position:absolute; z-index:9; width:16px; height:16px; border:2px solid #d6dfe9; border-radius:50%; background:#202938;

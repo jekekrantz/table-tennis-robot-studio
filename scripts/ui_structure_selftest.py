@@ -43,7 +43,7 @@ if not re.search(r'<script src="runtime\.bundle\.js\?v=[A-Za-z0-9._-]+" onerror=
     raise SystemExit("index.html must load the versioned runtime.bundle.js")
 for obsolete_script in (
     "pongbot-protocol.js", "pongbot-ble.js", "robot-geometry.js", "launch-model.js",
-    "guided-calibration.js", "drill-adjustments.js", "protocol-debug.js",
+    "guided-calibration.js", "drill-adjustments.js", "table-bounce.js", "protocol-debug.js",
     "studio-features-core.js", "debug-advisor.js", "app.js", "vendor/qrcode.min.js",
     "studio-features.js",
 ):
@@ -51,6 +51,14 @@ for obsolete_script in (
         raise SystemExit(f"production index must not load {obsolete_script} separately")
 if "deploy the complete release" not in html.lower():
     raise SystemExit("runtime bundle fallback must explain incomplete deployments")
+
+if app.count("{ includePostBounce: true }") != 3:
+    raise SystemExit("post-bounce simulation must remain scoped to shot creation and drill/editor previews")
+for token in ("postBouncePoints", "secondBounce", "postBounceClipped", 'SECOND_BOUNCE_COLOR = "#8bb8ff"'):
+    if token not in app:
+        raise SystemExit(f"Missing post-bounce trajectory integration: {token}")
+if 'Math.abs(table.netHeight - regulationTable().netHeight) > 1e-6' not in app:
+    raise SystemExit("default regulation net height label must stay hidden in trajectory views")
 
 for svg_id in ("poseSvg", "calibrationSideTrajectory", "tableDimensionSvg"):
     if not re.search(rf'<svg id="{svg_id}"[^>]*hidden', html):

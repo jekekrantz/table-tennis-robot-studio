@@ -34,6 +34,25 @@ The paper reports fitting on approximately 58,000 competitive flight
 trajectories and a 59% median landing-position error reduction over the standard
 baseline.
 
+## Ball-table contact model
+
+The shot-creation and drill-editor previews continue past a first on-table
+landing using Section III-C, equations (6)-(20), of Conti et al.:
+
+- instantaneous point contact with sliding/rolling regimes;
+- dynamic friction coefficient 0.25 and thin-shell inertia ratio 3/2;
+- impact-speed-dependent normal restitution `e_n = 0.98 + 0.02 v_z^-`;
+- the four published Lasso-fitted residual correction matrices, rotated from a
+  frame aligned with the incoming horizontal velocity into the app's table frame;
+- the same aerodynamic model and constant post-contact spin during the second
+  free-flight segment.
+
+The fitted contact residuals came from almost 25,000 contacts using Nittaku
+Nexcel 40+ 3-star balls and a SAN-EI table. Post-bounce placement is therefore
+shown as an equipment-specific estimate rather than an exact prediction. The
+preview stops at the projected second table-plane contact, or when the ball has
+travelled 0.5 m outside the table footprint, whichever happens first.
+
 ## Air properties
 
 Dry-air density is computed from the ideal-gas equation:
@@ -88,7 +107,8 @@ Guided calibration uses the fixed pivot-chain release point, distance/incidence-
 - The launch state still depends on the current Nova speed/spin calibration.
 - Physical head orientation is not yet converted to a fully verified 3D spin axis.
 - Spin is held constant during free flight.
-- No table-bounce model is used for first-landing prediction.
+- The bounce model does not change first-landing prediction, tuning, or guided
+  calibration; it is currently used only by shot/drill trajectory previews.
 - Robot alignment, ball wear and wheel contamination still require empirical
   calibration and safety margins.
 

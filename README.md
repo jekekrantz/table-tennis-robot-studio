@@ -221,7 +221,11 @@ See `PROTOCOL.md` for packet-level details and provenance.
 
 The trajectory preview uses the aerodynamic free-flight model from Conti et al.
 (2026), with ITTF ball and table values, constant angular velocity during the first
-flight segment, drag and Magnus forces, and numerical integration.
+flight segment, drag and Magnus forces, and numerical integration. Shot creation
+and drill-editor previews also use the paper's table-contact model to show the
+second arc and projected second bounce, capped at 0.5 m outside the table. The
+post-bounce result is marked as approximate because the fitted residuals are
+specific to the paper's ball and table hardware.
 
 Primary research source:
 

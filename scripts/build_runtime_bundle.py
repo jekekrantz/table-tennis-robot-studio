@@ -20,6 +20,7 @@ SOURCES = [
     "drill-adjustments.js",
     "pose-calibration.js",
     "shot-variation.js",
+    "table-bounce.js",
     "protocol-debug.js",
     "studio-features-core.js",
     "debug-advisor.js",
