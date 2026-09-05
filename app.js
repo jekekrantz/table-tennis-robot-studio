@@ -328,6 +328,7 @@
   let confirmCallback = null;
   let appView = "library";
   let appHistory = [];
+  const acknowledgedTrajectoryWarnings = new Set();
   let inspectorOpen = false;
   let addNodeDraftType = null;
   let playbackToken = 0;
@@ -2078,6 +2079,21 @@
 
     const query = String(libraryView.query || "").trim().toLowerCase();
     if (!query) {
+      const path = folderPath(libraryView.root, libraryView.folderId);
+      if (path.length > 1) {
+        const parent = path.at(-2);
+        const up = document.createElement("button");
+        up.type = "button";
+        up.className = "library-parent-item";
+        up.setAttribute("aria-label", `Up to ${parent.name}`);
+        up.innerHTML = `<span class="library-parent-icon">←</span><span><strong>${escapeHtml(parent.name)}</strong><small>Parent folder</small></span>`;
+        up.addEventListener("click", () => {
+          libraryView.folderId = parent.id;
+          renderDrillList();
+          renderLibraryEditState();
+        });
+        els.drillList.appendChild(up);
+      }
       for (const folder of childFolders(libraryView.root, libraryView.folderId)) {
         const button = document.createElement("button");
         button.type = "button";
@@ -3663,6 +3679,7 @@
   function validateDrill(drill) {
     const errors = [];
     const warnings = [];
+    const trajectoryWarnings = [];
     if (!drill.nodes.length) errors.push("The drill has no nodes.");
     if (!getNode(drill, drill.startNodeId)) errors.push("Choose a valid start node.");
 
@@ -3673,9 +3690,11 @@
         if (seenShotNames.has(key)) errors.push(`Ball name “${node.label}” is not unique.`);
         seenShotNames.add(key);
         if (outgoing(drill, node.id).length > 1) errors.push(`“${node.label}” may have only one outgoing path.`);
-        if (node.type === "serve") {
-          const warning = trajectoryPlanWarning(node.label, predictTrajectory(node.params, null, trajectoryOptionsForNode(node)));
-          if (warning) warnings.push(warning.replace(" The shot will still be sent.", ""));
+        const warning = trajectoryPlanWarning(node.label, predictTrajectory(node.params, null, trajectoryOptionsForNode(node)));
+        if (warning) {
+          const message = warning.replace(" The shot will still be sent.", "");
+          warnings.push(message);
+          trajectoryWarnings.push(message);
         }
       }
       if (node.type === "drill") {
@@ -3715,7 +3734,7 @@
     const reachableTerminal = drill.nodes.some(node => reachable.has(node.id) && outgoing(drill, node.id).length === 0);
     if (drill.nodes.length && !reachableTerminal) errors.push("At least one reachable path must finish at END.");
 
-    return { valid: errors.length === 0, errors, warnings, messages: [...errors, ...warnings] };
+    return { valid: errors.length === 0, errors, warnings, trajectoryWarnings, messages: [...errors, ...warnings] };
   }
 
   function findDrillRecursion(drillId, stack, visiting) {
@@ -4267,6 +4286,17 @@
     return `<span class="${cls}">${text}</span>`;
   }
 
+  function trajectoryLandingOutcome(prediction) {
+    const landing = prediction?.landing;
+    const table = prediction?.table;
+    if (!landing || !table) return null;
+    if (!prediction.net?.crossed || landing.x < table.length / 2) return "Predicted before the net";
+    if (landing.x > table.length) return "Predicted long";
+    if (Math.abs(landing.y) > table.width / 2) return "Predicted off the side";
+    if (landing.x < 0) return "Predicted behind the robot end";
+    return prediction.onTable ? "Predicted on the table" : "Predicted outside the table";
+  }
+
   function landingDescription(prediction) {
     const clearance = clearanceHtml(prediction);
     if (prediction.serve) {
@@ -4292,8 +4322,9 @@
     if (prediction.status === "edge") return `<strong class="trajectory-miss">Predicted table-edge contact</strong>.`;
     if (prediction.status === "net") return `<strong class="trajectory-miss">Predicted net contact</strong> · ${clearance}.`;
     if (!prediction.landing) return `<strong class="trajectory-warning">No landing found</strong> · ${clearance}.`;
-    const className = prediction.onTable ? "trajectory-safe" : "trajectory-miss";
-    const result = prediction.onTable ? "Predicted on the table" : "Predicted outside the table";
+    const playableLanding = prediction.onTable && prediction.net.crossed && prediction.landing.x >= prediction.table.length / 2;
+    const className = playableLanding ? "trajectory-safe" : "trajectory-miss";
+    const result = trajectoryLandingOutcome(prediction);
     const second = prediction.secondBounce
       ? `<br><span class="trajectory-second-bounce">Second bounce estimate · x ${fmt(prediction.secondBounce.x,2)} m, y ${fmt(prediction.secondBounce.y,2)} m, ${fmt(prediction.secondBounce.t - prediction.landing.t,2)} s after the first.</span>`
       : prediction.postBounceClipped
@@ -4315,8 +4346,20 @@
     if (prediction.status === "net") return `“${label}”: modeled to hit the net. The shot will still be sent.`;
     if (prediction.status === "edge") return `“${label}”: modeled to contact a table edge. The shot will still be sent.`;
     if (!prediction.landing) return `“${label}”: no modeled landing was found. The shot will still be sent.`;
-    if (!prediction.onTable) return `“${label}”: modeled to land outside the table at x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m. The shot will still be sent.`;
+    const outcome = trajectoryLandingOutcome(prediction);
+    if (!prediction.net.crossed || prediction.landing.x < prediction.table.length / 2) return `“${label}”: modeled to land before crossing the net at x ${fmt(prediction.landing.x,2)} m. The shot will still be sent.`;
+    if (!prediction.onTable) return `“${label}”: ${outcome.toLowerCase()} at x ${fmt(prediction.landing.x,2)} m, y ${fmt(prediction.landing.y,2)} m. The shot will still be sent.`;
     return null;
+  }
+
+  function trajectoryWarningAcknowledgementKey(drill, warnings) {
+    return JSON.stringify([drill.id, warnings]);
+  }
+
+  function trajectoryWarningAcknowledgementText(warnings) {
+    const first = warnings[0];
+    const more = warnings.length > 1 ? ` There ${warnings.length === 2 ? "is" : "are"} ${warnings.length - 1} more trajectory warning${warnings.length === 2 ? "" : "s"}.` : "";
+    return `${first}${more} This is a model warning, not an invalid Nova command. You can still play the drill.`;
   }
 
   function metricTransform(width, height, bounds, padding = 20) {
@@ -6837,6 +6880,18 @@
     if (!drill) return;
     const validation = validateDrill(drill);
     if (!validation.valid) { toast("Fix drill errors before playing."); return; }
+    if (validation.trajectoryWarnings.length) {
+      const acknowledgementKey = trajectoryWarningAcknowledgementKey(drill, validation.trajectoryWarnings);
+      if (!acknowledgedTrajectoryWarnings.has(acknowledgementKey)) {
+        askConfirm(
+          "Play despite trajectory warning?",
+          trajectoryWarningAcknowledgementText(validation.trajectoryWarnings),
+          () => { acknowledgedTrajectoryWarnings.add(acknowledgementKey); void startPlayback(); },
+          { actionLabel: "Play anyway", actionClass: "primary" }
+        );
+        return;
+      }
+    }
     if (!poseStaleAcknowledged && PoseCalibration.isStale(currentPoseSession())) {
       askConfirm(
         "Check the robot position?",

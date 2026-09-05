@@ -1538,6 +1538,7 @@ textarea { font:inherit; color:inherit; }
   font-size:1.45rem;
   cursor:pointer;
 }
+.screen-back-button { min-width:48px; min-height:48px; }
 .topbar-icon:hover,.screen-back-button:hover { background:#19212c; }
 .global-robot-status {
   min-height:40px;
@@ -1623,6 +1624,25 @@ textarea { font:inherit; color:inherit; }
   padding:11px 13px;
   border-style:solid;
 }
+.library-parent-item {
+  min-height:52px;
+  border:1px solid #354153;
+  border-radius:11px;
+  background:#121923;
+  color:#dce6f1;
+  padding:9px 13px;
+  display:grid;
+  grid-template-columns:30px minmax(0,1fr);
+  align-items:center;
+  gap:7px;
+  text-align:left;
+  cursor:pointer;
+}
+.library-parent-item:hover { border-color:#587099; background:#192330; }
+.library-parent-item strong,.library-parent-item small { display:block; }
+.library-parent-item strong { font-size:.82rem; }
+.library-parent-item small { margin-top:2px; color:var(--muted); font-size:.63rem; }
+.library-parent-icon { display:grid; place-items:center; color:#9bc9ff; font-size:1.2rem; }
 .library-folder-icon { color:#68a8ff; font-size:1.1rem; }
 .folder-chevron { color:#8e9bab; font-size:1.35rem; }
 .drill-library-card {
@@ -1980,7 +2000,7 @@ textarea { font:inherit; color:inherit; }
     margin:0;
     padding:7px 8px;
     display:grid;
-    grid-template-columns:42px 40px minmax(0,1fr) 40px 40px auto;
+    grid-template-columns:48px 40px minmax(0,1fr) 40px 40px auto;
     grid-template-rows:auto auto;
     gap:4px 8px;
   }

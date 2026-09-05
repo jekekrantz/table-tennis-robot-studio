@@ -165,8 +165,12 @@ for token in ('data-tuning-range="pacePct"', 'data-tuning-range="clearancePct"',
 for token in ('LIVE_TUNING_STORAGE_KEY', 'saveLiveTuningPreference', 'loadLiveTuningPreference'):
     if token not in app:
         raise SystemExit(f"Live tuning must persist outside drill storage: {token}")
-for token in ('function trajectoryPlanWarning', 'modeled to hit the net',
-              'The nominal adjusted shot will be sent instead', 'const trajectoryWarning'):
+for token in ('function trajectoryPlanWarning', 'function trajectoryLandingOutcome',
+              'modeled to hit the net', 'modeled to land before crossing the net',
+              'Predicted long', 'Predicted off the side',
+              'The nominal adjusted shot will be sent instead', 'const trajectoryWarning',
+              'trajectoryWarnings', 'Play despite trajectory warning?', 'Play anyway',
+              'This is a model warning, not an invalid Nova command'):
     if token not in app:
         raise SystemExit(f"Missing non-blocking trajectory feedback: {token}")
 if 'if (!adjusted.feasible) errors.push' in app or 'if (variation.error) errors.push' in app:
@@ -227,6 +231,11 @@ for token in (
 # Library/navigation semantics.
 if 'libraryView = { root: "builtin", folderId: "builtin-root", query: "" };' not in app:
     raise SystemExit("Drill browser must start at the Built-in root")
+for token in ('className = "library-parent-item"', 'Parent folder', 'path.at(-2)'):
+    if token not in app:
+        raise SystemExit(f"Missing explicit parent-folder navigation: {token}")
+if '.screen-back-button { min-width:48px; min-height:48px; }' not in css:
+    raise SystemExit("Back controls must retain a large touch target")
 for name in (
     "Drill: Forehand / backhand alternating", "Drill: 2-2 forehand / backhand",
     "Drill: Falkenberg", "Drill: Three spots random", "Shot: No-spin center",

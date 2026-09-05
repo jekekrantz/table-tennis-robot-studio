@@ -12,6 +12,46 @@ Captured 2026-09-04. These are product observations and future work, not complet
 
 ## Completed
 
+### Improve back and folder navigation — completed 2026-09-04
+
+- Increased Back controls to a minimum 48 × 48 px target, including on phones.
+- Added an explicit parent-folder row at the top of every nested built-in or My
+  drills folder while retaining breadcrumbs for direct ancestor navigation.
+
+### Make trajectory checks informative, not restrictive — completed 2026-09-04
+
+- Distinguishes modeled net contact, failure to cross the net, long placement,
+  side misses, edge contact, and missing landings.
+- Treats trajectory outcomes as warnings rather than hardware-invalid errors.
+- Requires a lightweight `Play anyway` acknowledgement once per distinct set of
+  trajectory warnings during the current app session.
+- Continues to block commands whose Nova elevation, placement, orientation, or
+  other hardware representation is invalid.
+
+### Reduce text in core workflows — completed 2026-09-04
+
+- Audited the Run, drill editing, shot editing, live-tuning, library, and
+  calibration workflows to reduce persistent routine text and dead space.
+- Kept routine labels concise and moved deeper explanations behind information
+  affordances that work with hover, keyboard focus, and tap.
+- Retained persistent text where it remains appropriate for setup, settings,
+  safety, and uncommon workflows.
+
+### Use practical numeric shot controls — completed 2026-09-04
+
+- Limited displayed precision and control sizing to values meaningful to people
+  and the BLE representation.
+- Added prominent `−` and `+` controls while retaining accessible direct numeric
+  entry.
+- Based ranges and increments on practical physical and encoding limits.
+
+### Convert live tuning to sliders with fine controls — completed 2026-09-04
+
+- Added sliders for coarse adjustment with legible current values.
+- Retained separate, generously sized `−` and `+` buttons for fine adjustment.
+- Supports touch, pointer, and keyboard use while preserving non-destructive
+  tuning and rolling live-update behavior.
+
 ### Serve shot type — completed 2026-09-04
 
 - Added a first-class **Serve** node with serve-oriented defaults and the same full manual speed, spin, elevation, aim, variation, timing, and connection controls as a Shot.
@@ -47,16 +87,6 @@ Captured 2026-09-04. These are product observations and future work, not complet
 
 ## Backlog
 
-### Reduce text in core workflows
-
-There is far too much persistent text around frequently used features. Audit the Run, drill editing, shot editing, live-tuning, library, and calibration workflows.
-
-- Keep routine labels and explanations to a few words where possible.
-- Move longer explanations behind a small outlined circular information button placed at the top-right of the control or group it explains.
-- The information affordance must work with hover, keyboard focus, and tap; it must not depend on hover alone.
-- Longer persistent text remains appropriate in settings, uncommon setup flows, safety-critical notices, and places users do not operate on every session.
-- The top of the current live-tuning interface is one concrete example, but not the only place that needs this treatment.
-
 ### Add an idle/resting robot-head state
 
 When the app does not expect to shoot soon—normally outside Run drill and calibration—the head should return to a defined resting state.
@@ -67,40 +97,6 @@ Goals:
 - Reduce sustained stress or load on motors and gears.
 - Define the safe resting pose, entry delay, cancellation behavior, and protocol command before implementation.
 - Enter rest after leaving shooting/calibration modes, while preserving explicit manual or diagnostic control where appropriate.
-
-### Use practical numeric shot controls
-
-Shot inputs expose much more precision than a person or the BLE representation needs.
-
-- Speed should normally fit a value such as `12.34 m/s` rather than exposing long decimals.
-- Spin should allow values into the hundreds of rps while remaining compact; roughly six input characters is sufficient.
-- Derive allowed ranges and increments from meaningful physical limits and the effective BLE encoding resolution. Do not imply precision the robot cannot use.
-- Add prominent `−` and `+` controls that use available space well.
-- Keep direct numeric entry for freedom and accessibility.
-
-### Improve back and folder navigation
-
-- Make Back controls larger and easier to hit, especially on phones.
-- In folder views, provide an explicit parent-folder item that moves up one level.
-- Do not rely on clicking a breadcrumb/path segment as the only way to navigate upward.
-
-### Convert live tuning to sliders with fine controls
-
-- Use sliders for coarse adjustment.
-- Overlay the current numeric value legibly on the slider.
-- Retain `−` and `+` buttons for fine adjustment, using smaller steps than today.
-- Give the buttons sufficiently large hit areas and separate them from the slider so a near-miss cannot jump the slider toward an extreme.
-- Support touch, pointer, and keyboard operation.
-- Keep the existing non-destructive tuning semantics and rolling live-update behavior.
-
-### Make trajectory checks informative, not restrictive
-
-The app currently refused to play a deliberately authored shot that the model predicted would hit the net.
-
-- Clearly indicate predicted outcomes such as net contact, failure to cross the net, landing long, landing off the side, or no modeled landing.
-- Distinguish a model warning from a transport/hardware-invalid command.
-- Allow the user to play physically encodable shots despite trajectory warnings after an appropriately lightweight acknowledgement.
-- Continue blocking only commands that cannot be represented safely or validly for the hardware.
 
 ### Support second-bounce goals and variation
 
@@ -144,11 +140,7 @@ delay(A → B) = 2 × (A flight time + A bounce-to-peak time)
 
 ## Suggested order when revisiting
 
-1. Perform the core-workflow text and dead-space audit.
-2. Improve numeric controls, Back targets, and parent-folder navigation.
-3. Redesign live tuning as coarse sliders plus fine buttons.
-4. Separate trajectory warnings from genuinely invalid hardware commands.
-5. Add second-bounce goals/variation and the Serve node.
-6. Add manual/Auto transition timing using the initial return-cycle model.
-7. Specify and test the resting-head state with the physical robot available.
-8. Promote AI assist globally and add screen-aware help context.
+1. Add second-bounce goals and variation.
+2. Add manual/Auto transition timing using the initial return-cycle model.
+3. Specify and test the resting-head state with the physical robot available.
+4. Promote AI assist globally and add screen-aware help context.

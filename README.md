@@ -10,7 +10,7 @@ development without a build step or package manager.
 
 The drill browser deliberately separates two roots:
 
-- **Built-in** is read-only and ships with the app. It is organized into virtual folders (Shots, Footwork, Placement, Spin, and Random / match-like) and updates automatically with new app releases. Use **Copy to My drills** before changing a built-in graph.
+- **Built-in** is read-only and ships with the app. It is organized into virtual folders (Shots, Serve / receive, Footwork, Placement, Spin, and Random / match-like) and updates automatically with new app releases. Use **Copy to My drills** before changing a built-in graph.
 - **My drills** contains only user-created/copied drills. It is saved locally, exported/imported with calibration, and supports nested virtual folders, move, duplicate, rename, and delete operations. Removing a folder moves its contents up one level instead of deleting drills.
 
 Built-in drills are not written to browser storage. This prevents app upgrades from overwriting custom work and prevents stale stored defaults from hiding newer built-in presets. Live tuning is stored separately as a player preference and never edits either source.
@@ -25,7 +25,7 @@ The user-facing navigation is organized around intent rather than editor interna
 4. Node/connection **Details** are a separate screen on phones and a side pane on desktop, so editing controls never cover the graph. Drill name, description, tags, folder and expected robot pose live in **Drill details** rather than on the canvas.
 5. **Robot** is global. It owns Connect/Disconnect, diagnostics, calibration and model/geometry settings. The compact Nova status in the top bar opens the same Robot page.
 
-Back arrows pop navigation history; close buttons dismiss only the current dialog/details layer.
+Back arrows use large touch targets and pop navigation history; close buttons dismiss only the current dialog/details layer. Nested library folders also begin with an explicit parent-folder row, so breadcrumbs are never the only way upward.
 
 ## Current capabilities
 
@@ -51,7 +51,10 @@ BLE authentication, packet construction, Start/Stop state handling, and
 calibration-to-hardware conversion as safety-sensitive.
 
 Predicted trajectories are planning aids, not safety interlocks or guarantees of
-where a physical ball will land.
+where a physical ball will land. Net, edge, short, long, side, and missing-landing
+predictions are warnings: after a lightweight acknowledgement, a representable
+command may still be played. Invalid Nova encodings and unverified physical head
+orientations remain blocked.
 
 ## Run locally
 
