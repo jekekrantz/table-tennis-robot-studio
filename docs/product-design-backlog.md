@@ -85,18 +85,31 @@ Captured 2026-09-04. These are product observations and future work, not complet
 - Removed the routine `15.25 cm net` annotation; net height is labeled only
   when it differs from the regulation default.
 
+### Global, context-aware AI assist — completed 2026-09-06
+
+- Added AI assist to the top app bar so it is reachable from every screen.
+- Added local help for common navigation, calibration, connection, and import/export questions while preserving validated drill creation and editing.
+- Shows the allow-listed context before use: screen, active drill name/source, visible selection, general Nova state, and current activity. Drill edits may also include the active drill definition.
+- Excludes Bluetooth logs, device identifiers, API keys, calibration values, unrelated stored drills, and arbitrary application state.
+
+### Add safe idle and connection lifecycle — software completed 2026-09-06
+
+- Leaving active Run or calibration work sends STOP as needed and waits for Nova to report Ready while retaining the BLE connection for a fast restart.
+- Added a Robot-menu setting to disconnect after 5, 10, 15, 30, or 60 minutes without robot use, with 10 minutes as the default and Never as an option.
+- Running drills and calibration do not time out. Changing browser visibility alone does not trigger shutdown.
+- The inactivity timeout performs an orderly Ready transition before disconnecting. Page close retains the separate best-effort STOP and immediate GATT disconnect because browsers cannot guarantee awaited BLE work during teardown.
+
 ## Backlog
 
-### Add an idle/resting robot-head state
+### Verify and enable a physical robot-head parking pose
 
-When the app does not expect to shoot soon—normally outside Run drill and calibration—the head should return to a defined resting state.
+The software idle state now confirms Nova is Ready and retains the connection. A distinct physical parking move remains disabled until it can be verified on the robot without firing or feeding.
 
 Goals:
 
-- Give the user an obvious physical signal that the robot is not about to shoot.
-- Reduce sustained stress or load on motors and gears.
 - Define the safe resting pose, entry delay, cancellation behavior, and protocol command before implementation.
-- Enter rest after leaving shooting/calibration modes, while preserving explicit manual or diagnostic control where appropriate.
+- Confirm that entering and leaving the pose cannot feed or fire a ball and measure the added first-shot positioning delay.
+- Once verified, add the pose as an optional step after the existing confirmed-Ready transition.
 
 ### Support second-bounce goals and variation
 
@@ -127,20 +140,8 @@ delay(A → B) = 2 × (A flight time + A bounce-to-peak time)
 - Recompute Auto timing when relevant shot, serve, spin, bounce, robot-pose, or calibration parameters change.
 - Keep future timing models open to return types such as flick, push, kick, opening loop, and other user-selectable responses.
 
-### Make AI assist global and context-aware
-
-- Add an AI assist button in the top app bar beside the Nova control so it is reachable from every screen.
-- Include the current screen/menu, active drill or editor selection, and relevant visible state as context.
-- Preserve all existing drill-assistant capabilities while extending the assistant to general app help.
-- Support questions such as:
-  - “How do I make a new drill?”
-  - “Where do I add a shot in the shot editor?”
-  - “How do I calibrate the robot?”
-- Make it clear what context will be used, and do not silently include secrets, Bluetooth logs, or unrelated stored data in external AI requests.
-
 ## Suggested order when revisiting
 
 1. Add second-bounce goals and variation.
 2. Add manual/Auto transition timing using the initial return-cycle model.
-3. Specify and test the resting-head state with the physical robot available.
-4. Promote AI assist globally and add screen-aware help context.
+3. Verify and enable the physical resting-head pose with the robot available.

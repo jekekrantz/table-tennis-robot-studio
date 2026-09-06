@@ -30,6 +30,7 @@ for expected in [
     "addServeBtn",
     "editorRunBtn", "robotDiagnosticsBtn", "robotDialogContext",
     "robotDialogConnectBtn",
+    "aiGlobalBtn", "robotIdleDisconnectInput", "robotIdleStatus",
     "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
 ]:
     if expected not in ids:
@@ -223,6 +224,7 @@ for token in (
     'function requestRobotConnection', 'browserBluetoothInstructions',
     'Connect once and the app will continue automatically', 'emergencyPageExit',
     'robot?.emergencyShutdown?.()', 'Copy this drill to edit it?',
+    'disconnectRobotAfterIdle', 'enterRobotIdleState', 'disconnectAfterIdleMinutes',
 ):
     if token not in app:
         raise SystemExit(f"Missing low-friction connection/safety/edit behavior: {token}")
@@ -239,6 +241,7 @@ for token in (
 for token in (
     'Share drill', 'AI assist', 'Copy AI request', 'Show QR code', 'SpeechRecognition',
     'promptRequestsFreshDrill', "proposalIntent==='create'", 'Create drill',
+    'promptRequestsAppHelp', 'Context used for this request', 'aiGlobalBtn',
 ):
     if token not in features:
         raise SystemExit(f"Missing integrated feature UI: {token}")

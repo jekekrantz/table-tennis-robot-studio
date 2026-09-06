@@ -14,10 +14,13 @@
       <div class="brand-title-row"><h1>Table Tennis Robot Studio</h1></div>
       <p id="topbarContext">Drill library</p>
     </div>
-    <button id="robotStatusBtn" class="global-robot-status disconnected" type="button" aria-label="Open robot controls">
-      <span class="robot-status-dot" aria-hidden="true"></span>
-      <span id="robotStatusText">Nova</span>
-    </button>
+    <div class="topbar-actions">
+      <button id="aiGlobalBtn" class="global-ai-button" type="button" aria-label="Open AI assist">✨ <span>AI</span></button>
+      <button id="robotStatusBtn" class="global-robot-status disconnected" type="button" aria-label="Open robot controls">
+        <span class="robot-status-dot" aria-hidden="true"></span>
+        <span id="robotStatusText">Nova</span>
+      </button>
+    </div>
   </header>
 
   <div class="app-layout">
@@ -153,6 +156,12 @@
           <section class="robot-menu-card panel-card">
             <button id="calibrationBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">◎</span><span><strong>Calibration</strong><small>Guided calibration and trajectory model</small></span><span>›</span></button>
             <button id="robotSettingsShortcutBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">⚙</span><span><strong>Robot / model settings</strong><small>Geometry, air model and Nova scaling</small></span><span>›</span></button>
+          </section>
+          <section class="robot-connection-settings panel-card">
+            <div><h3>Connection timeout</h3><p>Disconnect after Nova has not been used. Running drills and calibration never time out.</p></div>
+            <label class="field"><span>Disconnect when unused</span><select id="robotIdleDisconnectInput"><option value="0">Never</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
+            <p id="robotIdleStatus" class="helper" aria-live="polite"></p>
+            <details class="robot-rest-details"><summary>About the resting state</summary><p>When shooting finishes, the app confirms Nova is Ready and keeps the connection available for a fast restart. A separate physical head-parking move is not enabled until its non-firing protocol behavior and safe pose have been verified on the robot.</p></details>
           </section>
           <section class="model-default-card panel-card"><h3>Current defaults</h3><dl><div><dt>Base → yaw pivot</dt><dd>24.2 cm</dd></div><div><dt>Yaw → pitch → wheels</dt><dd>7.5 + 7.5 cm</dd></div><div><dt>Yaw pivot height</dt><dd>24.0 cm</dd></div><div><dt>Exit speed model</dt><dd>One affine line</dd></div></dl></section>
         </div>
@@ -514,7 +523,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-06.2" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-06.3" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

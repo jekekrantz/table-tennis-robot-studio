@@ -287,6 +287,8 @@
     robotPageDevice: $("robotPageDevice"),
     robotDiagnosticsBtn: $("robotDiagnosticsBtn"),
     robotSettingsShortcutBtn: $("robotSettingsShortcutBtn"),
+    robotIdleDisconnectInput: $("robotIdleDisconnectInput"),
+    robotIdleStatus: $("robotIdleStatus"),
   };
 
   let startupNotice = "";
@@ -331,6 +333,9 @@
   let liveRetuneInFlight = false;
   let pendingRobotAction = null;
   let pendingRobotReason = "";
+  let robotIdleTimer = null;
+  let robotLastUseAt = Date.now();
+  let robotIdleDisconnecting = false;
   let poseCalibrationState = null;
   let poseCalibrationDrag = null;
   let poseMeasurementGesture = null;
@@ -368,6 +373,7 @@
       activeDrillSource: "builtin",
       activeDrillId: builtInCatalog?.defaultDrillId ?? null,
       calibration: sanitizeCalibration(calibration),
+      robotSettings: defaultRobotSettings(),
       folders: [],
       drills: [],
     };
@@ -379,6 +385,7 @@
     if (!Array.isArray(library.folders)) library.folders = [];
     library.schemaVersion = SCHEMA_VERSION;
     if (!library.calibration) library.calibration = defaultCalibration();
+    library.robotSettings = sanitizeRobotSettings(library.robotSettings);
 
     const folderIds = new Set(library.folders.map(folder => folder.id));
     library.folders = library.folders
@@ -544,6 +551,16 @@
       testShot: { speedMps: 8.0, spinRps: 22, elevationDeg: 4, aimDeg: 0 },
       guided: defaultGuidedCalibration(),
     };
+  }
+
+  function defaultRobotSettings() {
+    return { disconnectAfterIdleMinutes: 10 };
+  }
+
+  function sanitizeRobotSettings(raw = {}) {
+    const allowed = new Set([0, 5, 10, 15, 30, 60]);
+    const minutes = Math.round(finite(raw.disconnectAfterIdleMinutes, 10));
+    return { disconnectAfterIdleMinutes: allowed.has(minutes) ? minutes : 10 };
   }
 
   function defaultDrill(name = "Custom drill") {
@@ -1739,6 +1756,7 @@
       activeDrillSource: source,
       activeDrillId: activeId,
       calibration: sanitizeCalibration(raw.calibration),
+      robotSettings: sanitizeRobotSettings(raw.robotSettings),
       folders,
       drills,
     };
@@ -1829,6 +1847,25 @@
     return view === "run" ? "Run drill" : view === "editor" ? "Drill editor" : view === "robot" ? "Robot" : "Drill library";
   }
 
+  function getAiContext() {
+    const drill = activeDrill();
+    const context = {
+      screen: els.calibrationDialog?.open ? "Calibration" : appViewLabel(appView),
+      activeDrill: drill ? (isActiveBuiltIn() ? builtInDisplayName(drill.name) : drill.name) : null,
+      drillSource: drill ? (isActiveBuiltIn() ? "Built-in" : "My drills") : null,
+      selection: null,
+      robotStatus: robot?.connected ? robotPhaseLabel(robot.snapshot()) : "Disconnected",
+      activity: playbackRunning ? "Running drill" : calibrationFeedRunning ? "Calibration feed" : calibrationTestRunning ? "Calibration test" : "Idle",
+    };
+    if (appView === "editor" && selection?.kind === "node") {
+      const node = getNode(drill, selection.id);
+      if (node) context.selection = `${node.type}: ${node.label}`;
+    } else if (appView === "editor" && selection?.kind === "edge") {
+      context.selection = "shot transition";
+    }
+    return context;
+  }
+
   function navigateApp(view, { push = true, allowBuiltInEditor = false } = {}) {
     const normalized = ["library", "run", "editor", "robot"].includes(view) ? view : "library";
     if (normalized === "editor" && isActiveBuiltIn() && !allowBuiltInEditor) {
@@ -1844,6 +1881,9 @@
     if (normalized === "run" && !activeDrill()) view = "library";
     if (normalized === "editor" && !activeDrill()) view = "library";
     const next = ["library", "run", "editor", "robot"].includes(view) ? view : "library";
+    if (appView === "run" && next !== "run" && (playbackRunning || calibrationTestRunning || robotIsActive())) {
+      void enterRobotIdleState("Leaving Run");
+    }
     if (push && next !== appView) appHistory.push(appView);
     appView = next;
     inspectorOpen = false;
@@ -1990,6 +2030,7 @@
     els.emptyHint.hidden = Boolean(drill?.nodes.length);
     renderLibraryEditState();
     renderRunPage();
+    renderRobotIdleSettings();
   }
 
   function libraryFolderDefs(root = libraryView.root) {
@@ -6132,6 +6173,7 @@
       return;
     }
     calibrationFeedRunning = true;
+    noteRobotUse();
     calibrationFeedToken += 1;
     const token = calibrationFeedToken;
     renderGuidedCalibration();
@@ -6157,6 +6199,7 @@
       if (token === calibrationFeedToken) calibrationFeedRunning = false;
       updateRobotUI();
       renderGuidedCalibration();
+      if (robot?.connected) noteRobotUse();
     }
   }
 
@@ -6170,6 +6213,7 @@
     }
     updateRobotUI();
     renderGuidedCalibration();
+    if (robot?.connected) noteRobotUse();
   }
 
   async function toggleGuidedFeed() {
@@ -7229,6 +7273,7 @@
     playbackToken += 1;
     const token = playbackToken;
     calibrationTestRunning = true;
+    noteRobotUse();
     calibrationTestMessage = robot.connected ? "Waiting for Nova Ready…" : "Opening Nova chooser…";
     updatePlayButton();
     renderCalibrationTestShotPanel();
@@ -7282,6 +7327,7 @@
         updatePlayButton();
         updateRobotUI();
         renderCalibrationTestShotPanel();
+        if (robot?.connected) noteRobotUse();
       }
     }
   }
@@ -7350,6 +7396,7 @@
     playbackToken += 1;
     const token = playbackToken;
     playbackRunning = true;
+    noteRobotUse();
     liveRetunePending = false;
     if (liveRetuneTimer) clearTimeout(liveRetuneTimer);
     liveRetuneTimer = null;
@@ -7566,6 +7613,7 @@
         activeEdgeRef = null;
         updatePlayButton();
         renderGraph();
+        if (robot?.connected) noteRobotUse();
       }
     }
   }
@@ -7626,6 +7674,7 @@
       updatePlayButton();
       updateRobotUI();
       renderCalibrationTestShotPanel();
+      if (robot?.connected) noteRobotUse();
     }
   }
 
@@ -8156,6 +8205,75 @@
       els.robotDialogContext.textContent = "";
     }
   }
+
+  function renderRobotIdleSettings() {
+    if (!els.robotIdleDisconnectInput || !els.robotIdleStatus || !library) return;
+    const minutes = library.robotSettings.disconnectAfterIdleMinutes;
+    els.robotIdleDisconnectInput.value = String(minutes);
+    if (!robot?.connected) {
+      els.robotIdleStatus.textContent = minutes ? `Nova will disconnect after ${minutes} minutes of no shooting or calibration use.` : "Automatic disconnect is off.";
+    } else if (!minutes) {
+      els.robotIdleStatus.textContent = "Connected · automatic disconnect is off.";
+    } else if (robotIdleDisconnecting) {
+      els.robotIdleStatus.textContent = "Stopping safely and disconnecting…";
+    } else {
+      const remainingMs = Math.max(0, robotLastUseAt + minutes * 60000 - Date.now());
+      els.robotIdleStatus.textContent = `Connected · disconnects after about ${Math.max(1, Math.ceil(remainingMs / 60000))} minute${remainingMs > 60000 ? "s" : ""} without robot use.`;
+    }
+  }
+
+  function clearRobotIdleTimer() {
+    if (robotIdleTimer) clearTimeout(robotIdleTimer);
+    robotIdleTimer = null;
+  }
+
+  function scheduleRobotIdleDisconnect() {
+    clearRobotIdleTimer();
+    renderRobotIdleSettings();
+    const minutes = library?.robotSettings?.disconnectAfterIdleMinutes || 0;
+    if (!robot?.connected || !minutes || robotIdleDisconnecting) return;
+    const remainingMs = Math.max(250, robotLastUseAt + minutes * 60000 - Date.now());
+    robotIdleTimer = setTimeout(() => { void disconnectRobotAfterIdle(); }, remainingMs);
+  }
+
+  function noteRobotUse() {
+    robotLastUseAt = Date.now();
+    scheduleRobotIdleDisconnect();
+  }
+
+  async function enterRobotIdleState(reason = "Robot idle") {
+    if (!robot?.connected) return;
+    if (calibrationFeedRunning) await stopGuidedFeed();
+    if (playbackRunning || calibrationTestRunning || robotIsActive()) await stopPlayback();
+    if (robot.connected && robot.authenticated && robot.wireState !== 3 && robot.wireState !== 0) {
+      await robot.stopAndWaitFree();
+    }
+    robot.log(`${reason}: Nova Ready; connection retained`, "info");
+    noteRobotUse();
+  }
+
+  async function disconnectRobotAfterIdle() {
+    if (!robot?.connected || robotIdleDisconnecting) return;
+    if (playbackRunning || calibrationTestRunning || calibrationFeedRunning || robotIsActive()) {
+      noteRobotUse();
+      return;
+    }
+    robotIdleDisconnecting = true;
+    clearRobotIdleTimer();
+    renderRobotIdleSettings();
+    try {
+      await enterRobotIdleState("Connection timeout");
+      await robot.disconnect({ stopFirst: true });
+      toast("Nova safely stopped and disconnected after inactivity");
+    } catch (error) {
+      robot.log(`Inactivity shutdown was not confirmed: ${error.message}`, "error");
+      toast(`Nova inactivity shutdown was not confirmed: ${error.message}`);
+    } finally {
+      robotIdleDisconnecting = false;
+      updateRobotUI();
+    }
+  }
+
   function updateRobotUI() {
     const snapshot = robot?.snapshot() || {
       connected: false,
@@ -8214,6 +8332,9 @@
       els.robotDialogConnectBtn.disabled = connecting || (!snapshot.browserSupported && !snapshot.connected);
       els.robotDialogConnectBtn.textContent = connecting ? "Connecting…" : "Connect Nova";
     }
+    if (!snapshot.connected) clearRobotIdleTimer();
+    else if (!robotIdleTimer && !robotIdleDisconnecting) scheduleRobotIdleDisconnect();
+    renderRobotIdleSettings();
     updatePlayButton();
     renderCalibrationTestShotPanel();
     renderGuidedCalibration();
@@ -8250,9 +8371,11 @@
         if (calibrationFeedRunning) await stopGuidedFeed();
         if (playbackRunning || calibrationTestRunning || robotIsActive()) await stopPlayback();
         await robot.disconnect({ stopFirst: false });
+        clearRobotIdleTimer();
         toast("Nova disconnected");
       } else {
         await robot.connect();
+        noteRobotUse();
         const snapshot = robot.snapshot();
         toast(snapshot.ready ? `Connected to ${snapshot.deviceName || "Nova"} · Ready` : `Connected · ${snapshot.stateName}`);
         const continuation = pendingRobotAction;
@@ -8270,6 +8393,7 @@
     if (!robot?.connected || !robot.authenticated) return;
     try {
       const status = await robot.queryStatus();
+      noteRobotUse();
       toast(`Nova: ${status.name}`);
     } catch (error) {
       toast(error.message);
@@ -8281,6 +8405,7 @@
     try {
       if (playbackRunning || robotIsActive()) await stopPlayback();
       await robot.disconnect({ stopFirst: false });
+      clearRobotIdleTimer();
       toast("Nova disconnected");
     } catch (error) {
       toast(error.message);
@@ -8308,6 +8433,8 @@
   }
 
   function handleUnexpectedRobotDisconnect(event) {
+    clearRobotIdleTimer();
+    renderRobotIdleSettings();
     if (event.detail?.expected) return;
     if (playbackRunning || calibrationTestRunning) {
       const wasCalibrationTest = calibrationTestRunning;
@@ -8517,8 +8644,15 @@
 
     els.calibrationBtn.addEventListener("click", () => openCalibrationWorkspace("guided"));
     els.robotSettingsShortcutBtn?.addEventListener("click", () => openCalibrationWorkspace("pose"));
+    els.robotIdleDisconnectInput?.addEventListener("change", () => {
+      library.robotSettings = sanitizeRobotSettings({ disconnectAfterIdleMinutes: els.robotIdleDisconnectInput.value });
+      saveLibrary();
+      noteRobotUse();
+      renderRobotIdleSettings();
+      toast(library.robotSettings.disconnectAfterIdleMinutes ? `Automatic disconnect set to ${library.robotSettings.disconnectAfterIdleMinutes} minutes` : "Automatic disconnect turned off");
+    });
     els.closeCalibrationBtn.addEventListener("click", () => {
-      if (calibrationFeedRunning) void stopGuidedFeed();
+      if (calibrationFeedRunning || calibrationTestRunning || robotIsActive()) void enterRobotIdleState("Leaving calibration");
       els.calibrationDialog.close();
     });
     bindCalibrationInputs();
@@ -8550,6 +8684,7 @@
 
     window.addEventListener("resize", () => renderGraph());
     const emergencyPageExit = () => {
+      clearRobotIdleTimer();
       playbackRunning = false;
       calibrationTestRunning = false;
       calibrationFeedRunning = false;
@@ -8564,6 +8699,7 @@
   globalThis.TableTennisRobotStudio = {
     getLibrary: () => library,
     getActiveDrill: () => activeDrill(),
+    getAiContext,
     isActiveBuiltIn: () => isActiveBuiltIn(),
     validateDrill,
     saveLibrary,
