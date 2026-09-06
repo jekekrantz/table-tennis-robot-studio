@@ -54,6 +54,11 @@ MAG_ROWS = [
     (17.0, -4.48e-4, .371, 650, -1.0e-7, 2.3e-4, -.0375),
 ]
 
+DELTA_VV = [[0, 0, 0], [0, 0, 3.378e-3], [-0.02344, 0, -0.02717]]
+DELTA_VW = [[0, 3.330e-4, 0], [-6.940e-4, -5.428e-5, -2.126e-4], [1.768e-5, -1.148e-5, -8.228e-6]]
+DELTA_WV = [[-0.69324, 0, -1.02984], [0.51114, 0, 0], [0.34033, 0, 0]]
+DELTA_WW = [[0.06456, 3.501e-4, 0.01193], [0.00756, 0.00211, 0.00389], [0.00314, 0.00291, 0.03411]]
+
 
 def interp(x: float, xs: list[float], ys: list[float]) -> float:
     if x <= xs[0]:
@@ -145,7 +150,7 @@ def rk4(position, velocity, omega):
     return next_position, next_velocity
 
 
-def simulate(speed: float, spin_rps: float, elevation_deg: float, aim_deg: float):
+def simulate(speed: float, spin_rps: float, elevation_deg: float, aim_deg: float, details=False):
     yaw = math.radians(aim_deg)
     elevation = math.radians(elevation_deg)
     # Fixed measured mechanical chain. Base yaw is zero in the default library;
@@ -170,6 +175,7 @@ def simulate(speed: float, spin_rps: float, elevation_deg: float, aim_deg: float
     t = 0.0
     while t < MAX_T:
         previous = position[:]
+        previous_velocity = velocity[:]
         position, velocity = rk4(position, velocity, omega)
         t += DT
         net_x = TABLE_L / 2
@@ -184,8 +190,85 @@ def simulate(speed: float, spin_rps: float, elevation_deg: float, aim_deg: float
                 previous[0] + ratio * (position[0] - previous[0]),
                 previous[1] + ratio * (position[1] - previous[1]),
             )
+            impact_velocity = [previous_velocity[i] + ratio * (velocity[i] - previous_velocity[i]) for i in range(3)]
             break
+    if details:
+        return landing, net, impact_velocity if landing else None, omega
     return landing, net
+
+
+def mat_vec(matrix, vector):
+    return [sum(row[i] * vector[i] for i in range(3)) for row in matrix]
+
+
+def mat_mul(left, right):
+    return [[sum(left[row][k] * right[k][column] for k in range(3)) for column in range(3)] for row in range(3)]
+
+
+def transpose(matrix):
+    return [list(column) for column in zip(*matrix)]
+
+
+def apply_table_bounce(velocity, omega):
+    restitution = 0.98 + 0.02 * velocity[2]
+    surface_x = velocity[0] - BALL_R * omega[1]
+    surface_y = velocity[1] + BALL_R * omega[0]
+    surface_speed = math.hypot(surface_x, surface_y)
+    alpha = min(2 / 5, 0.25 * (1 + restitution) * abs(velocity[2]) / surface_speed) if surface_speed > 1e-9 else 2 / 5
+    kappa = 3 / 2
+    base_velocity = [
+        (1 - alpha) * velocity[0] + alpha * BALL_R * omega[1],
+        (1 - alpha) * velocity[1] - alpha * BALL_R * omega[0],
+        -restitution * velocity[2],
+    ]
+    base_omega = [
+        (1 - kappa * alpha) * omega[0] - kappa * alpha / BALL_R * velocity[1],
+        (1 - kappa * alpha) * omega[1] + kappa * alpha / BALL_R * velocity[0],
+        omega[2],
+    ]
+    horizontal_speed = math.hypot(velocity[0], velocity[1])
+    cosine = velocity[0] / horizontal_speed if horizontal_speed > 1e-9 else 1
+    sine = velocity[1] / horizontal_speed if horizontal_speed > 1e-9 else 0
+    rotation = [[cosine, sine, 0], [-sine, cosine, 0], [0, 0, 1]]
+
+    def correction(matrix, vector):
+        rotated = mat_mul(mat_mul(transpose(rotation), matrix), rotation)
+        return mat_vec(rotated, vector)
+
+    velocity_correction = [a + b for a, b in zip(correction(DELTA_VV, velocity), correction(DELTA_VW, omega))]
+    omega_correction = [a + b for a, b in zip(correction(DELTA_WV, velocity), correction(DELTA_WW, omega))]
+    return (
+        [base_velocity[i] - velocity_correction[i] for i in range(3)],
+        [base_omega[i] - omega_correction[i] for i in range(3)],
+    )
+
+
+def simulate_serve(speed: float, spin_rps: float, elevation_deg: float, aim_deg: float):
+    first, _, impact_velocity, incoming_omega = simulate(speed, spin_rps, elevation_deg, aim_deg, details=True)
+    if first is None or impact_velocity is None:
+        return first, None, None
+    velocity, omega = apply_table_bounce(impact_velocity, incoming_omega)
+    position = [first[0], first[1], BALL_R]
+    second = None
+    net = None
+    t = 0.0
+    while t < MAX_T:
+        previous = position[:]
+        position, velocity = rk4(position, velocity, omega)
+        t += DT
+        if net is None and (previous[0] - TABLE_L / 2) * (position[0] - TABLE_L / 2) <= 0 and position[0] != previous[0]:
+            ratio = (TABLE_L / 2 - previous[0]) / (position[0] - previous[0])
+            z = previous[2] + ratio * (position[2] - previous[2])
+            y = previous[1] + ratio * (position[1] - previous[1])
+            net = (z - BALL_R - NET_H, y)
+        if previous[2] > BALL_R and position[2] <= BALL_R and position[2] < previous[2]:
+            ratio = (previous[2] - BALL_R) / (previous[2] - position[2] or 1)
+            second = (
+                previous[0] + ratio * (position[0] - previous[0]),
+                previous[1] + ratio * (position[1] - previous[1]),
+            )
+            break
+    return first, second, net
 
 
 def parse_presets():
@@ -206,6 +289,26 @@ def parse_presets():
     return rows
 
 
+def parse_serve_presets():
+    start = APP.index("const DEFAULT_SERVE_PRESETS = Object.freeze({")
+    end = APP.index("\n  });", start)
+    block = APP[start:end]
+    pattern = re.compile(
+        r"(?P<key>\w+):\s*\{.*?"
+        r"params:\s*\{\s*speedMps:\s*(?P<speed>-?[0-9.]+),\s*spinRps:\s*(?P<spin>-?[0-9.]+),\s*"
+        r"elevationDeg:\s*(?P<elev>-?[0-9.]+),\s*aimDeg:\s*(?P<aim>-?[0-9.]+)\s*\},.*?"
+        r"target:\s*\{\s*firstXM:\s*(?P<first_x>-?[0-9.]+),\s*firstYM:\s*(?P<first_y>-?[0-9.]+),\s*"
+        r"secondXM:\s*(?P<second_x>-?[0-9.]+),\s*secondYM:\s*(?P<second_y>-?[0-9.]+),.*?"
+        r"netClearanceCm:\s*(?P<clear>-?[0-9.]+)\s*\}",
+        re.S,
+    )
+    rows = []
+    for match in pattern.finditer(block):
+        data = match.groupdict()
+        rows.append({key: (value if key == "key" else float(value)) for key, value in data.items()})
+    return rows
+
+
 def main():
     # The blank/custom Shot node must itself start as a safe, useful ball.
     default_speed, default_spin, default_elevation, default_aim = 6.26, 10.0, 10.3, 0.0
@@ -214,6 +317,12 @@ def main():
     assert TABLE_L / 2 < default_landing[0] < TABLE_L, f"default new shot misses opponent half: {default_landing}"
     assert default_net[0] >= 0.075, f"default new shot has insufficient net clearance: {default_net[0]*100:.2f} cm"
     assert 0 < default_spin <= 12.0, "default new shot must be light topspin"
+
+    default_serve = simulate_serve(5.0, -8.0, -16.0, 0.0)
+    assert default_serve[0] and default_serve[1] and default_serve[2], "default new serve has no complete two-bounce trajectory"
+    assert 0 < default_serve[0][0] < TABLE_L / 2, f"default serve first bounce is not on robot side: {default_serve[0]}"
+    assert TABLE_L / 2 < default_serve[1][0] < TABLE_L, f"default serve second bounce is not on receiver side: {default_serve[1]}"
+    assert default_serve[2][0] > 0, f"default serve hits the net: {default_serve[2][0]*100:.2f} cm"
 
     presets = parse_presets()
     assert len(presets) >= 18, f"expected an expanded preset library, found {len(presets)}"
@@ -229,7 +338,24 @@ def main():
         assert clearance_cm >= 7.5, f"{preset['key']}: insufficient net margin {clearance_cm:.2f} cm"
         assert TABLE_L / 2 + .35 <= landing[0] <= TABLE_L - .20, f"{preset['key']}: risky longitudinal target {landing[0]:.3f}"
         assert abs(landing[1]) <= TABLE_W / 2 - .20, f"{preset['key']}: risky sideline target {landing[1]:.3f}"
-    print(f"default-library trajectory self-test PASS ({len(presets)} solved feeds)")
+    serves = parse_serve_presets()
+    assert len(serves) == 5, f"expected 5 serve presets, found {len(serves)}"
+    for preset in serves:
+        first, second, net = simulate_serve(preset["speed"], preset["spin"], preset["elev"], preset["aim"])
+        assert first and second and net, f"{preset['key']}: incomplete serve trajectory"
+        first_error = math.hypot(first[0] - preset["first_x"], first[1] - preset["first_y"])
+        second_error = math.hypot(second[0] - preset["second_x"], second[1] - preset["second_y"])
+        clearance_cm = net[0] * 100
+        assert first_error <= .02, f"{preset['key']}: first-bounce error {first_error*100:.2f} cm"
+        assert second_error <= .025, f"{preset['key']}: second-bounce error {second_error*100:.2f} cm"
+        assert abs(clearance_cm - preset["clear"]) <= .4, (
+            f"{preset['key']}: clearance {clearance_cm:.2f} cm vs documented {preset['clear']:.2f} cm"
+        )
+        assert 0 < first[0] < TABLE_L / 2, f"{preset['key']}: first bounce is not on robot side"
+        assert TABLE_L / 2 < second[0] < TABLE_L, f"{preset['key']}: second bounce is not on receiver side"
+        assert abs(first[1]) <= TABLE_W / 2 and abs(second[1]) <= TABLE_W / 2, f"{preset['key']}: serve misses table laterally"
+        assert clearance_cm > 0, f"{preset['key']}: serve contacts net"
+    print(f"default-library trajectory self-test PASS ({len(presets)} shot + {len(serves)} serve presets)")
 
 
 if __name__ == "__main__":

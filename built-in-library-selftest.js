@@ -30,6 +30,7 @@ const serveSignatures = new Set(Object.values(servePresets).map(preset => JSON.s
 let reachableBallNodes = 0;
 let reachableShots = 0;
 let reachableServes = 0;
+const usedServeSignatures = new Set();
 for (const drill of sample.drills) {
   assert(drill.startNodeId, `${drill.name}: missing start node`);
   const nodes = new Map(drill.nodes.map(node => [node.id, node]));
@@ -55,7 +56,10 @@ for (const drill of sample.drills) {
     if (node.type !== 'shot' && node.type !== 'serve') continue;
     reachableBallNodes += 1;
     if (node.type === 'shot') reachableShots += 1;
-    else reachableServes += 1;
+    else {
+      reachableServes += 1;
+      usedServeSignatures.add(JSON.stringify(node.params));
+    }
     const signatures = node.type === 'serve' ? serveSignatures : shotSignatures;
     assert(signatures.has(JSON.stringify(node.params)), `${drill.name} / ${node.label}: parameters do not match a validated preset`);
     const presets = node.type === 'serve' ? Object.values(servePresets) : Object.values(shotPresets);
@@ -71,5 +75,7 @@ for (const drill of sample.drills) {
     }
   }
 }
+assert.strictEqual(reachableServes, 15, 'expected all 15 reachable serve nodes in the built-in drills');
+assert.strictEqual(usedServeSignatures.size, Object.keys(servePresets).length, 'every built-in serve preset must be exercised by a drill');
 
 console.log(`Built-in library self-test PASS (42 drills, ${reachableBallNodes} reachable ball nodes: ${reachableShots} shots + ${reachableServes} serves)`);

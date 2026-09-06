@@ -40,13 +40,36 @@ const edgeContact = Variation.prepare(base, config, params => ({ ...analyticPred
 assert(!edgeContact.ok, 'variation must reject a table-edge contact');
 const hardwareRejected = Variation.prepare(base, config, params => ({ ...analyticPrediction(params), hardwareRepresentable: false }));
 assert(!hardwareRejected.ok, 'variation must reject commands outside the calibrated Nova actuator envelope');
-const servePrepared = Variation.prepare(base, config, params => {
+const analyticServePrediction = params => {
   const prediction = analyticPrediction(params);
   return { ...prediction, secondBounce: { x: prediction.landing.x + .5, y: prediction.landing.y - .1 }, serve: { valid: true } };
-});
+};
+const servePrepared = Variation.prepare(base, config, analyticServePrediction);
 assert(servePrepared.ok, servePrepared.reason);
 assert(Math.abs(servePrepared.baseOutcome[0] - (nominal.landing.x + .5)) < 1e-9, 'serve variation must target the receiver-side bounce');
 assert(Math.abs(servePrepared.baseOutcome[1] - (nominal.landing.y - .1)) < 1e-9, 'serve lateral target must use the receiver-side bounce');
+
+const serveOutcome = [nominal.landing.x + .5, nominal.landing.y - .1, nominal.net.clearanceM];
+const exactServeConfig = {
+  enabled: true,
+  placement: {
+    depthMinCm: (serveOutcome[0] - 1.37) * 100, depthMaxCm: (serveOutcome[0] - 1.37) * 100,
+    lateralMinCm: serveOutcome[1] * 100, lateralMaxCm: serveOutcome[1] * 100,
+  },
+  clearance: { minCm: serveOutcome[2] * 100, maxCm: serveOutcome[2] * 100 },
+  speed: { minMps: base.speedMps, maxMps: base.speedMps },
+  spin: { minRps: base.spinRps, maxRps: base.spinRps },
+  launch: { minElevationDeg: base.elevationDeg, maxElevationDeg: base.elevationDeg, minAimDeg: base.aimDeg, maxAimDeg: base.aimDeg },
+};
+const exactServeSupport = [{ params: base, outcome: serveOutcome }];
+const exactServePrepared = Variation.prepare(base, exactServeConfig, analyticServePrediction, { feasibleSamples: exactServeSupport });
+assert(exactServePrepared.ok && exactServePrepared.supportOnly, 'an exact valid serve must not require a free manifold');
+const exactServeBatch = Variation.sampleMany(exactServePrepared, 24, analyticServePrediction, Variation.createRng(771));
+assert.strictEqual(exactServeBatch.results.length, 24, 'an exact valid serve must sample reliably');
+for (const result of exactServeBatch.results) {
+  assert(Math.abs(result.actual.landing.x - serveOutcome[0]) < 1e-12, 'serve sampling must use second-bounce depth');
+  assert(Math.abs(result.actual.landing.y - serveOutcome[1]) < 1e-12, 'serve sampling must use second-bounce lateral position');
+}
 assert.strictEqual(prepared.evaluations, 5, 'preparation must use one base + four finite-difference evaluations');
 assert(Math.abs(prepared.tangent.reduce((sum, value) => sum + value * value, 0) - 1) < 1e-9);
 

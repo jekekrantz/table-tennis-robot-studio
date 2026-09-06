@@ -206,6 +206,13 @@
     return values ? { values, prediction } : null;
   }
 
+  function supportOnly(prepared, started) {
+    if (!prepared.feasibleSamples?.length) return null;
+    prepared.supportOnly = true;
+    prepared.preparedMs = (typeof performance !== "undefined" ? performance.now() : Date.now()) - started;
+    return prepared;
+  }
+
   function prepare(baseParams, variationInput, evaluate, options = {}) {
     const started = typeof performance !== "undefined" ? performance.now() : Date.now();
     const basePrediction = evaluate(baseParams);
@@ -268,13 +275,15 @@
       const shifted = [...baseNormalized];
       shifted[column] += step;
       const result = evaluateNormalized(prepared, shifted, evaluate);
-      if (!result) return { ok: false, reason: `Could not differentiate ${CONTROL_KEYS[column]}.` };
+      if (!result) return supportOnly(prepared, started)
+        || { ok: false, reason: `Could not differentiate ${CONTROL_KEYS[column]}.` };
       for (let row = 0; row < 3; row += 1) {
         jacobian[row][column] = (result.values[row] - baseOutcome[row]) / step / prepared.outputScales[row];
       }
     }
     const tangent = nullVector3x4(jacobian);
-    if (!tangent) return { ok: false, reason: "The nominal shot constraint Jacobian is rank-deficient." };
+    if (!tangent) return supportOnly(prepared, started)
+      || { ok: false, reason: "The nominal shot constraint Jacobian is rank-deficient." };
     prepared.jacobian = jacobian;
     prepared.tangent = tangent;
     prepared.bounds = normalizedBounds(prepared);
@@ -286,7 +295,8 @@
       phaseMin = Math.max(phaseMin, candidates[0]);
       phaseMax = Math.min(phaseMax, candidates[1]);
     }
-    if (!(phaseMax - phaseMin > 1e-4)) return { ok: false, reason: "Speed/spin ranges leave no free manifold interval around the nominal shot." };
+    if (!(phaseMax - phaseMin > 1e-4)) return supportOnly(prepared, started)
+      || { ok: false, reason: "Speed/spin ranges leave no free manifold interval around the nominal shot." };
     prepared.phaseRange = [phaseMin, phaseMax];
     const ended = typeof performance !== "undefined" ? performance.now() : Date.now();
     prepared.preparedMs = ended - started;
@@ -393,6 +403,20 @@
 
   function sample(prepared, evaluate, random = Math.random, options = {}) {
     if (!prepared?.ok || !prepared.variation?.enabled) return null;
+    if (prepared.supportOnly && prepared.feasibleSamples?.length) {
+      const seed = prepared.feasibleSamples[Math.min(prepared.feasibleSamples.length - 1,
+        Math.floor(random() * prepared.feasibleSamples.length))];
+      prepared.evaluations += 1;
+      const prediction = evaluate(seed.params);
+      const actual = outcome(prediction);
+      return actual ? {
+        params: { ...seed.params }, prediction,
+        target: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+        actual: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+        landingErrorM: 0, clearanceErrorM: 0, phase: 0, iterations: 0,
+        attempts: 1, evaluations: 1, fallback: true,
+      } : null;
+    }
     if (prepared.variation.mode === "launch") {
       const variation = prepared.variation;
       const attempts = Math.round(clamp(Math.max(12, finite(options.attempts, 12)), 12, 24));

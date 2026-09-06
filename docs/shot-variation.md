@@ -17,6 +17,7 @@ For each shot configuration it:
 6. rejects targets that cannot be solved inside the requested speed/spin and global elevation/aim limits.
 
 The user-requested intervals are never narrowed to make sampling easier. Invalid Cartesian combinations are skipped internally; if the local solver misses within its bounded budget, playback uses a known-valid trajectory from the filtered support. Runtime stops only when the requested intervals contain no known valid shot.
+An exact interval is valid support in its own right and does not need a nonzero free-manifold span. This applies equally to ordinary shots and serves.
 
 ## Intuitive-editor feasible envelopes
 
