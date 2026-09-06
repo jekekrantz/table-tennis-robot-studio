@@ -26,6 +26,7 @@
       this.doneCounter = 0;
       this.ballCounter = 0;
       this.lastBallEvent = null;
+      this.lastBallSignature = "";
       this.lastDoneSignature = "";
       this.lastStartAt = 0;
       this.disconnectRequested = false;
@@ -237,6 +238,7 @@
       await this.sendHeartbeat().catch(() => null);
       const doneBaseline = this.doneCounter;
       this.lastStartAt = performance.now();
+      this.lastBallSignature = "";
       this.log(`Starting ${description}`, "tx", packet);
       await this.requestCommand(packet, 0x81, 6000, "start", { logTx: false });
       this.setPhase("running");
@@ -335,11 +337,25 @@
 
     async stopForIdle() {
       if (!this.connected || !this.authenticated) return null;
+      let status = null;
+      try {
+        status = await this.queryStatus();
+      } catch (error) {
+        this.log(`Could not read status before idle STOP: ${error.message}`, "warn");
+      }
+      if (status?.state === 0 || status?.state === 3) {
+        this.setPhase(status.state === 3 ? "ready" : "connected-busy");
+        this.log(`Idle STOP already satisfied · Nova ${status.state === 3 ? "Ready" : "Uninitialized"} · BLE retained`);
+        return status;
+      }
       this.setPhase("stopping");
       this.log("Sending idle STOP");
-      await this.requestCommand(P.COMMANDS.stop, 0x80, 6000, "idle stop");
+      try {
+        await this.requestCommand(P.COMMANDS.stop, 0x80, 6000, "idle stop");
+      } catch (error) {
+        this.log(`Idle STOP acknowledgement failed: ${error.message}; still polling state`, "warn");
+      }
       const deadline = performance.now() + 25000;
-      let status = null;
       while (performance.now() < deadline) {
         await delay(350);
         status = await this.queryStatus();
@@ -458,6 +474,12 @@
       if (frame.opcode === 0x05 && frame.success) {
         try {
           const ball = P.parseBallEventFrame(frame);
+          const signature = `${ball.eventNumber}:${ball.cycleIndex}:${ball.servedCount}:${ball.recordIndex}`;
+          if (signature === this.lastBallSignature) {
+            this.log(`Ignoring duplicate ball event ${signature}`, "warn");
+            return;
+          }
+          this.lastBallSignature = signature;
           this.ballCounter += 1;
           this.lastBallEvent = { ...ball, counter: this.ballCounter, receivedAt: performance.now() };
           this.dispatchEvent(new CustomEvent("ball", { detail: this.lastBallEvent }));

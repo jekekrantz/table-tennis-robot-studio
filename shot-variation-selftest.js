@@ -113,6 +113,38 @@ for (const result of launchBatch.results) {
   assert(result.params.aimDeg >= -8 && result.params.aimDeg <= 6);
 }
 
+// Broad requested ranges are an allowed set, not a demand to sample the
+// impossible Cartesian product uniformly. Preparation independently projects
+// known-valid support onto each variable and retains a valid fallback.
+const supportParams = [
+  { speedMps: 6.6, spinRps: 12, elevationDeg: 9, aimDeg: -4 },
+  { speedMps: 7.0, spinRps: 18, elevationDeg: 10, aimDeg: 0 },
+  { speedMps: 7.4, spinRps: 24, elevationDeg: 11, aimDeg: 4 },
+];
+const support = supportParams.map(params => ({ params, outcome: (() => {
+  const p = analyticPrediction(params);
+  return [p.landing.x, p.landing.y, p.net.clearanceM];
+})() }));
+const broadLaunch = {
+  ...launchConfig,
+  speed: { minMps: 1, maxMps: 20 }, spin: { minRps: -120, maxRps: 120 },
+  launch: { minElevationDeg: -20, maxElevationDeg: 45, minAimDeg: -60, maxAimDeg: 60 },
+};
+const narrowSupported = Variation.prepare(base, launchConfig, analyticPrediction, { feasibleSamples: support });
+const broadSupported = Variation.prepare(base, broadLaunch, analyticPrediction, { feasibleSamples: support });
+assert(broadSupported.feasibleSamples.length >= narrowSupported.feasibleSamples.length,
+  'widening intervals must never remove previously feasible support');
+assert.deepStrictEqual(broadSupported.feasibleControlRanges.speedMps, [6.6, 7.4]);
+assert.deepStrictEqual(broadSupported.feasibleControlRanges.spinRps, [12, 24]);
+
+const exactSeed = support[1];
+const sparseEvaluator = params => Object.keys(params).every(key => Math.abs(params[key] - exactSeed.params[key]) < 1e-12)
+  ? analyticPrediction(params) : null;
+const sparsePrepared = Variation.prepare(exactSeed.params, broadLaunch, sparseEvaluator, { feasibleSamples: [exactSeed] });
+const sparseSample = Variation.sample(sparsePrepared, sparseEvaluator, Variation.createRng(99));
+assert(sparseSample, 'a broad interval with known valid support must sample from its internal feasible projection');
+assert.deepStrictEqual(sparseSample.params, exactSeed.params);
+
 // An impossible exact clearance must fail rather than be clamped onto a command boundary.
 const impossible = Variation.prepare(base, {
   ...config,

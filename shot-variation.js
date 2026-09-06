@@ -100,6 +100,37 @@
     return [landing.x, landing.y, prediction.net.clearanceM];
   }
 
+  function inside(value, range) {
+    return value >= range[0] - 1e-9 && value <= range[1] + 1e-9;
+  }
+
+  function seedInside(seed, variation, baseOutcome, table) {
+    if (!seed?.params || !Array.isArray(seed.outcome) || seed.outcome.length !== 3) return false;
+    if (!CONTROL_KEYS.every(key => Number.isFinite(Number(seed.params[key])))) return false;
+    if (!seed.outcome.every(Number.isFinite)) return false;
+    const controlRanges = {
+      speedMps: [variation.speed.minMps, variation.speed.maxMps],
+      spinRps: [variation.spin.minRps, variation.spin.maxRps],
+      elevationDeg: [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
+      aimDeg: [variation.launch.minAimDeg, variation.launch.maxAimDeg],
+    };
+    if (!CONTROL_KEYS.every(key => inside(seed.params[key], controlRanges[key]))) return false;
+    if (variation.mode === "launch") return true;
+    const placement = variation.placement;
+    const rectangle = Number.isFinite(placement.depthMinCm);
+    const placementInside = rectangle
+      ? inside((seed.outcome[0] - table.length / 2) * 100, [placement.depthMinCm, placement.depthMaxCm])
+        && inside(seed.outcome[1] * 100, [placement.lateralMinCm, placement.lateralMaxCm])
+      : Boolean(baseOutcome) && ((seed.outcome[0] - baseOutcome[0]) / Math.max(.0001, placement.depthCm / 100)) ** 2
+        + ((seed.outcome[1] - baseOutcome[1]) / Math.max(.0001, placement.lateralCm / 100)) ** 2 <= 1 + 1e-9;
+    return placementInside && inside(seed.outcome[2] * 100, [variation.clearance.minCm, variation.clearance.maxCm]);
+  }
+
+  function projectedRange(samples, getter) {
+    const values = samples.map(getter).filter(Number.isFinite);
+    return values.length ? [Math.min(...values), Math.max(...values)] : null;
+  }
+
   function determinant3(m) {
     return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
       - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
@@ -180,12 +211,21 @@
     const basePrediction = evaluate(baseParams);
     const baseOutcome = outcome(basePrediction);
     const variation = normalizeVariation(variationInput, baseParams, baseOutcome?.[2]);
+    const table = basePrediction?.table || { length: 2.74, width: 1.525 };
+    const feasibleSamples = (Array.isArray(options.feasibleSamples) ? options.feasibleSamples : [])
+      .filter(seed => seedInside(seed, variation, baseOutcome, table))
+      .map(seed => ({ params: Object.fromEntries(CONTROL_KEYS.map(key => [key, Number(seed.params[key])])), outcome: seed.outcome.map(Number) }));
+    const feasibleControlRanges = Object.fromEntries(CONTROL_KEYS.map(key => [key, projectedRange(feasibleSamples, seed => seed.params[key])]));
+    const feasibleOutcomeRanges = [0, 1, 2].map(index => projectedRange(feasibleSamples, seed => seed.outcome[index]));
     if (variation.mode === "launch") return {
       ok: true,
       baseParams: Object.fromEntries(CONTROL_KEYS.map(key => [key, finite(baseParams[key], 0)])),
       baseOutcome,
       basePrediction,
       variation,
+      feasibleSamples,
+      feasibleControlRanges,
+      feasibleOutcomeRanges,
       evaluations: 1,
       preparationEvaluations: 1,
       preparedMs: (typeof performance !== "undefined" ? performance.now() : Date.now()) - started,
@@ -202,6 +242,9 @@
       baseOutcome,
       basePrediction,
       variation,
+      feasibleSamples,
+      feasibleControlRanges,
+      feasibleOutcomeRanges,
       controlScales: [speedHalfRange, spinHalfRange, elevationHalfRange, aimHalfRange],
       controlLimits: {
         speedMps: [variation.speed.minMps, variation.speed.maxMps],
@@ -251,6 +294,11 @@
   }
 
   function sampleTarget(prepared, random) {
+    if (prepared.feasibleSamples?.length) {
+      const seed = prepared.feasibleSamples[Math.min(prepared.feasibleSamples.length - 1,
+        Math.floor(random() * prepared.feasibleSamples.length))];
+      return [...seed.outcome];
+    }
     const placement = prepared.variation.placement;
     const rectangle = Number.isFinite(placement.depthMinCm);
     const angle = rectangle ? 0 : random() * Math.PI * 2;
@@ -349,10 +397,10 @@
       const variation = prepared.variation;
       const attempts = Math.round(clamp(Math.max(12, finite(options.attempts, 12)), 12, 24));
       const ranges = {
-        speedMps: [variation.speed.minMps, variation.speed.maxMps],
-        spinRps: [variation.spin.minRps, variation.spin.maxRps],
-        elevationDeg: [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
-        aimDeg: [variation.launch.minAimDeg, variation.launch.maxAimDeg],
+        speedMps: prepared.feasibleControlRanges?.speedMps || [variation.speed.minMps, variation.speed.maxMps],
+        spinRps: prepared.feasibleControlRanges?.spinRps || [variation.spin.minRps, variation.spin.maxRps],
+        elevationDeg: prepared.feasibleControlRanges?.elevationDeg || [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
+        aimDeg: prepared.feasibleControlRanges?.aimDeg || [variation.launch.minAimDeg, variation.launch.maxAimDeg],
       };
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         const params = Object.fromEntries(CONTROL_KEYS.map(key => [key, ranges[key][0] + random() * (ranges[key][1] - ranges[key][0])]));
@@ -371,6 +419,20 @@
           evaluations: attempt + 1,
         };
       }
+      if (prepared.feasibleSamples?.length) {
+        const seed = prepared.feasibleSamples[Math.min(prepared.feasibleSamples.length - 1,
+          Math.floor(random() * prepared.feasibleSamples.length))];
+        prepared.evaluations += 1;
+        const prediction = evaluate(seed.params);
+        const actual = outcome(prediction);
+        if (actual) return {
+          params: { ...seed.params }, prediction,
+          target: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+          actual: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+          landingErrorM: 0, clearanceErrorM: 0, attempts, evaluations: attempts + 1,
+          fallback: true,
+        };
+      }
       return null;
     }
     const attempts = Math.round(clamp(finite(options.attempts, 5), 1, 12));
@@ -383,6 +445,20 @@
       const phase = prepared.phaseRange[0] + random() * (prepared.phaseRange[1] - prepared.phaseRange[0]);
       const result = solveSample(prepared, target, phase, evaluate, solveOptions);
       if (result) return { ...result, attempts: attempt + 1, evaluations: prepared.evaluations - startEvaluations };
+    }
+    if (prepared.feasibleSamples?.length && prepared.evaluations < solveOptions.evaluationDeadline) {
+      const seed = prepared.feasibleSamples[Math.min(prepared.feasibleSamples.length - 1,
+        Math.floor(random() * prepared.feasibleSamples.length))];
+      prepared.evaluations += 1;
+      const prediction = evaluate(seed.params);
+      const actual = outcome(prediction);
+      if (actual) return {
+        params: { ...seed.params }, prediction,
+        target: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+        actual: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+        landingErrorM: 0, clearanceErrorM: 0, phase: 0, iterations: 0,
+        attempts, evaluations: prepared.evaluations - startEvaluations, fallback: true,
+      };
     }
     return null;
   }

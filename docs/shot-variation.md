@@ -12,19 +12,19 @@ For each shot configuration it:
 1. evaluates the nominal trajectory;
 2. estimates the local three-by-four outcome Jacobian with four additional trajectory evaluations;
 3. finds its normalized null-space direction;
-4. samples landing position uniformly by area inside the requested rectangle (or a legacy ellipse), samples clearance inside its requested interval, and samples a phase along the feasible direction;
+4. filters deterministic valid trajectories through the requested intervals, independently projects that support onto each launch and outcome variable, and samples targets from the supported region;
 5. applies a bounded quasi-Newton correction to satisfy landing and clearance together;
 6. rejects targets that cannot be solved inside the requested speed/spin and global elevation/aim limits.
 
-Invalid samples are never clamped or projected to a command boundary. Runtime stops with a useful error if five bounded attempts cannot find a feasible shot.
+The user-requested intervals are never narrowed to make sampling easier. Invalid Cartesian combinations are skipped internally; if the local solver misses within its bounded budget, playback uses a known-valid trajectory from the filtered support. Runtime stops only when the requested intervals contain no known valid shot.
 
 ## Intuitive-editor feasible envelopes
 
-The intuitive editor starts new shots and serves with the reachable receiver-side rectangle inset 5 cm from each physical table edge, the reachable speed and spin envelope, and a requested 0–30 cm clearance interval. Feasibility may move an edge farther inward when the robot cannot reach the nominal inset. Each slider's visible endpoints are recalculated from deterministic valid trajectory samples while holding the other four selected intervals fixed. Every sample must also be exactly representable by the Nova model: base and individual wheel inputs must remain inside firmware limits, spin must remain below the speed-dependent calibrated capacity, and elevation/aim must fit both firmware and calibrated actuator ranges. The trajectory is evaluated with the speed and spin produced by the encoded wheel pair. An endpoint therefore means that at least one valid robot-representable combination exists there; it does not claim that every Cartesian combination inside the five intervals is valid. Exact selected speed/spin endpoints are added to the envelope search so narrow ranges remain useful.
+The intuitive editor starts new shots and serves as fixed, legal defaults: the two handles initially meet at the modeled landing, speed, spin and net clearance. Widening any interval adds controlled variation and can never remove a previously valid shot. If an older saved nominal is outside the editor's legal trajectory envelope, the controls start from the nearest valid sampled point so they remain operable; changing a control then stores the corrected shot. Slider endpoints show the unconditional robot/table envelope and do not shrink in response to the other selected intervals. Every sample must also be exactly representable by the Nova model: base and individual wheel inputs must remain inside firmware limits, spin must remain below the speed-dependent calibrated capacity, and elevation/aim must fit both firmware and calibrated actuator ranges. The trajectory is evaluated with the speed and spin produced by the encoded wheel pair. An interval describes allowed results; it does not claim that every Cartesian combination across all five intervals is valid. Exact selected speed/spin endpoints and each valid nominal shot are added to the support search so narrow ranges remain useful.
 
-The Manual tab edits launch speed, spin, elevation and left/right aim as synchronized min/dual-slider/max intervals. It samples commands directly inside those four ranges, skips combinations that are not robot-representable or do not make a valid receiver-side shot, and shows concise feedback when the interval set is wholly or partly impossible. Its receiver-side table shows a representative valid landing point. Outcome intervals remain available in the Intuitive tab; switching back to Intuitive returns variation to outcome-solving mode.
+The Manual tab edits launch speed, spin, elevation and left/right aim as synchronized min/dual-slider/max intervals. It internally projects known-valid support independently onto those four ranges, skips combinations that are not robot-representable or do not make a valid receiver-side shot, and reports only when the interval set contains no valid shot. Its receiver-side table shows a representative valid landing point. Outcome intervals remain available in the Intuitive tab; switching back to Intuitive returns variation to outcome-solving mode.
 
-Clearance text input and its slider may extend down to −30 cm to deliberately request net contact and exercise impossible-shot feedback. The upper endpoint follows the highest modeled valid receiver-side shot found under the other selected intervals.
+Clearance text input and its slider may extend down to −30 cm to deliberately request net contact and exercise impossible-shot feedback. Its endpoints remain the global editor bounds rather than changing with the other intervals.
 
 ## Performance limits
 
@@ -38,4 +38,4 @@ Development profiling for build `2026-09-01.1` produced:
 - Chromium with 6× CPU throttling: 100/100 accepted in 158.2 ms, or 1.58 ms per shot;
 - the 6× run averaged 3.05 post-preparation trajectory evaluations per shot.
 
-These numbers are regression references, not guarantees for every phone or requested variation region. Wide or nearly infeasible regions require more rejected attempts, but the hard evaluation cap bounds CPU use directly.
+These numbers are regression references, not guarantees for every phone or requested variation region. The bounded local solve keeps CPU use predictable; retained valid support prevents a broad allowed region from failing merely because it also contains impossible combinations.

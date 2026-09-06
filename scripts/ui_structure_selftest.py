@@ -18,9 +18,7 @@ for expected in [
     "guidedComputeBtn", "guidedSpeedMinInput", "guidedSpeedMaxInput",
     "guidedFeedBtn", "guidedRepeatCountInput", "guidedNozzleXInput",
     "guidedMeasurementOffsetInput", "guidedExportMeasurementsBtn",
-    "liveTuningBtn", "liveTuningDialog", "tuningPaceValue", "tuningClearanceValue",
-    "tuningSpinValue", "tuningSpeedValue", "resetLiveTuningBtn",
-    "saveLiveTunedDrillBtn", "saveEffectiveDrillBtn", "updateRobotPoseBtn",
+    "resetLiveTuningBtn", "saveEffectiveDrillBtn", "updateRobotPoseBtn",
     "poseCalibrationDialog", "poseCalibrationTableSvg", "poseCalibrationGuide",
     "poseCalibrationConfidence", "savePoseCalibrationBtn", "cancelPoseCalibrationBtn",
     "builtInLibraryTab", "myDrillsLibraryTab", "libraryBreadcrumb", "librarySearchInput",
@@ -133,21 +131,31 @@ for token in ('intuitiveRangeHtml("speed", selections.speed, domains.speed, "man
               'trajectoryPlanWarning(node.label, prediction)'):
     if token not in app:
         raise SystemExit(f"Missing shot-editor behavior: {token}")
-for token in ('SHOT_EDITOR_MODE_STORAGE_KEY', 'data-shot-editor-mode="intuitive"',
-              'data-shot-editor-mode="manual"', 'intuitiveLandingTable',
+for token in ('data-shot-editor-mode="intuitive"', 'data-shot-editor-mode="manual"',
+              'intuitiveLandingTable',
               'maxlength="5"', 'class="dual-range"', 'applyIntuitiveShot(node)',
               'candidatePrediction?.secondBounce', 'landing-target-rectangle',
               'depth: Object.freeze({ label: "From net"', 'lateral: Object.freeze({ label: "From center"',
               'function envelopeDomains', 'defaultIntuitiveVariation(node)',
-              'DEFAULT_TARGET_INSET_CM = 5', 'landing-robot-strip',
+              'if (!receiverPredictionValid(node, prediction))',
+              'landing-robot-strip',
               'landing-target-hatch', 'landing-table-edge', 'manual-shot-editor',
               'novaFeasiblePrediction(params', 'novaFeasibleBounds(library.calibration)',
               'LaunchModel.maxSpinRpsAtExitSpeed'):
     if token not in app:
         raise SystemExit(f"Missing intuitive shot-editor behavior: {token}")
+if 'if (isBallNodeType(type)) {' not in app or 'addNode(type);' not in app:
+    raise SystemExit("Adding a ball must go directly to the intuitive shot editor")
 for token in ('.shot-editor-tabs', '.intuitive-landing-table', '.dual-range', '.interval-value'):
     if token not in css:
         raise SystemExit(f"Missing intuitive shot-editor styling: {token}")
+for token in ('-webkit-appearance:none', 'grid-template-columns:52px minmax(0,1fr) 52px', 'max-width:100%'):
+    if token not in css:
+        raise SystemExit(f"Missing mobile dual-range containment: {token}")
+if 'point[other] >= selections[other][0]' in app:
+    raise SystemExit("Shot interval domains must not be conditioned on the other selected intervals")
+if 'difficult to sample' in app or 'Narrow one or more intervals' in app:
+    raise SystemExit("Broad allowed intervals must be internally compressed rather than rejected")
 if 'id="inspectorCloseBtn"' in html or '<strong>Details</strong>' in html:
     raise SystemExit("Shot inspector must use one hierarchical back/name/AI header")
 for token in ('liveTuningInlineHtml(p, node.type)', 'testShotVariationBtn', 'variationDepthField'):
@@ -155,8 +163,8 @@ for token in ('liveTuningInlineHtml(p, node.type)', 'testShotVariationBtn', 'var
         raise SystemExit(f"Obsolete manual shot-editor clutter remains: {token}")
 if 'distanceTrajectorySvg(' in app:
     raise SystemExit("Obsolete one-dimensional landing-distance visualization remains")
-if 'params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 }' not in app:
-    raise SystemExit("New-shot default must use the re-solved safe center no-spin ball")
+if 'params: { speedMps: 6.26, spinRps: 10, elevationDeg: 10.3, aimDeg: 0 }' not in app:
+    raise SystemExit("New-shot default must use the re-solved safe light-topspin ball")
 if 'params: { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 }' not in app:
     raise SystemExit("New-serve default must model two legal table bounces with a post-bounce net crossing")
 
@@ -176,8 +184,8 @@ if 'playbackResponsiveTuning' in app:
 for token in ("adjustedShotForRuntime", "tunedDelaySeconds", "Live tuning is active", "source drill stays unchanged"):
     if token not in app and token not in html:
         raise SystemExit(f"Missing live tuning integration: {token}")
-if 'every ball, including sub-drills' not in html:
-    raise SystemExit("Live tuning dialog must explain all-ball scope")
+if 'id="liveTuningDialog"' in html or '>Details</button>' in html:
+    raise SystemExit("Player tuning must not duplicate its controls in a Details dialog")
 for token in ('data-tuning-range="pacePct"', 'data-tuning-range="clearancePct"',
               'data-tuning-range="speedPct"', 'data-tuning-range="spinPct"',
               'data-tuning-delta="1"', 'type="range" min="-50" max="100" step="1"',

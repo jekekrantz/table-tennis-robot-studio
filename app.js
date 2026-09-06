@@ -6,7 +6,6 @@
 
   const STORAGE_KEY = "table-tennis-robot-studio";
   const LIVE_TUNING_STORAGE_KEY = "table-tennis-robot-studio-live-tuning";
-  const SHOT_EDITOR_MODE_STORAGE_KEY = "table-tennis-robot-studio-shot-editor-mode";
   const SCHEMA_VERSION = 1;
   // Trajectory launch coordinates come from the fixed measured pivot chain.
   const ROBOT_GEOMETRY_REFERENCE = "base-back-pivots-v1";
@@ -85,9 +84,7 @@
     validationList: $("validationList"),
     activeDrillTitle: $("activeDrillTitle"),
     modeText: $("modeText"),
-    liveTuningBtn: $("liveTuningBtn"),
     liveTuningSummary: $("liveTuningSummary"),
-    saveLiveTunedDrillBtn: $("saveLiveTunedDrillBtn"),
     graphViewport: $("graphViewport"),
     graphSurface: $("graphSurface"),
     graphWorld: $("graphWorld"),
@@ -214,16 +211,7 @@
     robotDisconnectBtn: $("robotDisconnectBtn"),
     robotCopyLogBtn: $("robotCopyLogBtn"),
     robotLog: $("robotLog"),
-    liveTuningDialog: $("liveTuningDialog"),
-    closeLiveTuningBtn: $("closeLiveTuningBtn"),
-    doneLiveTuningBtn: $("doneLiveTuningBtn"),
     resetLiveTuningBtn: $("resetLiveTuningBtn"),
-    tuningPaceValue: $("tuningPaceValue"),
-    tuningClearanceValue: $("tuningClearanceValue"),
-    tuningSpinValue: $("tuningSpinValue"),
-    tuningSpeedValue: $("tuningSpeedValue"),
-    liveTuningImpactLabel: $("liveTuningImpactLabel"),
-    liveTuningImpact: $("liveTuningImpact"),
     previewDialog: $("previewDialog"),
     closePreviewBtn: $("closePreviewBtn"),
     previewLimitInput: $("previewLimitInput"),
@@ -311,7 +299,6 @@
   let appHistory = [];
   const acknowledgedTrajectoryWarnings = new Set();
   let inspectorOpen = false;
-  let addNodeDraftType = null;
   let playbackToken = 0;
   let playbackRunning = false;
   let calibrationTestRunning = false;
@@ -628,7 +615,7 @@
       label: uniqueShotName(drill, label),
       x: 300,
       y: 260,
-      params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 },
+      params: { speedMps: 6.26, spinRps: 10, elevationDeg: 10.3, aimDeg: 0 },
     };
   }
 
@@ -643,28 +630,40 @@
     };
   }
 
-  const DEFAULT_TARGET_INSET_CM = 5;
-
   function defaultIntuitiveVariation(node) {
-    const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
-    const table = prediction.table;
-    const full = {
-      depth: [0, table.length * 50], lateral: [-table.width * 50, table.width * 50],
-      speed: [1, 20], spin: [-120, 120], clearance: [0, 30],
-    };
-    const domains = envelopeDomains(shotEnvelopeCloud(node), full, table);
+    let params = node.params;
+    let prediction = predictTrajectory(params, null, trajectoryOptionsForNode(node));
+    if (!receiverPredictionValid(node, prediction)) {
+      const nearest = shotEnvelopeCloud(node).reduce((best, point) => {
+        const score = ((point.params.speedMps - params.speedMps) / 5) ** 2
+          + ((point.params.spinRps - params.spinRps) / 40) ** 2
+          + ((point.params.elevationDeg - params.elevationDeg) / 20) ** 2
+          + ((point.params.aimDeg - params.aimDeg) / 30) ** 2;
+        return !best || score < best.score ? { point, score } : best;
+      }, null)?.point;
+      if (nearest) {
+        params = nearest.params;
+        prediction = nearest.prediction || predictTrajectory(params, null, trajectoryOptionsForNode(node));
+      }
+    }
+    const landing = receiverLanding(prediction, node.type === "serve");
+    const depthCm = landing ? (landing.x - prediction.table.length / 2) * 100 : prediction.table.length * 25;
+    const lateralCm = landing ? landing.y * 100 : 0;
+    const clearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
     return ShotVariation.normalizeVariation({
       enabled: true,
       placement: {
-        depthMinCm: Math.max(domains.depth[0], DEFAULT_TARGET_INSET_CM),
-        depthMaxCm: Math.min(domains.depth[1], table.length * 50 - DEFAULT_TARGET_INSET_CM),
-        lateralMinCm: Math.max(domains.lateral[0], -table.width * 50 + DEFAULT_TARGET_INSET_CM),
-        lateralMaxCm: Math.min(domains.lateral[1], table.width * 50 - DEFAULT_TARGET_INSET_CM),
+        depthMinCm: depthCm, depthMaxCm: depthCm,
+        lateralMinCm: lateralCm, lateralMaxCm: lateralCm,
       },
-      speed: { minMps: domains.speed[0], maxMps: domains.speed[1] },
-      spin: { minRps: domains.spin[0], maxRps: domains.spin[1] },
-      clearance: { minCm: 0, maxCm: Math.min(30, domains.clearance[1]) },
-    }, node.params, prediction.net?.clearanceM);
+      speed: { minMps: params.speedMps, maxMps: params.speedMps },
+      spin: { minRps: params.spinRps, maxRps: params.spinRps },
+      clearance: { minCm: clearanceCm, maxCm: clearanceCm },
+      launch: {
+        minElevationDeg: params.elevationDeg, maxElevationDeg: params.elevationDeg,
+        minAimDeg: params.aimDeg, maxAimDeg: params.aimDeg,
+      },
+    }, params, prediction.net?.clearanceM);
   }
 
   function makeRandom(label = "Weighted random") {
@@ -1672,13 +1671,22 @@
         };
         if (isBallNodeType(n.type)) {
           const p = n.params || {};
+          const defaults = n.type === "serve"
+            ? { speedMps: 5, spinRps: -8, elevationDeg: -16, aimDeg: 0 }
+            : { speedMps: 6.26, spinRps: 10, elevationDeg: 10.3, aimDeg: 0 };
+          const legacyBlankShot = n.type === "shot"
+            && /^Shot(?: \d+)?$/.test(String(n.label || "Shot"))
+            && Math.abs(finite(p.speedMps, 0) - 5.84) < 1e-9
+            && Math.abs(finite(p.spinRps, 0)) < 1e-9
+            && Math.abs(finite(p.elevationDeg, 0) - 10.3) < 1e-9
+            && Math.abs(finite(p.aimDeg, 0)) < 1e-9;
           common.params = {
-            speedMps: clamp(p.speedMps, 1, 20, 8),
-            spinRps: clamp(p.spinRps, -120, 120, 0),
-            elevationDeg: clamp(p.elevationDeg, -20, 45, 4),
-            aimDeg: clamp(p.aimDeg, -60, 60, 0),
+            speedMps: legacyBlankShot ? defaults.speedMps : clamp(p.speedMps, 1, 20, defaults.speedMps),
+            spinRps: legacyBlankShot ? defaults.spinRps : clamp(p.spinRps, -120, 120, defaults.spinRps),
+            elevationDeg: legacyBlankShot ? defaults.elevationDeg : clamp(p.elevationDeg, -20, 45, defaults.elevationDeg),
+            aimDeg: legacyBlankShot ? defaults.aimDeg : clamp(p.aimDeg, -60, 60, defaults.aimDeg),
           };
-          common.variation = n.variation?.enabled
+          common.variation = !legacyBlankShot && n.variation?.enabled
             ? ShotVariation.normalizeVariation(n.variation, common.params)
             : null;
         } else if (n.type === "drill") {
@@ -1818,16 +1826,6 @@
     }
   }
 
-  function saveShotEditorModePreference() {
-    try { localStorage.setItem(SHOT_EDITOR_MODE_STORAGE_KEY, shotEditorMode); }
-    catch (error) { console.warn("Could not save shot editor mode preference", error); }
-  }
-
-  function loadShotEditorModePreference() {
-    try { return localStorage.getItem(SHOT_EDITOR_MODE_STORAGE_KEY) === "manual" ? "manual" : "intuitive"; }
-    catch (_) { return "intuitive"; }
-  }
-
   function commit({ render = true, message = null } = {}) {
     saveLibrary();
     if (render) renderAll();
@@ -1949,6 +1947,10 @@
 
   function openInspectorScreen() {
     inspectorOpen = Boolean(selection);
+    if (selection?.kind === "node" && isBallNode(getNode(activeDrill(), selection.id))) {
+      shotEditorMode = "intuitive";
+      renderInspector();
+    }
     document.body.classList.toggle("details-open", inspectorOpen);
   }
 
@@ -3230,7 +3232,7 @@
         elevationDeg: clamp(draft.elevationDeg, -20, 45, node.params.elevationDeg),
         aimDeg: clamp(draft.aimDeg, -60, 60, node.params.aimDeg),
       };
-      node.variation = defaultIntuitiveVariation(node);
+      node.variation = null;
     } else if (type === "random") {
       node = makeRandom(String(draft.label || "Weighted random"));
     } else if (type === "drill") {
@@ -3269,7 +3271,6 @@
 
   function openAddNodeMenu() {
     if (!activeDrillEditable()) { toast("Copy this built-in preset to My drills before editing it."); return; }
-    addNodeDraftType = null;
     els.addNodeDialogTitle.textContent = "Add to drill";
     els.addNodeDialogSubtitle.textContent = selection?.kind === "edge" ? "The new step will be inserted into the selected path." : selection?.kind === "node" ? "The new step will be connected after the selected node when possible." : "Choose what to add.";
     els.addNodeChoicePanel.hidden = false;
@@ -3278,54 +3279,19 @@
     els.addNodeDialog.showModal();
   }
 
-  function newShotPreviewHtml(params, type = "shot") {
-    const prediction = predictTrajectory(params, null, { includePostBounce: true, serve: type === "serve" });
-    return `${trajectoryLegendHtml(prediction)}<div class="new-shot-preview"><div><small>Top view</small>${topTrajectorySvg(prediction, 600, 250)}</div><div><small>Side view</small>${sideTrajectorySvg(prediction, 600, 230)}</div></div>`;
-  }
-
   function openAddNodeConfig(type) {
-    addNodeDraftType = type;
+    if (isBallNodeType(type)) {
+      shotEditorMode = "intuitive";
+      addNode(type);
+      els.addNodeDialog.close();
+      return;
+    }
     els.addNodeChoicePanel.hidden = true;
     els.addNodeConfigPanel.hidden = false;
     const titles = { shot: "Add shot", serve: "Add serve", random: "Add random choice", counter: "Add repeat / loop", drill: "Add sub-drill" };
     els.addNodeDialogTitle.textContent = titles[type] || "Add node";
     els.addNodeDialogSubtitle.textContent = "Set the step, then add it.";
-    if (isBallNodeType(type)) {
-      const serve = type === "serve";
-      const p = serve
-        ? { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 }
-        : { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 };
-      els.addNodeConfigPanel.innerHTML = `
-        <label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="${serve ? "Serve" : "Shot"}"></label>
-        ${serve ? `<p class="helper">A legal modeled serve must bounce on the robot side, clear the net, then bounce on the player side. The preview continues through the receiver's second bounce.</p>` : ""}
-        <div class="shot-parameter-stack">
-          <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="-0.1">−</button><span class="input-with-unit"><input id="newShotSpeedField" class="shot-number-input" type="number" inputmode="decimal" min="1" max="20" step="0.01" data-decimals="2" value="${fmt(p.speedMps,2)}"><small>m/s</small></span><button class="stepper-button" type="button" data-create-step="newShotSpeedField" data-delta="0.1">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="-1">−</button><span class="input-with-unit"><input id="newShotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.1" data-decimals="1" value="${fmt(p.spinRps,1)}"><small>rps</small></span><button class="stepper-button" type="button" data-create-step="newShotSpinField" data-delta="1">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Elevation</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotElevationField" data-delta="-0.5">−</button><span class="input-with-unit"><input id="newShotElevationField" class="shot-number-input" type="number" inputmode="decimal" min="-20" max="45" step="0.1" data-decimals="1" value="${fmt(p.elevationDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotElevationField" data-delta="0.5">+</button></span></label>
-          <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="-0.5">−</button><span class="input-with-unit"><input id="newShotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" data-decimals="1" value="${fmt(p.aimDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-create-step="newShotAimField" data-delta="0.5">+</button></span></label>
-        </div>
-        <div id="newShotPreview">${newShotPreviewHtml(p, type)}</div>
-        <div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add ${serve ? "serve" : "shot"}</button></div>`;
-      const refresh = () => {
-        const params = { speedMps: finite($("newShotSpeedField")?.value, p.speedMps), spinRps: finite($("newShotSpinField")?.value, p.spinRps), elevationDeg: finite($("newShotElevationField")?.value, p.elevationDeg), aimDeg: finite($("newShotAimField")?.value, p.aimDeg) };
-        $("newShotPreview").innerHTML = newShotPreviewHtml(params, type);
-      };
-      ["newShotSpeedField","newShotSpinField","newShotElevationField","newShotAimField"].forEach(id => $(id)?.addEventListener("input", refresh));
-      ["newShotSpeedField","newShotSpinField","newShotElevationField","newShotAimField"].forEach(id => $(id)?.addEventListener("change", event => {
-        const input = event.target;
-        const decimals = Math.max(0, Math.trunc(finite(input.dataset.decimals, 0)));
-        const value = clamp(input.value, finite(input.min, -Infinity), finite(input.max, Infinity), 0);
-        input.value = String(rounded(value, decimals));
-        refresh();
-      }));
-      els.addNodeConfigPanel.querySelectorAll("[data-create-step]").forEach(button => button.addEventListener("click", () => {
-        const input = $(button.dataset.createStep); if (!input) return;
-        const next = finite(input.value, 0) + finite(button.dataset.delta, 0);
-        const decimals = Math.max(0, Math.trunc(finite(input.dataset.decimals, 0)));
-        input.value = String(rounded(Math.min(finite(input.max, Infinity), Math.max(finite(input.min, -Infinity), next)), decimals));
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }));
-    } else if (type === "random") {
+    if (type === "random") {
       els.addNodeConfigPanel.innerHTML = `<label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Weighted random"></label><p class="helper">After creating it, add branches from the node or use + with the random node selected.</p><div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add random choice</button></div>`;
     } else if (type === "counter") {
       els.addNodeConfigPanel.innerHTML = `<label class="field"><span>Name</span><input id="newNodeNameField" type="text" maxlength="90" value="Repeater"></label><label class="field"><span>Starting repetitions</span><input id="newCounterStartField" type="number" min="0" max="100000" step="1" value="2"></label><div class="dialog-action-row"><button id="cancelCreateNodeBtn" class="button ghost" type="button">Cancel</button><button id="confirmCreateNodeBtn" class="button primary" type="button">Add repeater</button></div>`;
@@ -3335,7 +3301,6 @@
     $("cancelCreateNodeBtn")?.addEventListener("click", () => { els.addNodeDialog.close(); });
     $("confirmCreateNodeBtn")?.addEventListener("click", () => {
       const draft = { label: $("newNodeNameField")?.value?.trim() || titles[type] };
-      if (isBallNodeType(type)) Object.assign(draft, { speedMps: rounded(finite($("newShotSpeedField")?.value, type === "serve" ? 5.0 : 5.84), 2), spinRps: rounded(finite($("newShotSpinField")?.value, type === "serve" ? -8 : 0), 1), elevationDeg: rounded(finite($("newShotElevationField")?.value, type === "serve" ? -16 : 10.3), 1), aimDeg: rounded(finite($("newShotAimField")?.value, 0), 1) });
       if (type === "counter") draft.startCount = finite($("newCounterStartField")?.value, 2);
       if (type === "drill") draft.referencedDrillId = $("newReferencedDrillField")?.value || null;
       addNode(type, draft);
@@ -3516,7 +3481,6 @@
 
   function shotEnvelopeCloud(node, selections = null) {
     const key = JSON.stringify([node.type, library.calibration]);
-    if (shotEnvelopeCache.has(key) && !selections) return shotEnvelopeCache.get(key);
     const values = list => [...new Set(list.map(value => rounded(value, 3)))].sort((a, b) => a - b);
     const hardware = novaFeasibleBounds(library.calibration);
     const speedModel = library.calibration.nova.speedModel;
@@ -3551,14 +3515,34 @@
       }
     };
     let cloud = shotEnvelopeCache.get(key);
-    if (!cloud) { cloud = []; collect(cloud, speeds, spins); shotEnvelopeCache.set(key, cloud); }
-    if (!selections) return cloud;
+    if (!cloud) {
+      cloud = [];
+      collect(cloud, speeds, spins);
+      shotEnvelopeCache.set(key, cloud);
+    }
+    // A preset or imported shot need not lie on the coarse shared grid. Add
+    // this node's nominal to the returned support without polluting the cache
+    // used by every other node of the same type.
+    const supported = [...cloud];
+    const nominalPrediction = novaFeasiblePrediction(node.params, null, trajectoryOptionsForNode(node));
+    const nominalLanding = receiverLanding(nominalPrediction, node.type === "serve");
+    if (receiverPredictionValid(node, nominalPrediction) && nominalLanding && Number.isFinite(nominalPrediction.net?.clearanceM)) {
+      supported.push({
+        depth: (nominalLanding.x - nominalPrediction.table.length / 2) * 100,
+        lateral: nominalLanding.y * 100,
+        speed: node.params.speedMps, spin: node.params.spinRps,
+        elevation: node.params.elevationDeg, aim: node.params.aimDeg,
+        clearance: nominalPrediction.net.clearanceM * 100,
+        params: { ...node.params },
+      });
+    }
+    if (!selections) return supported;
     const endpoints = range => values([range[0], (range[0] + range[1]) / 2, range[1]]);
     const supplemental = [];
     collect(supplemental, endpoints(selections.speed), endpoints(selections.spin),
       selections.elevation ? endpoints(selections.elevation) : elevations,
       selections.aim ? endpoints(selections.aim) : aims);
-    return cloud.concat(supplemental);
+    return supported.concat(supplemental);
   }
 
   function envelopeDomains(cloud, selections, table) {
@@ -3567,17 +3551,11 @@
       depth: [0, table.length * 50], lateral: [-table.width * 50, table.width * 50],
       speed: hardware.speed, spin: hardware.spin, elevation: hardware.elevation, aim: hardware.aim, clearance: [-30, 100],
     };
-    const domains = {};
-    for (const key of Object.keys(hard)) {
-      const candidates = cloud.filter(point => Object.keys(selections).every(other => other === key || (point[other] >= selections[other][0] - 1e-9 && point[other] <= selections[other][1] + 1e-9)));
-      domains[key] = candidates.length
-        ? [Math.max(hard[key][0], Math.min(...candidates.map(point => point[key]))), Math.min(hard[key][1], Math.max(...candidates.map(point => point[key])))]
-        : [...hard[key]];
-    }
-    // Negative clearance is an intentional impossible-shot request. Keep it
-    // directly selectable while the positive endpoint follows the feasible cloud.
-    domains.clearance[0] = -30;
-    return domains;
+    // An interval is an allowed set, so its UI domain is only bounded by the
+    // table/editor and hardware limits. Feasibility belongs to the sampler;
+    // conditioning these endpoints on other selections made widening one
+    // interval unexpectedly shrink another.
+    return Object.fromEntries(Object.entries(hard).map(([key, range]) => [key, [...range]]));
   }
 
   function intuitiveSelections(node, prediction, variation) {
@@ -3598,9 +3576,11 @@
     const p = node.params;
     const serve = node.type === "serve";
     const prediction = predictTrajectory(p, null, trajectoryOptionsForNode(node, true));
-    const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM) : null;
+    const variation = node.variation?.enabled
+      ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM)
+      : defaultIntuitiveVariation(node);
     const selections = intuitiveSelections(node, prediction, variation);
-    const domains = envelopeDomains(shotEnvelopeCloud(node, selections), selections, prediction.table);
+    const domains = envelopeDomains(shotEnvelopeCloud(node), selections, prediction.table);
     return `
       <section class="intuitive-editor">
         ${intuitiveLandingSvg(prediction, selections, serve)}
@@ -3631,7 +3611,7 @@
       elevation: [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
       aim: [variation.launch.minAimDeg, variation.launch.maxAimDeg],
     };
-    const domains = envelopeDomains(shotEnvelopeCloud(node, selections), selections, prediction.table);
+    const domains = envelopeDomains(shotEnvelopeCloud(node), selections, prediction.table);
     selections = Object.fromEntries(Object.entries(selections).map(([key, range]) => {
       const lo = clamp(range[0], domains[key][0], domains[key][1], domains[key][0]);
       const hi = clamp(range[1], lo, domains[key][1], domains[key][1]);
@@ -3771,7 +3751,6 @@
       const next = button.dataset.shotEditorMode === "manual" ? "manual" : "intuitive";
       if (next === shotEditorMode) return;
       shotEditorMode = next;
-      saveShotEditorModePreference();
       renderInspector();
     }));
     if (shotEditorMode === "intuitive") {
@@ -3827,12 +3806,6 @@
       setIntuitiveFeedback(node, "No valid shot exists inside all five intervals.", "miss");
       return;
     }
-    const domains = envelopeDomains(cloud, controls, table);
-    controls = Object.fromEntries(Object.entries(controls).map(([key, range]) => {
-      const lo = clamp(range[0], domains[key][0], domains[key][1], domains[key][0]);
-      const hi = clamp(range[1], lo, domains[key][1], domains[key][1]);
-      return [key, [lo, hi]];
-    }));
     const target = {
       x: table.length / 2 + (controls.depth[0] + controls.depth[1]) / 200,
       y: (controls.lateral[0] + controls.lateral[1]) / 200,
@@ -3901,7 +3874,7 @@
     node.variation = variation;
     shotVariationCache.clear();
     if (profile.ok) intuitiveFeedbackByNodeId.delete(node.id);
-    else intuitiveFeedbackByNodeId.set(node.id, `<strong class="trajectory-warning">Valid shots exist, but this range is difficult to sample. Narrow one or more intervals.</strong>`);
+    else intuitiveFeedbackByNodeId.set(node.id, `<strong class="trajectory-miss">No valid shot exists inside all five intervals.</strong>`);
     commit();
   }
 
@@ -3956,20 +3929,7 @@
       if (output) { output.hidden = false; output.innerHTML = manualFeedbackByNodeId.get(node.id); }
       return;
     }
-    const domains = envelopeDomains(cloud, controls, prediction.table);
-    controls = Object.fromEntries(Object.entries(controls).map(([key, range]) => {
-      const lo = clamp(range[0], domains[key][0], domains[key][1], domains[key][0]);
-      const hi = clamp(range[1], lo, domains[key][1], domains[key][1]);
-      return [key, [lo, hi]];
-    }));
-    const constrainedPoints = feasiblePoints.filter(point => Object.keys(controls).every(key =>
-      point[key] >= controls[key][0] - 1e-9 && point[key] <= controls[key][1] + 1e-9));
-    if (!constrainedPoints.length) {
-      manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot exists inside all four launch intervals.</strong>');
-      const output = $("manualShotFeedback");
-      if (output) { output.hidden = false; output.innerHTML = manualFeedbackByNodeId.get(node.id); }
-      return;
-    }
+    const constrainedPoints = feasiblePoints;
     const centers = Object.fromEntries(Object.entries(controls).map(([key, range]) => [key, (range[0] + range[1]) / 2]));
     const spans = Object.fromEntries(Object.entries(controls).map(([key, range]) => [key, Math.max(INTUITIVE_RANGE_SPECS[key].step, range[1] - range[0])]));
     const roundedCandidate = point => {
@@ -4008,8 +3968,7 @@
     }, params, nominalPrediction?.net?.clearanceM ?? prediction.net?.clearanceM);
     shotVariationCache.clear();
     const profile = profileShotVariation(node, 24);
-    if (!profile.ok) manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot could be sampled from these intervals.</strong>');
-    else if (profile.failed) manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-warning">Some combinations are impossible; playback will use valid combinations only.</strong>');
+    if (!profile.ok) manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot exists inside all four launch intervals.</strong>');
     else manualFeedbackByNodeId.delete(node.id);
     commit();
   }
@@ -6653,29 +6612,9 @@
     return result;
   }
 
-  function liveTuningShotForPreview() {
-    const drill = activeDrill();
-    if (!drill) return null;
-    if (selection?.kind === "node") {
-      const selected = getNode(drill, selection.id);
-      if (isBallNode(selected)) return selected;
-    }
-    return drill.nodes.find(isBallNode) || null;
-  }
-
   function renderLiveTuning() {
     liveTuning = DrillAdjustments.normalizeTuning(liveTuning);
-    const values = [
-      [els.tuningPaceValue, "pacePct"],
-      [els.tuningClearanceValue, "clearancePct"],
-      [els.tuningSpinValue, "spinPct"],
-      [els.tuningSpeedValue, "speedPct"],
-    ];
-    for (const [output, key] of values) {
-      if (output) {
-        output.textContent = formatTuningPercent(liveTuning[key]);
-        output.closest(".tuning-control")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
-      }
+    for (const key of Object.keys(liveTuning)) {
       document.querySelectorAll(`[data-tuning-output="${key}"]`).forEach(runOutput => {
         runOutput.textContent = formatTuningPercent(liveTuning[key]);
         runOutput.closest(".session-adjustment")?.classList.toggle("active", Math.abs(liveTuning[key]) > 1e-9);
@@ -6686,36 +6625,7 @@
       });
     }
     const activeEntries = Object.entries(liveTuning).filter(([, value]) => Math.abs(value) > 1e-9);
-    els.liveTuningBtn?.classList.toggle("active", activeEntries.length > 0);
     if (els.liveTuningSummary) els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "No adjustments";
-
-    const drill = activeDrill();
-    const shot = liveTuningShotForPreview();
-    if (!shot) {
-      els.liveTuningImpactLabel.textContent = "No shot available";
-      els.liveTuningImpact.innerHTML = `<p class="helper">The selected drill has no direct shot node to preview.</p>`;
-      return;
-    }
-    els.liveTuningImpactLabel.textContent = `All balls · example: ${shot.label}`;
-    const result = adjustedShotForRuntime(shot.params, drill.id, shot.type);
-    const base = result.basePrediction || predictTrajectory(shot.params, calibrationAtPose(drillPose(drill)), trajectoryOptionsForNode(shot));
-    const tuned = result.prediction || base;
-    const baseClearance = base?.net?.clearanceM;
-    const tunedClearance = tuned?.net?.clearanceM;
-    const landingShiftCm = Number.isFinite(result.landingErrorM) ? result.landingErrorM * 100 : null;
-    const warnings = result.warnings || [];
-    els.liveTuningImpact.innerHTML = `
-      <div class="live-tuning-impact-grid">
-        <div><span>Speed</span><strong>${fmt(shot.params.speedMps,2)} → ${fmt(result.params.speedMps,2)} m/s</strong><small>effective shot</small></div>
-        <div><span>Spin</span><strong>${signed(shot.params.spinRps,1)} → ${signed(result.params.spinRps,1)} rps</strong><small>effective shot</small></div>
-        <div><span>Elevation</span><strong>${signed(shot.params.elevationDeg,1)}° → ${signed(result.params.elevationDeg,1)}°</strong><small>solver compensation</small></div>
-        <div><span>Landing shift</span><strong>${landingShiftCm == null ? "—" : `${fmt(landingShiftCm,1)} cm`}</strong><small>modeled distance</small></div>
-        <div><span>Net clearance</span><strong>${baseClearance == null ? "—" : `${fmt(baseClearance * 100,1)} cm`} → ${tunedClearance == null ? "—" : `${fmt(tunedClearance * 100,1)} cm`}</strong><small>bottom of ball over net</small></div>
-        <div><span>Scope</span><strong>Every ball</strong><small>including sub-drills</small></div>
-        <div><span>Stored drill</span><strong>Unchanged</strong><small>runtime layer only</small></div>
-      </div>
-      ${warnings.length ? `<p class="live-tuning-impact-warning">${escapeHtml(warnings.join(" "))}</p>` : ""}
-    `;
   }
 
   function requestImmediateLiveRetune() {
@@ -6768,13 +6678,40 @@
     };
   }
 
+  function variationFeasibleSamples(node, variation) {
+    if (!node || !variation?.enabled) return [];
+    const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
+    const normalized = ShotVariation.normalizeVariation(variation, node.params, prediction.net?.clearanceM);
+    const selections = normalized.mode === "launch" ? {
+      speed: [normalized.speed.minMps, normalized.speed.maxMps],
+      spin: [normalized.spin.minRps, normalized.spin.maxRps],
+      elevation: [normalized.launch.minElevationDeg, normalized.launch.maxElevationDeg],
+      aim: [normalized.launch.minAimDeg, normalized.launch.maxAimDeg],
+    } : intuitiveSelections(node, prediction, normalized);
+    const matching = shotEnvelopeCloud(node, selections).filter(point => Object.entries(selections).every(([key, range]) =>
+      point[key] >= range[0] - 1e-9 && point[key] <= range[1] + 1e-9));
+    // Bound cache size and preparation work while preserving the full region's
+    // endpoints through deterministic, even sampling.
+    const limit = 256;
+    const selected = matching.length <= limit ? matching : Array.from({ length: limit }, (_, index) =>
+      matching[Math.round(index * (matching.length - 1) / (limit - 1))]);
+    return selected.map(point => ({
+      params: { ...point.params },
+      outcome: [prediction.table.length / 2 + point.depth / 100, point.lateral / 100, point.clearance / 100],
+    }));
+  }
+
   function variationCacheEntry(shot, baseParams, runtime = false) {
     if (!shot.variation?.enabled) return null;
     const environment = variationEnvironment(shot.drillId, runtime, shot.nodeType || shot.type);
     const cacheKey = JSON.stringify([runtime, shot.drillId, shot.nodeId, shot.nodeType || shot.type, baseParams, shot.variation, environment.calibration]);
     let entry = shotVariationCache.get(cacheKey);
     if (entry) return entry;
-    const prepared = ShotVariation.prepare(baseParams, shot.variation, environment.evaluate);
+    const drill = getDrill(shot.drillId);
+    const node = drill ? getNode(drill, shot.nodeId) : null;
+    const prepared = ShotVariation.prepare(baseParams, shot.variation, environment.evaluate, {
+      feasibleSamples: variationFeasibleSamples(node, shot.variation),
+    });
     entry = { prepared, evaluate: environment.evaluate };
     if (shotVariationCache.size >= 48) shotVariationCache.clear();
     shotVariationCache.set(cacheKey, entry);
@@ -6794,8 +6731,8 @@
     return result
       ? { params: result.params, result }
       : { params: null, error: shot.variation.mode === "launch"
-        ? "No feasible varied shot was found inside the launch intervals. Narrow speed, spin, elevation, or aim."
-        : "No feasible varied shot was found after five bounded attempts. Reduce the requested position, clearance, speed, or spin range." };
+        ? "No valid shot exists inside the requested launch intervals."
+        : "No valid shot exists inside the requested position, clearance, speed, and spin intervals." };
   }
 
   function profileShotVariation(node, count = 12) {
@@ -6803,7 +6740,9 @@
     const owner = allDrills().find(drill => drill.nodes.some(candidate => candidate.id === node.id)) || activeDrill();
     const environment = variationEnvironment(owner?.id, false, node.type);
     const started = performance.now();
-    const prepared = ShotVariation.prepare(node.params, node.variation, environment.evaluate);
+    const prepared = ShotVariation.prepare(node.params, node.variation, environment.evaluate, {
+      feasibleSamples: variationFeasibleSamples(node, node.variation),
+    });
     if (!prepared.ok) return { ok: false, reason: prepared.reason };
     const batch = ShotVariation.sampleMany(prepared, Math.max(1, Math.min(100, Math.round(count))), environment.evaluate, ShotVariation.createRng(0x51f15e), {
       attempts: 5,
@@ -6814,7 +6753,7 @@
     const elapsedMs = performance.now() - started;
     return {
       ok: batch.results.length > 0,
-      reason: batch.results.length ? "" : "No feasible samples were found. Reduce the requested variation ranges.",
+      reason: batch.results.length ? "" : "No valid shot exists inside the requested intervals.",
       accepted: batch.results.length,
       failed: batch.failures.length,
       elapsedMs,
@@ -8651,14 +8590,7 @@
     els.duplicateDrillBtn.addEventListener("click", () => { duplicateActiveDrill(); els.drillDetailsDialog.close(); navigateApp("editor", { push: true }); });
     els.deleteDrillBtn.addEventListener("click", deleteActiveDrill);
 
-    els.liveTuningBtn.addEventListener("click", () => {
-      renderLiveTuning();
-      els.liveTuningDialog.showModal();
-    });
-    els.closeLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
-    els.doneLiveTuningBtn.addEventListener("click", () => els.liveTuningDialog.close());
     els.resetLiveTuningBtn.addEventListener("click", resetLiveTuning);
-    els.saveLiveTunedDrillBtn.addEventListener("click", () => { els.liveTuningDialog.close(); saveEffectiveDrillAsNew(); });
     els.saveEffectiveDrillBtn.addEventListener("click", saveEffectiveDrillAsNew);
     els.updateRobotPoseBtn.addEventListener("click", openPoseCalibration);
     els.closePoseCalibrationBtn.addEventListener("click", () => {
@@ -8928,7 +8860,6 @@
     library = initializeLibrary();
     repairLibraryIfNeeded();
     liveTuning = loadLiveTuningPreference();
-    shotEditorMode = loadShotEditorModePreference();
     // Always start the browser at its root. The active drill can live in any
     // folder, but entering the app should show the library structure rather
     // than silently dropping the user inside that drill's folder.

@@ -5,6 +5,7 @@ The runtime treats a user drill as one logical session rather than independently
 ## Normal playback
 
 - Playback uses one running 24-byte record slot. The first shot is sent with `START`; each `0x05` ball event triggers a same-size `0x84` replacement for the next shot.
+- Exact duplicate `0x05` notifications are ignored so a repeated BLE notification cannot advance the controller-side pattern twice.
 - Finite sessions use combo mode with the exact shot count, so the Nova returns to Ready after the final ball. Infinite sessions use endless mode and end only on Stop.
 - The one-slot shape never changes while running. Direct hardware tests showed that same-size updates are accepted, while attempts to change the active record count are rejected with status 1.
 - Logical set boundaries do not create STOP/START cycles. Random choices, shot variation, and live tuning can therefore change the next slot while the robot remains Running.

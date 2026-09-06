@@ -96,7 +96,7 @@ Captured 2026-09-04. These are product observations and future work, not complet
 ### Add safe idle and connection lifecycle — software completed 2026-09-06
 
 - Leaving active Run or calibration work sends STOP as needed and waits for Nova to report Ready while retaining the BLE connection for a fast restart.
-- Added a separate configurable idle STOP, defaulting to two minutes since the connection or last confirmed ball event. It sends STOP even from Ready, confirms Nova reaches Ready or Uninitialized, and retains BLE; the next Start initializes automatically when required.
+- Added a separate configurable idle STOP, defaulting to two minutes since the connection or last confirmed ball event. Ready and Uninitialized already satisfy the stopped condition; otherwise it sends STOP, confirms Nova reaches Ready or Uninitialized, and retains BLE. The next Start initializes automatically when required.
 - Added a Robot-menu setting to disconnect after 5, 10, 15, 30, or 60 minutes without robot use, with 10 minutes as the default and Never as an option.
 - The BLE disconnect timeout never interrupts a running drill or calibration. The shorter STOP timer is deliberately based on confirmed ball events and ends activity after the configured no-shot interval. Changing browser visibility alone does not trigger shutdown.
 - The inactivity timeout performs an orderly Ready transition before disconnecting. Page close retains the separate best-effort STOP and immediate GATT disconnect because browsers cannot guarantee awaited BLE work during teardown.

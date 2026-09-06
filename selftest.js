@@ -177,8 +177,8 @@ async function main() {
   const idleStopWritesBefore = fake.write.writes.filter(hex => hex === P.hex(P.COMMANDS.stop)).length;
   await controller.stopForIdle();
   const idleStopWritesAfter = fake.write.writes.filter(hex => hex === P.hex(P.COMMANDS.stop)).length;
-  if (idleStopWritesAfter !== idleStopWritesBefore + 1 || !controller.ready) {
-    throw new Error("Idle STOP must be sent from Ready, confirmed, and retain BLE");
+  if (idleStopWritesAfter !== idleStopWritesBefore || !controller.ready) {
+    throw new Error("Idle STOP must treat Ready as already stopped and retain BLE");
   }
   await controller.sendRaw(P.COMMANDS.heartbeat, { label: "mock fire-and-forget heartbeat" });
   const ballEventPromise = controller.waitForBallEvent(controller.ballCounter, 2000);
@@ -187,6 +187,8 @@ async function main() {
   if (ballEvent.counter !== 1 || ballEvent.eventNumber !== 1 || ballEvent.recordIndex !== 0) {
     throw new Error(`Mock ball event was not parsed: ${JSON.stringify(ballEvent)}`);
   }
+  fake.notify.emit(frame(0x05, [1, 0, 0, 0, 1, 0, 0]));
+  if (controller.ballCounter !== 1) throw new Error("Duplicate ball notifications must not advance playback twice");
 
   const ball = P.packBallRecord({
     wheelA: 2861,
