@@ -13,6 +13,7 @@ function analyticPrediction(params) {
       hit: false,
       clearanceM: 0.008 * v + 0.0007 * w + 0.013 * e,
     },
+    table: { length: 2.74, width: 1.525 },
   };
 }
 
@@ -31,6 +32,21 @@ const prepared = Variation.prepare(base, config, analyticPrediction);
 assert(prepared.ok, prepared.reason);
 const invalidServe = Variation.prepare(base, config, params => ({ ...analyticPrediction(params), serve: { valid: false } }));
 assert(!invalidServe.ok, 'serve variation must reject trajectories without a legal second bounce');
+const netContact = Variation.prepare(base, config, params => ({
+  ...analyticPrediction(params), status: 'net', net: { ...analyticPrediction(params).net, hit: true },
+}));
+assert(!netContact.ok, 'variation must reject a trajectory that physically contacts the net');
+const edgeContact = Variation.prepare(base, config, params => ({ ...analyticPrediction(params), status: 'edge' }));
+assert(!edgeContact.ok, 'variation must reject a table-edge contact');
+const hardwareRejected = Variation.prepare(base, config, params => ({ ...analyticPrediction(params), hardwareRepresentable: false }));
+assert(!hardwareRejected.ok, 'variation must reject commands outside the calibrated Nova actuator envelope');
+const servePrepared = Variation.prepare(base, config, params => {
+  const prediction = analyticPrediction(params);
+  return { ...prediction, secondBounce: { x: prediction.landing.x + .5, y: prediction.landing.y - .1 }, serve: { valid: true } };
+});
+assert(servePrepared.ok, servePrepared.reason);
+assert(Math.abs(servePrepared.baseOutcome[0] - (nominal.landing.x + .5)) < 1e-9, 'serve variation must target the receiver-side bounce');
+assert(Math.abs(servePrepared.baseOutcome[1] - (nominal.landing.y - .1)) < 1e-9, 'serve lateral target must use the receiver-side bounce');
 assert.strictEqual(prepared.evaluations, 5, 'preparation must use one base + four finite-difference evaluations');
 assert(Math.abs(prepared.tangent.reduce((sum, value) => sum + value * value, 0) - 1) < 1e-9);
 
@@ -60,6 +76,42 @@ assert(maxSpeed - minSpeed > 0.35, 'free manifold sampling should vary speed');
 assert(maxSpin - minSpin > 2, 'free manifold sampling should vary spin');
 assert(positivePhase > 60 && negativePhase > 60, 'both manifold directions should be sampled');
 assert(batch.evaluations / batch.results.length < 10, `evaluation budget too high: ${batch.evaluations / batch.results.length}`);
+
+const rectangleConfig = {
+  ...config,
+  placement: { depthMinCm: 35, depthMaxCm: 48, lateralMinCm: -6, lateralMaxCm: 8 },
+};
+const rectanglePrepared = Variation.prepare(base, rectangleConfig, analyticPrediction);
+assert(rectanglePrepared.ok, rectanglePrepared.reason);
+const rectangleBatch = Variation.sampleMany(rectanglePrepared, 80, analyticPrediction, Variation.createRng(2468), {
+  attempts: 5, maxIterations: 7, landingToleranceM: 0.003, clearanceToleranceM: 0.001,
+});
+assert(rectangleBatch.results.length >= 65, `expected usable rectangle acceptance, got ${rectangleBatch.results.length}/80`);
+for (const result of rectangleBatch.results) {
+  const depthCm = (result.target.landing.x - 1.37) * 100;
+  const lateralCm = result.target.landing.y * 100;
+  assert(depthCm >= 35 && depthCm <= 48, `rectangle depth target ${depthCm}`);
+  assert(lateralCm >= -6 && lateralCm <= 8, `rectangle lateral target ${lateralCm}`);
+}
+
+const launchConfig = {
+  ...config,
+  mode: 'launch',
+  speed: { minMps: 6.5, maxMps: 7.5 },
+  spin: { minRps: 10, maxRps: 24 },
+  launch: { minElevationDeg: 7, maxElevationDeg: 13, minAimDeg: -8, maxAimDeg: 6 },
+};
+const launchPrepared = Variation.prepare(base, launchConfig, analyticPrediction);
+assert(launchPrepared.ok, launchPrepared.reason);
+assert.strictEqual(launchPrepared.preparationEvaluations, 1, 'launch intervals only need the nominal preparation evaluation');
+const launchBatch = Variation.sampleMany(launchPrepared, 120, analyticPrediction, Variation.createRng(4321), { attempts: 5 });
+assert.strictEqual(launchBatch.results.length, 120, 'valid launch intervals should produce direct samples');
+for (const result of launchBatch.results) {
+  assert(result.params.speedMps >= 6.5 && result.params.speedMps <= 7.5);
+  assert(result.params.spinRps >= 10 && result.params.spinRps <= 24);
+  assert(result.params.elevationDeg >= 7 && result.params.elevationDeg <= 13);
+  assert(result.params.aimDeg >= -8 && result.params.aimDeg <= 6);
+}
 
 // An impossible exact clearance must fail rather than be clamped onto a command boundary.
 const impossible = Variation.prepare(base, {

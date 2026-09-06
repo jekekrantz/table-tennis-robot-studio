@@ -26,13 +26,13 @@ for expected in [
     "builtInLibraryTab", "myDrillsLibraryTab", "libraryBreadcrumb", "librarySearchInput",
     "newFolderBtn", "copyBuiltInBtn", "moveDrillBtn", "folderDialog", "moveDrillDialog",
     "libraryScreen", "runScreen", "editorScreen", "robotScreen",
-    "mobileLibraryNavBtn", "mobileRunNavBtn", "mobileEditNavBtn", "mobileRobotNavBtn",
     "addNodeDialog", "drillDetailsDialog", "addNodeMenuBtn", "runEditDrillBtn",
     "addServeBtn",
     "editorRunBtn", "robotDiagnosticsBtn", "protocolDebugBtn", "protocolDebugDialog",
     "protocolDebugEditor", "protocolDebugRunBtn", "protocolDebugStopScriptBtn",
     "protocolDebugStopNovaBtn", "protocolDebugFileInput", "robotDialogContext",
     "robotDialogConnectBtn",
+    "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
 ]:
     if expected not in ids:
         raise SystemExit(f"Missing required UI control: {expected}")
@@ -121,16 +121,35 @@ for token in (
         raise SystemExit(f"Missing robust calibration/export behavior: {token}")
 
 # Shot editor and semantic presentation.
-for token in ('data-step-target="shotSpeedField"', 'data-step-delta="0.1"',
-              'data-step-target="shotSpinField"', 'data-step-delta="1"',
-              'data-step-target="shotElevationField"', 'data-step-target="shotAimField"',
-              'data-step-delta="0.5"', 'data-decimals="2"', 'data-decimals="1"',
-              'Predicted top view', 'topTrajectorySvg(prediction, 600, 280)',
-              'class="shot-parameter-stack"', 'class="field shot-parameter-row"',
-              'Shot variation', 'testShotVariationBtn', 'variationDepthField',
-              'variationClearanceMinField', 'variationSpeedMinField', 'variationSpinMinField'):
+for token in ('intuitiveRangeHtml("speed", selections.speed, domains.speed, "manual")',
+              'intuitiveRangeHtml("spin", selections.spin, domains.spin, "manual")',
+              'intuitiveRangeHtml("elevation", selections.elevation, domains.elevation, "manual")',
+              'intuitiveRangeHtml("aim", selections.aim, domains.aim, "manual")',
+              'applyManualShot(node)', 'bindManualShotInspector(node)',
+              'intuitiveLandingSvg(prediction, null, serve, true)',
+              'trajectoryPlanWarning(node.label, prediction)'):
     if token not in app:
         raise SystemExit(f"Missing shot-editor behavior: {token}")
+for token in ('SHOT_EDITOR_MODE_STORAGE_KEY', 'data-shot-editor-mode="intuitive"',
+              'data-shot-editor-mode="manual"', 'intuitiveLandingTable',
+              'maxlength="5"', 'class="dual-range"', 'applyIntuitiveShot(node)',
+              'candidatePrediction?.secondBounce', 'landing-target-rectangle',
+              'depth: Object.freeze({ label: "From net"', 'lateral: Object.freeze({ label: "From center"',
+              'function envelopeDomains', 'defaultIntuitiveVariation(node)',
+              'DEFAULT_TARGET_INSET_CM = 5', 'landing-robot-strip',
+              'landing-target-hatch', 'landing-table-edge', 'manual-shot-editor',
+              'novaFeasiblePrediction(params', 'novaFeasibleBounds(library.calibration)',
+              'LaunchModel.maxSpinRpsAtExitSpeed'):
+    if token not in app:
+        raise SystemExit(f"Missing intuitive shot-editor behavior: {token}")
+for token in ('.shot-editor-tabs', '.intuitive-landing-table', '.dual-range', '.interval-value'):
+    if token not in css:
+        raise SystemExit(f"Missing intuitive shot-editor styling: {token}")
+if 'id="inspectorCloseBtn"' in html or '<strong>Details</strong>' in html:
+    raise SystemExit("Shot inspector must use one hierarchical back/name/AI header")
+for token in ('liveTuningInlineHtml(p, node.type)', 'testShotVariationBtn', 'variationDepthField'):
+    if token in app:
+        raise SystemExit(f"Obsolete manual shot-editor clutter remains: {token}")
 if 'distanceTrajectorySvg(' in app:
     raise SystemExit("Obsolete one-dimensional landing-distance visualization remains")
 if 'params: { speedMps: 5.84, spinRps: 0, elevationDeg: 10.3, aimDeg: 0 }' not in app:
@@ -282,10 +301,12 @@ for token in ('labels: ["Variable topspin"], varied: true',
         raise SystemExit(f"Selective built-in variation behavior missing: {token}")
 
 # Responsive structure.
-for token in (".mobile-primary-nav", ".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell",
+for token in (".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell",
               ".drill-library-card", ".flow-terminal", ".add-node-choice-grid", ".feature-dialog", ".debug-frame"):
     if token not in css:
         raise SystemExit(f"Missing responsive UI structure: {token}")
+if "mobile-primary-nav" in html or "mobile-primary-nav" in css:
+    raise SystemExit("Obsolete persistent mobile navigation remains")
 for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"',
               'openAddNodeMenu', 'openAddNodeConfig', 'openDrillDetails'):
     if token not in app:

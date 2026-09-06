@@ -8,7 +8,7 @@
   const RAW_BASE = 969.9321047526674;
   const RAW_PER_SPEED_LEVEL = 630.455868089234;
   const RAW_DELTA_PER_SPIN_LEVEL = 342.036255843120;
-  const HARDWARE_RAW_MIN = 100;
+  const HARDWARE_RAW_MIN = 0;
   const HARDWARE_RAW_MAX = 7500;
   const DEFAULT_MOTOR_SCALING = Object.freeze({
     rawAtZeroSpeedLevel: RAW_BASE,
@@ -199,6 +199,17 @@
     if (clampToMeasuredCapacity) magnitude = Math.min(magnitude, cap.maxSpinSetting);
     return sign * magnitude;
   }
+  function maxSpinRpsAtExitSpeed(speedMps, scaling = DEFAULT_MOTOR_SCALING, model = DEFAULT_LINEAR_EXIT_MODEL) {
+    const s = normalizeMotorScaling(scaling);
+    const raw = rawFromExitSpeed(speedMps, model);
+    if (raw < HARDWARE_RAW_MIN || raw > HARDWARE_RAW_MAX) return 0;
+    const curve = Array.isArray(scaling?.spinsightCurve) ? scaling.spinsightCurve : SPINSIGHT_MEASURED_CURVE;
+    const cap = spinCapacityAtLevel(levelFromRaw(raw, s), curve);
+    if (!(cap.maxSpinSetting > 0) || !(cap.maxSpinRps > 0)) return 0;
+    const wheelHeadroomRaw = Math.max(0, Math.min(raw - HARDWARE_RAW_MIN, HARDWARE_RAW_MAX - raw));
+    const wheelLimitedSetting = wheelHeadroomRaw / s.rawDeltaPerSpinLevel;
+    return cap.maxSpinRps * Math.min(cap.maxSpinSetting, wheelLimitedSetting) / cap.maxSpinSetting;
+  }
   function spinRpsFromRawWheels(wheelA, wheelB, scaling = DEFAULT_MOTOR_SCALING) {
     const s = normalizeMotorScaling(scaling);
     const curve = Array.isArray(scaling?.spinsightCurve) ? scaling.spinsightCurve : SPINSIGHT_MEASURED_CURVE;
@@ -234,6 +245,7 @@
     spinCapacityAtLevel,
     spinRpsFromSpinSetting,
     spinSettingFromRps,
+    maxSpinRpsAtExitSpeed,
     spinRpsFromRawWheels,
   });
 });

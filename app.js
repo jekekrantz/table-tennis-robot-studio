@@ -6,6 +6,7 @@
 
   const STORAGE_KEY = "table-tennis-robot-studio";
   const LIVE_TUNING_STORAGE_KEY = "table-tennis-robot-studio-live-tuning";
+  const SHOT_EDITOR_MODE_STORAGE_KEY = "table-tennis-robot-studio-shot-editor-mode";
   const SCHEMA_VERSION = 1;
   // Trajectory launch coordinates come from the fixed measured pivot chain.
   const ROBOT_GEOMETRY_REFERENCE = "base-back-pivots-v1";
@@ -245,10 +246,6 @@
     desktopRunNavBtn: $("desktopRunNavBtn"),
     desktopEditNavBtn: $("desktopEditNavBtn"),
     desktopRobotNavBtn: $("desktopRobotNavBtn"),
-    mobileLibraryNavBtn: $("mobileLibraryNavBtn"),
-    mobileRunNavBtn: $("mobileRunNavBtn"),
-    mobileEditNavBtn: $("mobileEditNavBtn"),
-    mobileRobotNavBtn: $("mobileRobotNavBtn"),
     runBackBtn: $("runBackBtn"),
     editorBackBtn: $("editorBackBtn"),
     robotBackBtn: $("robotBackBtn"),
@@ -267,7 +264,7 @@
     drillDetailsBtn: $("drillDetailsBtn"),
     editorAutosaveText: $("editorAutosaveText"),
     inspectorBackBtn: $("inspectorBackBtn"),
-    inspectorCloseBtn: $("inspectorCloseBtn"),
+    inspectorNameField: $("inspectorNameField"),
     addNodeMenuBtn: $("addNodeMenuBtn"),
     addNodeDialog: $("addNodeDialog"),
     closeAddNodeDialogBtn: $("closeAddNodeDialogBtn"),
@@ -347,6 +344,7 @@
   let protocolDebugRunning = false;
   let stopPromise = null;
   let liveTuning = null;
+  let shotEditorMode = "intuitive";
   const liveTuningCache = new Map();
   let liveTuningRevision = 0;
   let playbackLiveContext = null;
@@ -361,9 +359,13 @@
   let poseMeasurementGesture = null;
   let poseStaleAcknowledged = false;
   const shotVariationCache = new Map();
+  const shotEnvelopeCache = new Map();
+  const intuitiveFeedbackByNodeId = new Map();
+  const manualFeedbackByNodeId = new Map();
   let shotVariationRng = ShotVariation?.createRng(Date.now());
 
   const Protocol = globalThis.PongbotProtocol;
+  const NOVA_LIMITS = Protocol?.FIRMWARE_LIMITS;
   const ProtocolDebug = globalThis.NovaProtocolDebug;
   const RobotController = globalThis.NovaBleController;
   const robot = Protocol && RobotController ? new RobotController() : null;
@@ -635,6 +637,30 @@
       y: 260,
       params: { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 },
     };
+  }
+
+  const DEFAULT_TARGET_INSET_CM = 5;
+
+  function defaultIntuitiveVariation(node) {
+    const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
+    const table = prediction.table;
+    const full = {
+      depth: [0, table.length * 50], lateral: [-table.width * 50, table.width * 50],
+      speed: [1, 20], spin: [-120, 120], clearance: [0, 30],
+    };
+    const domains = envelopeDomains(shotEnvelopeCloud(node), full, table);
+    return ShotVariation.normalizeVariation({
+      enabled: true,
+      placement: {
+        depthMinCm: Math.max(domains.depth[0], DEFAULT_TARGET_INSET_CM),
+        depthMaxCm: Math.min(domains.depth[1], table.length * 50 - DEFAULT_TARGET_INSET_CM),
+        lateralMinCm: Math.max(domains.lateral[0], -table.width * 50 + DEFAULT_TARGET_INSET_CM),
+        lateralMaxCm: Math.min(domains.lateral[1], table.width * 50 - DEFAULT_TARGET_INSET_CM),
+      },
+      speed: { minMps: domains.speed[0], maxMps: domains.speed[1] },
+      spin: { minRps: domains.spin[0], maxRps: domains.spin[1] },
+      clearance: { minCm: 0, maxCm: Math.min(30, domains.clearance[1]) },
+    }, node.params, prediction.net?.clearanceM);
   }
 
   function makeRandom(label = "Weighted random") {
@@ -1539,7 +1565,7 @@
     const guidedShots = Array.isArray(guidedRaw.shots) ? guidedRaw.shots.map((shot, index) => ({
       id: String(shot?.id || `cal-${index + 1}`),
       index,
-      rawSpeed: clamp(shot?.rawSpeed, 100, 7500, 2025),
+      rawSpeed: clamp(shot?.rawSpeed, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, 2025),
       elevationDeg: clamp(shot?.elevationDeg, -20, 60, 10),
       distanceCm: shot?.distanceCm === null || shot?.distanceCm === "" || shot?.distanceCm === undefined ? null : finite(shot.distanceCm, null),
       netClearanceCm: shot?.netClearanceCm === null || shot?.netClearanceCm === "" || shot?.netClearanceCm === undefined ? null : finite(shot.netClearanceCm, null),
@@ -1609,8 +1635,8 @@
         elevationMinDeg: clamp(guidedRaw.elevationMinDeg, -20, 60, guidedBase.elevationMinDeg),
         elevationMaxDeg: clamp(guidedRaw.elevationMaxDeg, -20, 60, guidedBase.elevationMaxDeg),
         elevationCount: Math.round(clamp(guidedRaw.elevationCount, 2, 12, guidedBase.elevationCount)),
-        speedMinRaw: Math.round(clamp(guidedRaw.speedMinRaw, 100, 7500, guidedBase.speedMinRaw)),
-        speedMaxRaw: Math.round(clamp(guidedRaw.speedMaxRaw, 100, 7500, guidedBase.speedMaxRaw)),
+        speedMinRaw: Math.round(clamp(guidedRaw.speedMinRaw, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, guidedBase.speedMinRaw)),
+        speedMaxRaw: Math.round(clamp(guidedRaw.speedMaxRaw, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, guidedBase.speedMaxRaw)),
         speedCount: Math.round(clamp(guidedRaw.speedCount, 2, 8, guidedBase.speedCount)),
         currentIndex: Math.max(0, Math.round(finite(guidedRaw.currentIndex, 0))),
         shots: guidedShots,
@@ -1787,6 +1813,16 @@
     }
   }
 
+  function saveShotEditorModePreference() {
+    try { localStorage.setItem(SHOT_EDITOR_MODE_STORAGE_KEY, shotEditorMode); }
+    catch (error) { console.warn("Could not save shot editor mode preference", error); }
+  }
+
+  function loadShotEditorModePreference() {
+    try { return localStorage.getItem(SHOT_EDITOR_MODE_STORAGE_KEY) === "manual" ? "manual" : "intuitive"; }
+    catch (_) { return "intuitive"; }
+  }
+
   function commit({ render = true, message = null } = {}) {
     saveLibrary();
     if (render) renderAll();
@@ -1839,7 +1875,7 @@
     document.body.dataset.appView = next;
     const screens = { library: els.libraryScreen, run: els.runScreen, editor: els.editorScreen, robot: els.robotScreen };
     Object.entries(screens).forEach(([key, screen]) => { if (screen) screen.hidden = key !== next; });
-    const navs = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn, els.mobileLibraryNavBtn, els.mobileRunNavBtn, els.mobileEditNavBtn, els.mobileRobotNavBtn];
+    const navs = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn];
     navs.forEach(button => {
       if (!button) return;
       const active = button.dataset.appNav === next;
@@ -3144,6 +3180,7 @@
         elevationDeg: clamp(draft.elevationDeg, -20, 45, node.params.elevationDeg),
         aimDeg: clamp(draft.aimDeg, -60, 60, node.params.aimDeg),
       };
+      node.variation = defaultIntuitiveVariation(node);
     } else if (type === "random") {
       node = makeRandom(String(draft.label || "Weighted random"));
     } else if (type === "drill") {
@@ -3286,10 +3323,14 @@
   function renderInspector() {
     const drill = activeDrill();
     if (!drill || !selection) {
+      document.body.classList.remove("ball-details");
+      if (els.inspectorNameField) els.inspectorNameField.hidden = true;
       els.inspectorContent.innerHTML = `<div class="empty-inspector"><h2>Inspector</h2><p>Select a node or connection.</p></div>`;
       return;
     }
     if (selection.kind === "edge") {
+      document.body.classList.remove("ball-details");
+      if (els.inspectorNameField) els.inspectorNameField.hidden = true;
       const edge = getEdge(drill, selection.id);
       if (!edge) { selection = null; renderInspector(); return; }
       renderEdgeInspector(drill, edge);
@@ -3319,21 +3360,16 @@
   }
 
   function renderNodeInspector(drill, node) {
-    const typeName = node.type === "shot" ? "Single shot" : node.type === "serve" ? "Serve" : node.type === "random" ? "Weighted randomization" : node.type === "drill" ? "Reusable sub-drill" : "Repeater";
-    let html = `
-      <div class="inspector-heading">
-        <div><h2>${escapeHtml(node.label)}</h2><p class="inspector-subtitle">${typeName}</p></div>
-        <button id="setStartInspectorBtn" class="button compact ghost" type="button"${drill.startNodeId === node.id ? " disabled" : ""}>${drill.startNodeId === node.id ? "First step" : "Make first step"}</button>
-      </div>
-      <label class="field"><span>Name</span><input id="nodeNameField" type="text" maxlength="90" value="${attr(node.label)}"></label>
-    `;
+    document.body.classList.toggle("ball-details", isBallNode(node));
+    if (els.inspectorNameField) { els.inspectorNameField.hidden = false; els.inspectorNameField.value = node.label; }
+    let html = "";
 
     if (isBallNode(node)) html += shotInspectorHtml(node);
     else if (node.type === "random") html += randomInspectorHtml(drill, node);
     else if (node.type === "drill") html += drillNodeInspectorHtml(drill, node);
     else html += counterInspectorHtml(drill, node);
 
-    html += incomingHtml(drill, node);
+    if (!isBallNode(node)) html += incomingHtml(drill, node);
     els.inspectorContent.innerHTML = html;
     bindCommonInspector(drill, node);
     if (isBallNode(node)) bindShotInspector(drill, node);
@@ -3343,48 +3379,227 @@
   }
 
   function shotInspectorHtml(node) {
+    return `
+      <div class="shot-editor-tabs" role="tablist" aria-label="Shot editor mode">
+        <button type="button" role="tab" data-shot-editor-mode="intuitive" aria-selected="${shotEditorMode === "intuitive"}" class="${shotEditorMode === "intuitive" ? "active" : ""}">Intuitive</button>
+        <button type="button" role="tab" data-shot-editor-mode="manual" aria-selected="${shotEditorMode === "manual"}" class="${shotEditorMode === "manual" ? "active" : ""}">Manual</button>
+      </div>
+      ${shotEditorMode === "manual" ? manualShotInspectorHtml(node) : intuitiveShotInspectorHtml(node)}
+    `;
+  }
+
+  const INTUITIVE_RANGE_SPECS = Object.freeze({
+    depth: Object.freeze({ label: "From net", unit: "cm", min: 0, max: 137, step: 1, decimals: 0 }),
+    lateral: Object.freeze({ label: "From center", unit: "cm", min: -76, max: 76, step: 1, decimals: 0 }),
+    speed: Object.freeze({ label: "Speed", unit: "m/s", min: 1, max: 20, step: .1, decimals: 1 }),
+    spin: Object.freeze({ label: "Spin", unit: "rps", min: -120, max: 120, step: 1, decimals: 0 }),
+    elevation: Object.freeze({ label: "Elevation", unit: "°", min: -20, max: 45, step: .5, decimals: 1 }),
+    aim: Object.freeze({ label: "Aim left/right", unit: "°", min: -60, max: 60, step: .5, decimals: 1 }),
+    clearance: Object.freeze({ label: "Net clearance", unit: "cm", min: -30, max: 100, step: .1, decimals: 1 }),
+  });
+
+  function intuitiveRangeHtml(key, values, domain, mode = "intuitive") {
+    const spec = INTUITIVE_RANGE_SPECS[key];
+    const min = domain?.[0] ?? spec.min, max = domain?.[1] ?? spec.max;
+    const span = Math.max(spec.step, max - min);
+    const minPct = (values[0] - min) / span * 100;
+    const maxPct = (values[1] - min) / span * 100;
+    return `<label class="intuitive-range-control" data-${mode}-range="${key}" data-domain-min="${min}" data-domain-max="${max}">
+      <span class="intuitive-range-heading"><strong>${spec.label}</strong><small>${spec.unit}</small></span>
+      <span class="interval-row">
+        <input class="interval-value interval-min" type="text" inputmode="decimal" maxlength="5" aria-label="Minimum ${spec.label.toLowerCase()}" value="${fmt(values[0], spec.decimals)}">
+        <span class="dual-range" style="--range-start:${minPct}%;--range-end:${maxPct}%">
+          <input class="range-min" type="range" min="${min}" max="${max}" step="${spec.step}" value="${values[0]}" aria-label="Minimum ${spec.label.toLowerCase()}">
+          <input class="range-max" type="range" min="${min}" max="${max}" step="${spec.step}" value="${values[1]}" aria-label="Maximum ${spec.label.toLowerCase()}">
+        </span>
+        <input class="interval-value interval-max" type="text" inputmode="decimal" maxlength="5" aria-label="Maximum ${spec.label.toLowerCase()}" value="${fmt(values[1], spec.decimals)}">
+      </span>
+    </label>`;
+  }
+
+  function intuitiveLandingSvg(prediction, selections, serve, exact = false) {
+    const table = prediction.table;
+    const left = 11, netY = 62, width = 338, receiverHeight = 255;
+    const sx = lateralCm => left + (lateralCm + table.width * 50) / (table.width * 100) * width;
+    const sy = depthCm => netY + depthCm / (table.length * 50) * receiverHeight;
+    const landing = receiverLanding(prediction, serve);
+    const landingDepthCm = landing ? (landing.x - table.length / 2) * 100 : NaN;
+    const landingLateralCm = landing ? landing.y * 100 : NaN;
+    const exactLandingVisible = exact && landingDepthCm >= 0 && landingDepthCm <= table.length * 50
+      && Math.abs(landingLateralCm) <= table.width * 50;
+    const target = exact
+      ? exactLandingVisible
+        ? `<circle class="landing-target-point-halo" cx="${sx(landingLateralCm)}" cy="${sy(landingDepthCm)}" r="13"/><circle class="landing-target-point" cx="${sx(landingLateralCm)}" cy="${sy(landingDepthCm)}" r="6"/>`
+        : ""
+      : `<rect class="landing-target-rectangle" x="${sx(selections.lateral[0])}" y="${sy(selections.depth[0])}" width="${Math.max(3, sx(selections.lateral[1]) - sx(selections.lateral[0]))}" height="${Math.max(3, sy(selections.depth[1]) - sy(selections.depth[0]))}"/>`;
+    return `<svg id="intuitiveLandingTable" class="intuitive-landing-table" viewBox="0 0 360 344" role="img"
+      aria-label="Selected ${serve ? "serve" : "shot"} landing ${exact ? "point" : "rectangle"} on the receiver side">
+      <defs>
+        <pattern id="landing-target-hatch" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="12" height="12" class="landing-target-pattern-base"/>
+          <line x1="0" y1="0" x2="0" y2="12" class="landing-target-pattern-line"/>
+        </pattern>
+      </defs>
+      <rect x="${left}" y="0" width="${width}" height="${netY}" class="landing-table-surface landing-robot-strip"/>
+      <rect x="${left}" y="${netY}" width="${width}" height="${receiverHeight}" rx="3" class="landing-table-surface landing-receiver-half"/>
+      <line x1="${left}" y1="0" x2="${left}" y2="${netY + receiverHeight}" class="landing-table-edge"/>
+      <line x1="${left + width}" y1="0" x2="${left + width}" y2="${netY + receiverHeight}" class="landing-table-edge"/>
+      <line x1="${left}" y1="${netY + receiverHeight}" x2="${left + width}" y2="${netY + receiverHeight}" class="landing-table-edge"/>
+      <text x="180" y="14" class="landing-side-label">ROBOT SIDE</text>
+      <line x1="${left - 5}" y1="${netY}" x2="${left + width + 5}" y2="${netY}" class="landing-net"/>
+      <text x="180" y="55" class="landing-net-label">NET</text>
+      <line x1="${sx(0)}" y1="0" x2="${sx(0)}" y2="${netY + receiverHeight}" class="landing-centre-line"/>
+      ${target}
+      <text x="180" y="336" class="landing-side-label">RECEIVER END</text>
+    </svg>`;
+  }
+
+  function receiverLanding(prediction, serve) { return serve ? prediction?.secondBounce : prediction?.landing; }
+
+  function receiverPredictionValid(node, prediction) {
+    if (!prediction) return false;
+    if (node.type === "serve") return Boolean(prediction.serve?.valid);
+    const landing = receiverLanding(prediction, false);
+    return prediction.status !== "net" && prediction.status !== "edge" && !prediction.net?.hit
+      && Boolean(prediction.net?.crossed && prediction.onTable && landing?.x >= prediction.table.length / 2);
+  }
+
+  function shotEnvelopeCloud(node, selections = null) {
+    const key = JSON.stringify([node.type, library.calibration]);
+    if (shotEnvelopeCache.has(key) && !selections) return shotEnvelopeCache.get(key);
+    const values = list => [...new Set(list.map(value => rounded(value, 3)))].sort((a, b) => a - b);
+    const hardware = novaFeasibleBounds(library.calibration);
+    const speedModel = library.calibration.nova.speedModel;
+    const levelSpeeds = [0, 2, 4, 4.5, 6, 8, 10].map(level =>
+      LaunchModel.exitSpeedFromRaw(LaunchModel.rawFromLevel(level, library.calibration.nova), speedModel));
+    const speeds = values([hardware.speed[0], hardware.speed[1], 4.6, 5.84, 8, 12, 16, ...levelSpeeds])
+      .filter(value => value >= hardware.speed[0] - 1e-9 && value <= hardware.speed[1] + 1e-9);
+    const spins = values([-60, -42, -28, -18, -13, 0, 13, 18, 28, 42, 60])
+      .filter(value => value >= hardware.spin[0] - 1e-9 && value <= hardware.spin[1] + 1e-9);
+    const elevations = values(node.type === "serve" ? [-20, -18, -16, -14, -12, -8, -4, 0, 12, 28, 30] : [-20, -12, -4, 4, 10.3, 20, 28, 30])
+      .concat(hardware.elevation).filter(value => value >= hardware.elevation[0] - 1e-9 && value <= hardware.elevation[1] + 1e-9);
+    const aims = values([-22, -20, -12, -6, 0, 6, 12, 20, 22, ...hardware.aim])
+      .filter(value => value >= hardware.aim[0] - 1e-9 && value <= hardware.aim[1] + 1e-9);
+    const collect = (target, speedValues, spinValues, elevationValues = elevations, aimValues = aims) => {
+      for (const speedMps of speedValues) {
+        const speedSpinLimit = LaunchModel.maxSpinRpsAtExitSpeed(speedMps, library.calibration.nova, speedModel);
+        const coupledSpins = values([...spinValues, -speedSpinLimit, speedSpinLimit]);
+        for (const spinRps of coupledSpins) for (const elevationDeg of elevationValues) for (const aimDeg of aimValues) {
+      const params = { speedMps, spinRps, elevationDeg, aimDeg };
+      const prediction = novaFeasiblePrediction(params, null, trajectoryOptionsForNode(node));
+      if (!prediction) continue;
+      const landing = receiverLanding(prediction, node.type === "serve");
+      const valid = receiverPredictionValid(node, prediction);
+      if (!valid || !landing || !Number.isFinite(prediction.net?.clearanceM)) continue;
+      target.push({
+        depth: (landing.x - prediction.table.length / 2) * 100,
+        lateral: landing.y * 100,
+        speed: speedMps, spin: spinRps, elevation: elevationDeg, aim: aimDeg, clearance: prediction.net.clearanceM * 100,
+        params,
+      });
+      }
+      }
+    };
+    let cloud = shotEnvelopeCache.get(key);
+    if (!cloud) { cloud = []; collect(cloud, speeds, spins); shotEnvelopeCache.set(key, cloud); }
+    if (!selections) return cloud;
+    const endpoints = range => values([range[0], (range[0] + range[1]) / 2, range[1]]);
+    const supplemental = [];
+    collect(supplemental, endpoints(selections.speed), endpoints(selections.spin),
+      selections.elevation ? endpoints(selections.elevation) : elevations,
+      selections.aim ? endpoints(selections.aim) : aims);
+    return cloud.concat(supplemental);
+  }
+
+  function envelopeDomains(cloud, selections, table) {
+    const hardware = novaFeasibleBounds(library.calibration);
+    const hard = {
+      depth: [0, table.length * 50], lateral: [-table.width * 50, table.width * 50],
+      speed: hardware.speed, spin: hardware.spin, elevation: hardware.elevation, aim: hardware.aim, clearance: [-30, 100],
+    };
+    const domains = {};
+    for (const key of Object.keys(hard)) {
+      const candidates = cloud.filter(point => Object.keys(selections).every(other => other === key || (point[other] >= selections[other][0] - 1e-9 && point[other] <= selections[other][1] + 1e-9)));
+      domains[key] = candidates.length
+        ? [Math.max(hard[key][0], Math.min(...candidates.map(point => point[key]))), Math.min(hard[key][1], Math.max(...candidates.map(point => point[key])))]
+        : [...hard[key]];
+    }
+    // Negative clearance is an intentional impossible-shot request. Keep it
+    // directly selectable while the positive endpoint follows the feasible cloud.
+    domains.clearance[0] = -30;
+    return domains;
+  }
+
+  function intuitiveSelections(node, prediction, variation) {
+    const table = prediction.table;
+    const landing = receiverLanding(prediction, node.type === "serve") || { x: table.length * .75, y: 0 };
+    const placement = variation?.placement || {};
+    const rectangle = Number.isFinite(placement.depthMinCm);
+    return {
+      depth: rectangle ? [placement.depthMinCm, placement.depthMaxCm] : [Math.max(0, (landing.x - table.length / 2) * 100 - (placement.depthCm || 0)), Math.min(table.length * 50, (landing.x - table.length / 2) * 100 + (placement.depthCm || 0))],
+      lateral: rectangle ? [placement.lateralMinCm, placement.lateralMaxCm] : [Math.max(-table.width * 50, landing.y * 100 - (placement.lateralCm || 0)), Math.min(table.width * 50, landing.y * 100 + (placement.lateralCm || 0))],
+      speed: variation ? [variation.speed.minMps, variation.speed.maxMps] : [1, 20],
+      spin: variation ? [variation.spin.minRps, variation.spin.maxRps] : [-120, 120],
+      clearance: variation ? [variation.clearance.minCm, variation.clearance.maxCm] : [0, 30],
+    };
+  }
+
+  function intuitiveShotInspectorHtml(node) {
     const p = node.params;
     const serve = node.type === "serve";
     const prediction = predictTrajectory(p, null, trajectoryOptionsForNode(node, true));
     const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM) : null;
-    const nominalClearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
+    const selections = intuitiveSelections(node, prediction, variation);
+    const domains = envelopeDomains(shotEnvelopeCloud(node, selections), selections, prediction.table);
     return `
-      <div class="compact-info-row"><span>${serve ? "Serve" : "Shot"} parameters</span><details class="info-disclosure"><summary aria-label="About ${serve ? "serve" : "shot"} parameters">i</summary><div class="info-popover">Negative spin means underspin; positive spin means topspin. Rotations per second describe the ball directly.${serve ? " The first bounce must be before the net and the next after it; the preview then follows a third arc to the receiver's second bounce or the display limit." : ""}</div></details></div>
-      ${liveTuningInlineHtml(p, node.type)}
-      <div class="shot-parameter-stack">
-        <label class="field shot-parameter-row"><span>Ball speed</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="-0.1" aria-label="Decrease ball speed by 0.1 metres per second">−</button><span class="input-with-unit"><input id="shotSpeedField" class="shot-number-input" type="number" inputmode="decimal" min="1" max="20" step="0.01" data-decimals="2" value="${fmt(p.speedMps,2)}"><small>m/s</small></span><button class="stepper-button" type="button" data-step-target="shotSpeedField" data-step-delta="0.1" aria-label="Increase ball speed by 0.1 metres per second">+</button></span></label>
-        <label class="field shot-parameter-row"><span>Spin</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="-1" aria-label="Decrease ball rotation by 1 rotation per second">−</button><span class="input-with-unit"><input id="shotSpinField" class="shot-number-input" type="number" inputmode="decimal" min="-120" max="120" step="0.1" data-decimals="1" value="${fmt(p.spinRps,1)}"><small>rps</small></span><button class="stepper-button" type="button" data-step-target="shotSpinField" data-step-delta="1" aria-label="Increase ball rotation by 1 rotation per second">+</button></span></label>
-        <label class="field shot-parameter-row"><span>Elevation</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotElevationField" data-step-delta="-0.5" aria-label="Decrease elevation by 0.5 degrees">−</button><span class="input-with-unit"><input id="shotElevationField" class="shot-number-input" type="number" inputmode="decimal" min="-20" max="45" step="0.1" data-decimals="1" value="${fmt(p.elevationDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-step-target="shotElevationField" data-step-delta="0.5" aria-label="Increase elevation by 0.5 degrees">+</button></span></label>
-        <label class="field shot-parameter-row"><span>Aim left/right</span><span class="numeric-stepper"><button class="stepper-button" type="button" data-step-target="shotAimField" data-step-delta="-0.5" aria-label="Aim 0.5 degrees left">−</button><span class="input-with-unit"><input id="shotAimField" class="shot-number-input" type="number" inputmode="decimal" min="-60" max="60" step="0.1" data-decimals="1" value="${fmt(p.aimDeg,1)}"><small>°</small></span><button class="stepper-button" type="button" data-step-target="shotAimField" data-step-delta="0.5" aria-label="Aim 0.5 degrees right">+</button></span></label>
-      </div>
-      ${trajectoryLegendHtml(prediction)}
-      <div class="shot-view-stack">
-        <div><p class="helper">Predicted top view</p>${topTrajectorySvg(prediction, 600, 280)}</div>
-        <div><p class="helper">Predicted side view</p>${sideTrajectorySvg(prediction, 600, 300)}</div>
-      </div>
-      <div class="landing-card">${landingDescription(prediction)}</div>
-      ${novaEstimateHtml(p)}
-      <details class="shot-variation-section"${variation ? " open" : ""}>
-        <summary><span><strong>${serve ? "Serve" : "Shot"} variation</strong><small>Sample only physically solved ${serve ? "serves" : "shots"}</small></span><input id="shotVariationEnabled" type="checkbox"${variation ? " checked" : ""} aria-label="Enable ${serve ? "serve" : "shot"} variation"></summary>
-        <div class="shot-variation-body">
-          <div class="compact-info-row"><span>Variation ranges</span><details class="info-disclosure"><summary aria-label="About shot variation">i</summary><div class="info-popover">Landing and net clearance are sampled as outcomes. Speed, spin, elevation and aim are solved together; impossible samples are skipped instead of pushed to a boundary.</div></details></div>
-          <div class="field-grid two">
-            <label class="field"><span>Landing depth spread</span><span class="input-with-unit"><input id="variationDepthField" type="number" min="0" max="120" step="1" value="${variation?.placement.depthCm ?? 15}"><small>± cm</small></span></label>
-            <label class="field"><span>Lateral spread</span><span class="input-with-unit"><input id="variationLateralField" type="number" min="0" max="120" step="1" value="${variation?.placement.lateralCm ?? 20}"><small>± cm</small></span></label>
-            <label class="field"><span>Min net clearance</span><span class="input-with-unit"><input id="variationClearanceMinField" type="number" min="0.2" max="80" step="0.1" value="${variation?.clearance.minCm ?? fmt(nominalClearanceCm,1)}"><small>cm</small></span></label>
-            <label class="field"><span>Max net clearance</span><span class="input-with-unit"><input id="variationClearanceMaxField" type="number" min="0.2" max="80" step="0.1" value="${variation?.clearance.maxCm ?? fmt(nominalClearanceCm,1)}"><small>cm</small></span></label>
-            <label class="field"><span>Min speed</span><span class="input-with-unit"><input id="variationSpeedMinField" type="number" min="1" max="20" step="0.1" value="${variation?.speed.minMps ?? fmt(Math.max(1,p.speedMps-.6),1)}"><small>m/s</small></span></label>
-            <label class="field"><span>Max speed</span><span class="input-with-unit"><input id="variationSpeedMaxField" type="number" min="1" max="20" step="0.1" value="${variation?.speed.maxMps ?? fmt(Math.min(20,p.speedMps+.6),1)}"><small>m/s</small></span></label>
-            <label class="field"><span>Min spin</span><span class="input-with-unit"><input id="variationSpinMinField" type="number" min="-120" max="120" step="1" value="${variation?.spin.minRps ?? fmt(Math.max(-120,p.spinRps-5),0)}"><small>rps</small></span></label>
-            <label class="field"><span>Max spin</span><span class="input-with-unit"><input id="variationSpinMaxField" type="number" min="-120" max="120" step="1" value="${variation?.spin.maxRps ?? fmt(Math.min(120,p.spinRps+5),0)}"><small>rps</small></span></label>
-          </div>
-          <button id="testShotVariationBtn" class="button ghost wide" type="button"${variation ? "" : " disabled"}>Test 12 varied shots</button>
-          <p id="shotVariationTestResult" class="helper" aria-live="polite">${variation ? "Tap Test to measure feasibility and solve time on this device." : `Enable variation to configure and test this ${serve ? "serve" : "shot"} family.`}</p>
+      <section class="intuitive-editor">
+        ${intuitiveLandingSvg(prediction, selections, serve)}
+        <div class="intuitive-intervals">
+          ${intuitiveRangeHtml("depth", selections.depth, domains.depth)}
+          ${intuitiveRangeHtml("lateral", selections.lateral, domains.lateral)}
+          ${intuitiveRangeHtml("speed", selections.speed, domains.speed)}
+          ${intuitiveRangeHtml("spin", selections.spin, domains.spin)}
+          ${intuitiveRangeHtml("clearance", selections.clearance, domains.clearance)}
         </div>
-      </details>
-      <section class="connection-section">
-        <h3>Then…</h3>
-        ${singleConnectionRowHtml(activeDrill(), node, outgoing(activeDrill(), node.id)[0] ?? null, "next")}
+        <p id="intuitiveShotFeedback" class="intuitive-feedback" aria-live="polite"${intuitiveFeedbackByNodeId.has(node.id) ? "" : " hidden"}>${intuitiveFeedbackByNodeId.get(node.id) || ""}</p>
+      </section>
+    `;
+  }
+
+  function manualShotInspectorHtml(node) {
+    const p = node.params;
+    const serve = node.type === "serve";
+    const requestedPrediction = predictTrajectory(p, null, trajectoryOptionsForNode(node, true));
+    const projectedPrediction = novaFeasiblePrediction(p, null, trajectoryOptionsForNode(node, true));
+    const prediction = projectedPrediction || requestedPrediction;
+    const variation = node.variation?.enabled
+      ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM)
+      : defaultIntuitiveVariation(node);
+    let selections = {
+      speed: [variation.speed.minMps, variation.speed.maxMps],
+      spin: [variation.spin.minRps, variation.spin.maxRps],
+      elevation: [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
+      aim: [variation.launch.minAimDeg, variation.launch.maxAimDeg],
+    };
+    const domains = envelopeDomains(shotEnvelopeCloud(node, selections), selections, prediction.table);
+    selections = Object.fromEntries(Object.entries(selections).map(([key, range]) => {
+      const lo = clamp(range[0], domains[key][0], domains[key][1], domains[key][0]);
+      const hi = clamp(range[1], lo, domains[key][1], domains[key][1]);
+      return [key, [lo, hi]];
+    }));
+    const warning = (!projectedPrediction ? novaRepresentationMessage(p) : trajectoryPlanWarning(node.label, prediction))
+      ?.replace(/ The shot will still be sent\.$/, "") || "";
+    const feedback = manualFeedbackByNodeId.get(node.id) || (warning ? `<strong class="trajectory-miss">${escapeHtml(warning)}</strong>` : "");
+    return `
+      <section class="manual-shot-editor">
+        ${intuitiveLandingSvg(prediction, null, serve, true)}
+        <div class="intuitive-intervals">
+          ${intuitiveRangeHtml("speed", selections.speed, domains.speed, "manual")}
+          ${intuitiveRangeHtml("spin", selections.spin, domains.spin, "manual")}
+          ${intuitiveRangeHtml("elevation", selections.elevation, domains.elevation, "manual")}
+          ${intuitiveRangeHtml("aim", selections.aim, domains.aim, "manual")}
+        </div>
+        <p id="manualShotFeedback" class="intuitive-feedback" aria-live="polite"${feedback ? "" : " hidden"}>${feedback}</p>
       </section>
     `;
   }
@@ -3489,16 +3704,12 @@
   }
 
   function bindCommonInspector(drill, node) {
-    $("setStartInspectorBtn")?.addEventListener("click", () => {
-      drill.startNodeId = node.id;
-      commit({ message: "Start node updated" });
-    });
-    $("nodeNameField")?.addEventListener("change", event => {
+    if (els.inspectorNameField) els.inspectorNameField.onchange = event => {
       const requested = event.target.value.trim() || typeDefaultName(node.type);
       node.label = isBallNode(node) ? uniqueShotName(drill, requested, node.id) : requested;
       if (isBallNode(node) && node.label !== requested) toast(`Ball renamed to “${node.label}” to keep ball names unique.`);
       commit();
-    });
+    };
     els.inspectorContent.querySelectorAll(".incoming-edge-button").forEach(button => button.addEventListener("click", () => {
       selection = { kind: "edge", id: button.dataset.edgeId };
       renderAll();
@@ -3506,68 +3717,255 @@
   }
 
   function bindShotInspector(drill, node) {
-    bindNumberField("shotSpeedField", value => node.params.speedMps = rounded(clamp(value, 1, 20, 8), 2));
-    bindNumberField("shotSpinField", value => node.params.spinRps = rounded(clamp(value, -120, 120, 0), 1));
-    bindNumberField("shotElevationField", value => node.params.elevationDeg = rounded(clamp(value, -20, 45, 4), 1));
-    bindNumberField("shotAimField", value => node.params.aimDeg = rounded(clamp(value, -60, 60, 0), 1));
-    $("shotVariationEnabled")?.addEventListener("change", event => {
-      if (!event.target.checked) {
-        node.variation = null;
-      } else {
-        const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
-        const clearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
-        const serve = node.type === "serve";
-        node.variation = ShotVariation.normalizeVariation({
-          enabled: true,
-          placement: { depthCm: serve ? 4 : 15, lateralCm: serve ? 6 : 20 },
-          clearance: { minCm: clearanceCm, maxCm: clearanceCm },
-          speed: { minMps: node.params.speedMps - (serve ? .25 : .6), maxMps: node.params.speedMps + (serve ? .25 : .6) },
-          spin: { minRps: node.params.spinRps - (serve ? 2 : 5), maxRps: node.params.spinRps + (serve ? 2 : 5) },
-        }, node.params, prediction.net?.clearanceM);
-      }
-      shotVariationCache.clear();
-      commit();
-    });
-    const variationFields = [
-      ["variationDepthField", ["placement", "depthCm"]],
-      ["variationLateralField", ["placement", "lateralCm"]],
-      ["variationClearanceMinField", ["clearance", "minCm"]],
-      ["variationClearanceMaxField", ["clearance", "maxCm"]],
-      ["variationSpeedMinField", ["speed", "minMps"]],
-      ["variationSpeedMaxField", ["speed", "maxMps"]],
-      ["variationSpinMinField", ["spin", "minRps"]],
-      ["variationSpinMaxField", ["spin", "maxRps"]],
+    els.inspectorContent.querySelectorAll("[data-shot-editor-mode]").forEach(button => button.addEventListener("click", () => {
+      const next = button.dataset.shotEditorMode === "manual" ? "manual" : "intuitive";
+      if (next === shotEditorMode) return;
+      shotEditorMode = next;
+      saveShotEditorModePreference();
+      renderInspector();
+    }));
+    if (shotEditorMode === "intuitive") {
+      bindIntuitiveShotInspector(drill, node);
+      return;
+    }
+    bindManualShotInspector(node);
+  }
+
+  function setIntuitiveFeedback(node, message, kind = "warning") {
+    const className = kind === "safe" ? "trajectory-safe" : kind === "miss" ? "trajectory-miss" : "trajectory-warning";
+    intuitiveFeedbackByNodeId.set(node.id, `<strong class="${className}">${escapeHtml(message)}</strong>`);
+    const output = $("intuitiveShotFeedback");
+    if (output) { output.hidden = false; output.innerHTML = intuitiveFeedbackByNodeId.get(node.id); }
+  }
+
+  function intervalRangeKey(container) {
+    return container.dataset.intuitiveRange || container.dataset.manualRange;
+  }
+
+  function intuitiveRangeValues(container) {
+    const key = intervalRangeKey(container);
+    const spec = INTUITIVE_RANGE_SPECS[key];
+    return [
+      clamp(finite(container.querySelector(".interval-min").value, spec.min), spec.min, spec.max, spec.min),
+      clamp(finite(container.querySelector(".interval-max").value, spec.max), spec.min, spec.max, spec.max),
     ];
-    variationFields.forEach(([id, path]) => $(id)?.addEventListener("change", event => {
-      if (!node.variation?.enabled) return;
-      node.variation[path[0]][path[1]] = finite(event.target.value, node.variation[path[0]][path[1]]);
-      node.variation = ShotVariation.normalizeVariation(node.variation, node.params);
-      shotVariationCache.clear();
-      commit();
+  }
+
+  function paintIntuitiveRange(container, values) {
+    const key = intervalRangeKey(container);
+    const spec = INTUITIVE_RANGE_SPECS[key];
+    const [lo, hi] = values;
+    container.querySelector(".interval-min").value = fmt(lo, spec.decimals);
+    container.querySelector(".interval-max").value = fmt(hi, spec.decimals);
+    container.querySelector(".range-min").value = lo;
+    container.querySelector(".range-max").value = hi;
+    const domainMin = finite(container.dataset.domainMin, spec.min);
+    const domainMax = finite(container.dataset.domainMax, spec.max);
+    const span = Math.max(spec.step, domainMax - domainMin);
+    const track = container.querySelector(".dual-range");
+    track.style.setProperty("--range-start", `${(lo - domainMin) / span * 100}%`);
+    track.style.setProperty("--range-end", `${(hi - domainMin) / span * 100}%`);
+  }
+
+  function applyIntuitiveShot(node) {
+    let controls = Object.fromEntries([...els.inspectorContent.querySelectorAll("[data-intuitive-range]")]
+      .map(container => [container.dataset.intuitiveRange, intuitiveRangeValues(container)]));
+    const table = predictTrajectory(node.params, null, trajectoryOptionsForNode(node)).table;
+    const cloud = shotEnvelopeCloud(node, controls);
+    const feasiblePoints = cloud.filter(point => Object.keys(controls).every(key => point[key] >= controls[key][0] - 1e-9 && point[key] <= controls[key][1] + 1e-9));
+    if (!feasiblePoints.length) {
+      setIntuitiveFeedback(node, "No valid shot exists inside all five intervals.", "miss");
+      return;
+    }
+    const domains = envelopeDomains(cloud, controls, table);
+    controls = Object.fromEntries(Object.entries(controls).map(([key, range]) => {
+      const lo = clamp(range[0], domains[key][0], domains[key][1], domains[key][0]);
+      const hi = clamp(range[1], lo, domains[key][1], domains[key][1]);
+      return [key, [lo, hi]];
     }));
-    $("testShotVariationBtn")?.addEventListener("click", () => {
-      const output = $("shotVariationTestResult");
-      if (!output) return;
-      output.textContent = "Solving 12 varied shots…";
-      setTimeout(() => {
-        const profile = profileShotVariation(node, 12);
-        output.textContent = profile.ok
-          ? `${profile.accepted}/12 feasible · ${fmt(profile.elapsedMs,1)} ms total · ${fmt(profile.elapsedMs / Math.max(1, profile.accepted),1)} ms/shot · ${fmt(profile.evaluationsPerShot,1)} trajectory evaluations/shot.`
-          : profile.reason;
-      }, 0);
+    const target = {
+      x: table.length / 2 + (controls.depth[0] + controls.depth[1]) / 200,
+      y: (controls.lateral[0] + controls.lateral[1]) / 200,
+    };
+    const desiredSpeedMps = (controls.speed[0] + controls.speed[1]) / 2;
+    const desiredSpinRps = (controls.spin[0] + controls.spin[1]) / 2;
+    const targetClearanceM = (controls.clearance[0] + controls.clearance[1]) / 200;
+    const centers = Object.fromEntries(Object.entries(controls).map(([key, range]) => [key, (range[0] + range[1]) / 2]));
+    const spans = Object.fromEntries(Object.entries(controls).map(([key, range]) => [key, Math.max(INTUITIVE_RANGE_SPECS[key].step, range[1] - range[0])]));
+    const fallbackPoint = feasiblePoints.reduce((best, point) => {
+      const score = Object.keys(controls).reduce((sum, key) => sum + ((point[key] - centers[key]) / spans[key]) ** 2, 0);
+      return !best || score < best.score ? { point, score } : best;
+    }, null).point;
+    const options = trajectoryOptionsForNode(node, true);
+    const predictRaw = params => novaFeasiblePrediction(params, null, options);
+    const predictReceiverLanding = params => {
+      const raw = predictRaw(params);
+      if (node.type !== "serve") return raw;
+      return raw?.secondBounce ? { ...raw, landing: raw.secondBounce } : { ...raw, landing: null };
+    };
+    const solution = DrillAdjustments.solveShotGoals(
+      { ...node.params, speedMps: desiredSpeedMps, spinRps: desiredSpinRps },
+      { targetLanding: target, targetClearanceM, desiredSpeedMps, desiredSpinRps },
+      predictReceiverLanding,
+      {
+        minSpeedMps: controls.speed[0], maxSpeedMps: controls.speed[1],
+        minSpinRps: controls.spin[0], maxSpinRps: controls.spin[1],
+        landingScaleM: .025, clearanceScaleM: .008, speedScaleMps: .8, spinScaleRps: 10,
+        maxIterations: 10, maxEvaluations: 40,
+      }
+    );
+    let candidateParams = solution?.params || fallbackPoint.params;
+    let candidatePrediction = predictRaw(candidateParams);
+    const candidateLanding = node.type === "serve" ? candidatePrediction?.secondBounce : candidatePrediction?.landing;
+    let point = candidateLanding && Number.isFinite(candidatePrediction?.net?.clearanceM) ? {
+      depth: (candidateLanding.x - candidatePrediction.table.length / 2) * 100,
+      lateral: candidateLanding.y * 100,
+      speed: candidateParams.speedMps, spin: candidateParams.spinRps,
+      clearance: candidatePrediction.net.clearanceM * 100,
+    } : null;
+    let playable = receiverPredictionValid(node, candidatePrediction);
+    const inside = point && Object.keys(controls).every(key => point[key] >= controls[key][0] - .01 && point[key] <= controls[key][1] + .01);
+    if (!playable || !inside) {
+      candidateParams = fallbackPoint.params;
+      candidatePrediction = predictRaw(candidateParams);
+    }
+    const params = {
+      speedMps: rounded(candidateParams.speedMps, 2),
+      spinRps: rounded(candidateParams.spinRps, 1),
+      elevationDeg: rounded(candidateParams.elevationDeg, 1),
+      aimDeg: rounded(candidateParams.aimDeg, 1),
+    };
+    const variation = ShotVariation.normalizeVariation({
+      enabled: true,
+      placement: {
+        depthMinCm: controls.depth[0], depthMaxCm: controls.depth[1],
+        lateralMinCm: controls.lateral[0], lateralMaxCm: controls.lateral[1],
+      },
+      speed: { minMps: controls.speed[0], maxMps: controls.speed[1] },
+      spin: { minRps: controls.spin[0], maxRps: controls.spin[1] },
+      clearance: { minCm: controls.clearance[0], maxCm: controls.clearance[1] },
+    }, params, candidatePrediction.net?.clearanceM);
+    const candidate = { ...node, params, variation };
+    const profile = profileShotVariation(candidate, 12);
+    node.params = params;
+    node.variation = variation;
+    shotVariationCache.clear();
+    if (profile.ok) intuitiveFeedbackByNodeId.delete(node.id);
+    else intuitiveFeedbackByNodeId.set(node.id, `<strong class="trajectory-warning">Valid shots exist, but this range is difficult to sample. Narrow one or more intervals.</strong>`);
+    commit();
+  }
+
+  function bindIntuitiveShotInspector(drill, node) {
+    bindIntervalControls("[data-intuitive-range]", () => applyIntuitiveShot(node));
+  }
+
+  function bindIntervalControls(selector, apply) {
+    const containers = [...els.inspectorContent.querySelectorAll(selector)];
+    containers.forEach(container => {
+      const minText = container.querySelector(".interval-min");
+      const maxText = container.querySelector(".interval-max");
+      const minRange = container.querySelector(".range-min");
+      const maxRange = container.querySelector(".range-max");
+      const sync = (source, commitChange = false) => {
+        if ((source === minText || source === maxText) && ["", "-", ".", "-."].includes(source.value.trim()) && !commitChange) return;
+        let lo = source === minRange ? finite(minRange.value) : finite(minText.value, finite(minRange.value));
+        let hi = source === maxRange ? finite(maxRange.value) : finite(maxText.value, finite(maxRange.value));
+        const key = intervalRangeKey(container);
+        const spec = INTUITIVE_RANGE_SPECS[key];
+        const domainMin = finite(container.dataset.domainMin, spec.min);
+        const domainMax = finite(container.dataset.domainMax, spec.max);
+        const inputMin = key === "clearance" ? spec.min : domainMin;
+        lo = clamp(lo, inputMin, domainMax, inputMin);
+        hi = clamp(hi, inputMin, domainMax, domainMax);
+        if (source === minText || source === minRange) { if (lo > hi) hi = lo; }
+        else if (hi < lo) lo = hi;
+        paintIntuitiveRange(container, [lo, hi]);
+        if (commitChange) apply();
+      };
+      [minText, maxText].forEach(input => {
+        input.addEventListener("input", () => sync(input));
+        input.addEventListener("change", () => sync(input, true));
+      });
+      [minRange, maxRange].forEach(input => {
+        input.addEventListener("input", () => sync(input));
+        input.addEventListener("change", () => sync(input, true));
+      });
     });
-    els.inspectorContent.querySelectorAll("[data-step-target][data-step-delta]").forEach(button => button.addEventListener("click", () => {
-      const input = $(button.dataset.stepTarget);
-      if (!input) return;
-      const min = Number.isFinite(Number(input.min)) ? Number(input.min) : -Infinity;
-      const max = Number.isFinite(Number(input.max)) ? Number(input.max) : Infinity;
-      const delta = finite(button.dataset.stepDelta, 0);
-      const decimals = Math.max(0, Math.trunc(finite(input.dataset.decimals, 0)));
-      const next = Math.min(max, Math.max(min, finite(input.value, 0) + delta));
-      input.value = String(rounded(next, decimals));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function applyManualShot(node) {
+    let controls = Object.fromEntries([...els.inspectorContent.querySelectorAll("[data-manual-range]")]
+      .map(container => [container.dataset.manualRange, intuitiveRangeValues(container)]));
+    const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
+    const cloud = shotEnvelopeCloud(node, controls);
+    const feasiblePoints = cloud.filter(point => Object.keys(controls).every(key =>
+      point[key] >= controls[key][0] - 1e-9 && point[key] <= controls[key][1] + 1e-9));
+    if (!feasiblePoints.length) {
+      manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot exists inside all four launch intervals.</strong>');
+      const output = $("manualShotFeedback");
+      if (output) { output.hidden = false; output.innerHTML = manualFeedbackByNodeId.get(node.id); }
+      return;
+    }
+    const domains = envelopeDomains(cloud, controls, prediction.table);
+    controls = Object.fromEntries(Object.entries(controls).map(([key, range]) => {
+      const lo = clamp(range[0], domains[key][0], domains[key][1], domains[key][0]);
+      const hi = clamp(range[1], lo, domains[key][1], domains[key][1]);
+      return [key, [lo, hi]];
     }));
-    bindConnectionRows(drill);
+    const constrainedPoints = feasiblePoints.filter(point => Object.keys(controls).every(key =>
+      point[key] >= controls[key][0] - 1e-9 && point[key] <= controls[key][1] + 1e-9));
+    if (!constrainedPoints.length) {
+      manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot exists inside all four launch intervals.</strong>');
+      const output = $("manualShotFeedback");
+      if (output) { output.hidden = false; output.innerHTML = manualFeedbackByNodeId.get(node.id); }
+      return;
+    }
+    const centers = Object.fromEntries(Object.entries(controls).map(([key, range]) => [key, (range[0] + range[1]) / 2]));
+    const spans = Object.fromEntries(Object.entries(controls).map(([key, range]) => [key, Math.max(INTUITIVE_RANGE_SPECS[key].step, range[1] - range[0])]));
+    const roundedCandidate = point => {
+      const params = {
+        speedMps: rounded(point.params.speedMps, 2),
+        spinRps: rounded(point.params.spinRps, 1),
+        elevationDeg: rounded(point.params.elevationDeg, 1),
+        aimDeg: rounded(point.params.aimDeg, 1),
+      };
+      const projected = novaFeasiblePrediction(params, null, trajectoryOptionsForNode(node));
+      const valid = receiverPredictionValid(node, projected);
+      return valid ? { ...point, params, projected } : null;
+    };
+    const roundedPoints = constrainedPoints.map(roundedCandidate).filter(Boolean);
+    const candidates = roundedPoints.length ? roundedPoints : constrainedPoints;
+    const nominal = candidates.reduce((best, point) => {
+      const score = Object.keys(controls).reduce((sum, key) => sum + ((point[key] - centers[key]) / spans[key]) ** 2, 0);
+      return !best || score < best.score ? { point, score } : best;
+    }, null).point;
+    const params = roundedPoints.length ? nominal.params : { ...nominal.params };
+    const nominalPrediction = nominal.projected || novaFeasiblePrediction(params, null, trajectoryOptionsForNode(node));
+    const base = node.variation?.enabled
+      ? ShotVariation.normalizeVariation(node.variation, node.params, prediction.net?.clearanceM)
+      : defaultIntuitiveVariation(node);
+    node.params = params;
+    node.variation = ShotVariation.normalizeVariation({
+      ...base,
+      enabled: true,
+      mode: "launch",
+      speed: { minMps: controls.speed[0], maxMps: controls.speed[1] },
+      spin: { minRps: controls.spin[0], maxRps: controls.spin[1] },
+      launch: {
+        minElevationDeg: controls.elevation[0], maxElevationDeg: controls.elevation[1],
+        minAimDeg: controls.aim[0], maxAimDeg: controls.aim[1],
+      },
+    }, params, nominalPrediction?.net?.clearanceM ?? prediction.net?.clearanceM);
+    shotVariationCache.clear();
+    const profile = profileShotVariation(node, 24);
+    if (!profile.ok) manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot could be sampled from these intervals.</strong>');
+    else if (profile.failed) manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-warning">Some combinations are impossible; playback will use valid combinations only.</strong>');
+    else manualFeedbackByNodeId.delete(node.id);
+    commit();
+  }
+
+  function bindManualShotInspector(node) {
+    bindIntervalControls("[data-manual-range]", () => applyManualShot(node));
   }
 
   function bindRandomInspector(drill, node) {
@@ -3796,8 +4194,8 @@
     const swapped = calibration.rotationType >= 4;
     const desiredWheelA = swapped ? baseRaw - delta : baseRaw + delta;
     const desiredWheelB = swapped ? baseRaw + delta : baseRaw - delta;
-    const wheelA = Math.floor(clamp(desiredWheelA, 100, 7500, 100));
-    const wheelB = Math.floor(clamp(desiredWheelB, 100, 7500, 100));
+    const wheelA = Math.floor(clamp(desiredWheelA, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, NOVA_LIMITS.wheelRawMin));
+    const wheelB = Math.floor(clamp(desiredWheelB, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, NOVA_LIMITS.wheelRawMin));
     const baseRawLimited = Math.abs(baseRaw - requestedRaw) > .01;
     const wheelRawLimited = Math.abs(wheelA - desiredWheelA) > 1.01 || Math.abs(wheelB - desiredWheelB) > 1.01;
     const hardwareLimited = baseRawLimited || wheelRawLimited;
@@ -3805,19 +4203,79 @@
     const modeledBaseRaw = (wheelA + wheelB) / 2;
     const modeledExitSpeedMps = LaunchModel.exitSpeedFromRaw(modeledBaseRaw, speedModel);
     const modeledSpinRps = LaunchModel.spinRpsFromRawWheels(swapped ? wheelB : wheelA, swapped ? wheelA : wheelB, nova);
-    const upDown = Math.round(clamp(nova.upDownAtZeroDeg + nova.upDownPerDegree * params.elevationDeg, -50, 100, 0));
-    const placement = clamp(params.aimDeg / nova.yawDegreesPerPlacement, -10, 10, 0);
+    const desiredUpDown = nova.upDownAtZeroDeg + nova.upDownPerDegree * params.elevationDeg;
+    const upDownLimited = desiredUpDown < -50 - 1e-6 || desiredUpDown > 100 + 1e-6;
+    const upDown = Math.round(clamp(desiredUpDown, -50, 100, 0));
+    const desiredPlacement = params.aimDeg / nova.yawDegreesPerPlacement;
+    const placementLimited = desiredPlacement < -10 - 1e-6 || desiredPlacement > 10 + 1e-6;
+    const placement = clamp(desiredPlacement, -10, 10, 0);
+    const pitchFirmwareLimited = params.elevationDeg < NOVA_LIMITS.pitchDegMin - 1e-6 || params.elevationDeg > NOVA_LIMITS.pitchDegMax + 1e-6;
+    const yawFirmwareLimited = params.aimDeg < NOVA_LIMITS.yawDegMin - 1e-6 || params.aimDeg > NOVA_LIMITS.yawDegMax + 1e-6;
+    const actuatorLimited = upDownLimited || placementLimited || pitchFirmwareLimited || yawFirmwareLimited;
+    const representable = !(spinLimited || baseRawLimited || wheelRawLimited || actuatorLimited);
     return { wheelA, wheelB, upDown, placement, speedLevel, spinLevel, maxSpinSetting, maxSpinRps,
       limited: spinLimited, spinLimited, speedExtrapolated, hardwareLimited, baseRawLimited, wheelRawLimited,
+      desiredUpDown, desiredPlacement, upDownLimited, placementLimited, pitchFirmwareLimited, yawFirmwareLimited,
+      actuatorLimited, representable,
       requestedRaw, baseRaw, modeledBaseRaw, modeledExitSpeedMps, modeledSpinRps,
       calibratedRange: LaunchModel.calibratedSpeedRange(speedModel) };
+  }
+
+  function novaFeasibleBounds(calibration = library.calibration) {
+    const nova = calibration.nova;
+    const speed = LaunchModel.hardwareSpeedRange(nova.speedModel);
+    let elevationMin = NOVA_LIMITS.pitchDegMin;
+    let elevationMax = NOVA_LIMITS.pitchDegMax;
+    const slope = finite(nova.upDownPerDegree, 0);
+    if (Math.abs(slope) > 1e-9) {
+      const a = (-50 - finite(nova.upDownAtZeroDeg, 10)) / slope;
+      const b = (100 - finite(nova.upDownAtZeroDeg, 10)) / slope;
+      elevationMin = Math.max(elevationMin, Math.min(a, b));
+      elevationMax = Math.min(elevationMax, Math.max(a, b));
+    }
+    const calibratedAim = Math.abs(finite(nova.yawDegreesPerPlacement, 2.2)) * 10;
+    const aimMax = Math.min(NOVA_LIMITS.yawDegMax, calibratedAim);
+    const aimMin = Math.max(NOVA_LIMITS.yawDegMin, -calibratedAim);
+    const maxSpinRps = Math.max(0, ...LaunchModel.normalizeSpinCurve(nova.spinsightCurve).map(point => point.maxSpinRps));
+    return {
+      speed: [Math.max(1, speed.minMps), Math.min(20, speed.maxMps)],
+      spin: [-maxSpinRps, maxSpinRps],
+      elevation: [elevationMin, elevationMax],
+      aim: [aimMin, aimMax],
+    };
+  }
+
+  function novaFeasiblePrediction(params, calibration = null, options = {}) {
+    const c = calibration || library.calibration;
+    const estimate = estimatedNovaSettings(params, c);
+    if (!estimate.representable) return null;
+    const effectiveParams = {
+      ...params,
+      speedMps: estimate.modeledExitSpeedMps,
+      spinRps: estimate.modeledSpinRps,
+    };
+    const prediction = predictTrajectory(effectiveParams, calibration, options);
+    prediction.hardwareRepresentable = true;
+    prediction.requestedParams = { ...params };
+    prediction.effectiveParams = effectiveParams;
+    prediction.novaEstimate = estimate;
+    return prediction;
+  }
+
+  function novaRepresentationMessage(params, calibration = library.calibration) {
+    const estimate = estimatedNovaSettings(params, calibration);
+    if (estimate.pitchFirmwareLimited || estimate.upDownLimited) return "Elevation is outside Nova's representable range.";
+    if (estimate.yawFirmwareLimited || estimate.placementLimited) return "Aim is outside Nova's representable range.";
+    if (estimate.baseRawLimited) return "Speed is outside Nova's wheel range.";
+    if (estimate.spinLimited || estimate.wheelRawLimited) return "This speed and spin combination is outside Nova's coupled wheel envelope.";
+    return "The command is outside Nova's representable range.";
   }
   function novaEstimateHtml(params) {
     const estimate = estimatedNovaSettings(params);
     const warnings = [];
     if (estimate.speedExtrapolated && estimate.calibratedRange) warnings.push(`Speed uses linear extrapolation outside the measured calibration range (${fmt(estimate.calibratedRange.minMps,1)}–${fmt(estimate.calibratedRange.maxMps,1)} m/s).`);
-    if (estimate.baseRawLimited) warnings.push("Requested speed requires a base raw input outside 100…7500; the base command is clipped at the hardware boundary.");
-    if (estimate.wheelRawLimited) warnings.push("The requested spin differential pushes an individual wheel outside 100…7500 raw; individual wheel commands are clipped and the displayed modeled speed/spin reflect the clipped commands.");
+    if (estimate.baseRawLimited) warnings.push(`Requested speed requires a base raw input outside ${NOVA_LIMITS.wheelRawMin}…${NOVA_LIMITS.wheelRawMax}; the base command is clipped at the hardware boundary.`);
+    if (estimate.wheelRawLimited) warnings.push(`The requested spin differential pushes an individual wheel outside ${NOVA_LIMITS.wheelRawMin}…${NOVA_LIMITS.wheelRawMax} raw; individual wheel commands are clipped and the displayed modeled speed/spin reflect the clipped commands.`);
     if (estimate.limited) warnings.push(`Requested spin exceeds the Spinsight-derived capability at this speed (${fmt(estimate.maxSpinRps,1)} rps maximum); the spin command is clamped.`);
     return `<div class="nova-estimate">
       <span>Estimated Nova settings</span>
@@ -5494,8 +5952,8 @@
     g.elevationMinDeg = clamp(els.guidedElevationMinInput.value, -20, 60, g.placement === "ground" ? 5 : 10);
     g.elevationMaxDeg = clamp(els.guidedElevationMaxInput.value, -20, 60, g.placement === "ground" ? 45 : 30);
     g.elevationCount = Math.round(clamp(els.guidedElevationCountInput.value, 2, 12, 5));
-    g.speedMinRaw = Math.round(clamp(els.guidedSpeedMinInput.value, 100, 7500, 2000));
-    g.speedMaxRaw = Math.round(clamp(els.guidedSpeedMaxInput.value, 100, 7500, 3000));
+    g.speedMinRaw = Math.round(clamp(els.guidedSpeedMinInput.value, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, 2000));
+    g.speedMaxRaw = Math.round(clamp(els.guidedSpeedMaxInput.value, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, 3000));
     g.speedCount = Math.round(clamp(els.guidedSpeedCountInput.value, 2, 8, g.placement === "ground" ? 6 : 3));
     return g;
   }
@@ -6252,7 +6710,7 @@
     const calibration = calibrationAtPose(runtime ? currentRobotPose() : drillPose(drill));
     return {
       calibration,
-      evaluate: params => predictTrajectory(params, calibration, { serve: nodeType === "serve" }),
+      evaluate: params => novaFeasiblePrediction(params, calibration, { serve: nodeType === "serve" }),
     };
   }
 
@@ -6281,7 +6739,9 @@
     });
     return result
       ? { params: result.params, result }
-      : { params: null, error: "No feasible varied shot was found after five bounded attempts. Reduce the requested position, clearance, speed, or spin range." };
+      : { params: null, error: shot.variation.mode === "launch"
+        ? "No feasible varied shot was found inside the launch intervals. Narrow speed, spin, elevation, or aim."
+        : "No feasible varied shot was found after five bounded attempts. Reduce the requested position, clearance, speed, or spin range." };
   }
 
   function profileShotVariation(node, count = 12) {
@@ -6306,7 +6766,7 @@
       elapsedMs,
       preparationMs: prepared.preparedMs,
       evaluations: prepared.evaluations,
-      evaluationsPerShot: (prepared.evaluations - 5) / Math.max(1, batch.results.length),
+      evaluationsPerShot: (prepared.evaluations - (prepared.preparationEvaluations || 0)) / Math.max(1, batch.results.length),
       results: batch.results,
     };
   }
@@ -6402,14 +6862,18 @@
     const estimate = estimatedNovaSettings(shot.params, c);
     const errors = [];
     const warnings = [];
-    const upDown = c.nova.upDownAtZeroDeg + c.nova.upDownPerDegree * shot.params.elevationDeg;
-    const placement = shot.params.aimDeg / c.nova.yawDegreesPerPlacement;
     const hardwareRange = LaunchModel.hardwareSpeedRange(c.nova.speedModel);
-    if (upDown < -50 - 1e-6 || upDown > 100 + 1e-6) {
-      errors.push(`“${shot.label}”: elevation ${fmt(shot.params.elevationDeg,1)}° maps to Nova Up/down ${fmt(upDown,1)}, outside -50…100.`);
+    if (shot.params.elevationDeg < NOVA_LIMITS.pitchDegMin - 1e-6 || shot.params.elevationDeg > NOVA_LIMITS.pitchDegMax + 1e-6) {
+      errors.push(`“${shot.label}”: elevation ${fmt(shot.params.elevationDeg,1)}° is outside the firmware pitch range ${NOVA_LIMITS.pitchDegMin}…${NOVA_LIMITS.pitchDegMax}°.`);
     }
-    if (Math.abs(placement) > 10 + 1e-6) {
-      errors.push(`“${shot.label}”: aim ${fmt(shot.params.aimDeg,1)}° maps to placement ${fmt(placement,1)}, outside -10…10.`);
+    if (shot.params.aimDeg < NOVA_LIMITS.yawDegMin - 1e-6 || shot.params.aimDeg > NOVA_LIMITS.yawDegMax + 1e-6) {
+      errors.push(`“${shot.label}”: aim ${fmt(shot.params.aimDeg,1)}° is outside the firmware yaw range ${NOVA_LIMITS.yawDegMin}…${NOVA_LIMITS.yawDegMax}°.`);
+    }
+    if (estimate.upDownLimited && !estimate.pitchFirmwareLimited) {
+      warnings.push(`“${shot.label}”: elevation exceeds the calibrated up/down actuator travel; the actuator command is clipped.`);
+    }
+    if (estimate.placementLimited && !estimate.yawFirmwareLimited) {
+      warnings.push(`“${shot.label}”: aim exceeds the calibrated placement actuator travel; the actuator command is clipped.`);
     }
     if (estimate.speedExtrapolated && estimate.calibratedRange) {
       warnings.push(`“${shot.label}”: ${fmt(shot.params.speedMps,1)} m/s is outside the measured calibration range (${fmt(estimate.calibratedRange.minMps,1)}…${fmt(estimate.calibratedRange.maxMps,1)} m/s); the same affine line is extrapolated.`);
@@ -6418,7 +6882,7 @@
       warnings.push(`“${shot.label}”: requested speed needs a base raw input outside ${hardwareRange.minRaw}…${hardwareRange.maxRaw}; the base command is clipped at the boundary.`);
     }
     if (estimate.wheelRawLimited) {
-      warnings.push(`“${shot.label}”: the spin differential pushes an individual wheel outside 100…7500 raw; individual wheel commands are clipped.`);
+      warnings.push(`“${shot.label}”: the spin differential pushes an individual wheel outside ${NOVA_LIMITS.wheelRawMin}…${NOVA_LIMITS.wheelRawMax} raw; individual wheel commands are clipped.`);
     }
     if (estimate.limited) {
       warnings.push(`“${shot.label}”: requested ${fmt(Math.abs(shot.params.spinRps),1)} rps exceeds the calibrated ${fmt(estimate.maxSpinRps,1)} rps capacity at this speed; spin is clamped.`);
@@ -6427,8 +6891,8 @@
   }
   function novaFrequencyForDelay(delaySeconds) {
     const desired = Math.max(0, finite(delaySeconds, 0));
-    const minDelay = 1 / 1.5; // 0.667 s at the robot's 1.5 Hz maximum
-    const maxDelay = 1 / .5;  // 2.000 s at the robot's 0.5 Hz minimum
+    const minDelay = 1 / NOVA_LIMITS.frequencyHzMax;
+    const maxDelay = 1 / NOVA_LIMITS.frequencyHzMin;
     const encodedDelay = clamp(desired || minDelay, minDelay, maxDelay, minDelay);
     return {
       desiredDelay: desired,
@@ -6494,8 +6958,8 @@
         warnings.push(`“${compiled.shots[index - 1].label}” → “${shot.label}”: ${fmt(timing.desiredDelay,2)} s exceeds the Nova's 2.00 s per-ball pre-pause; the flow will split batches and wait the remaining ${fmt(timing.extraHostDelay,2)} s in the controller.`);
       }
 
-      const wheelA = Math.trunc(clamp(preflight.estimate.wheelA, 100, 7500, 100));
-      const wheelB = Math.trunc(clamp(preflight.estimate.wheelB, 100, 7500, 100));
+      const wheelA = Math.trunc(clamp(preflight.estimate.wheelA, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, NOVA_LIMITS.wheelRawMin));
+      const wheelB = Math.trunc(clamp(preflight.estimate.wheelB, NOVA_LIMITS.wheelRawMin, NOVA_LIMITS.wheelRawMax, NOVA_LIMITS.wheelRawMin));
       const record = Protocol.packBallRecord({
         wheelA,
         wheelB,
@@ -7380,9 +7844,15 @@
     const copy = structuredClone(variation);
     const speedDelta = adjustment.params.speedMps - baseParams.speedMps;
     const spinDelta = adjustment.params.spinRps - baseParams.spinRps;
+    const elevationDelta = adjustment.params.elevationDeg - baseParams.elevationDeg;
+    const aimDelta = adjustment.params.aimDeg - baseParams.aimDeg;
     const clearanceDeltaCm = ((adjustment.prediction?.net?.clearanceM ?? 0) - (adjustment.basePrediction?.net?.clearanceM ?? 0)) * 100;
     copy.speed.minMps += speedDelta; copy.speed.maxMps += speedDelta;
     copy.spin.minRps += spinDelta; copy.spin.maxRps += spinDelta;
+    if (copy.launch) {
+      copy.launch.minElevationDeg += elevationDelta; copy.launch.maxElevationDeg += elevationDelta;
+      copy.launch.minAimDeg += aimDelta; copy.launch.maxAimDeg += aimDelta;
+    }
     copy.clearance.minCm += clearanceDeltaCm; copy.clearance.maxCm += clearanceDeltaCm;
     return ShotVariation.normalizeVariation(copy, adjustment.params, adjustment.prediction?.net?.clearanceM);
   }
@@ -7642,7 +8112,8 @@
   function fmt(value, digits = 2) {
     const n = Number(value);
     if (!Number.isFinite(n)) return "—";
-    return n.toFixed(digits).replace(/\.?0+$/, "");
+    const fixed = n.toFixed(digits);
+    return fixed.includes(".") ? fixed.replace(/0+$/, "").replace(/\.$/, "") : fixed;
   }
 
   function escapeHtml(value) {
@@ -8152,7 +8623,7 @@ STATUS
       robot.addEventListener("disconnect", handleUnexpectedRobotDisconnect);
     }
 
-    const primaryNavButtons = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn, els.mobileLibraryNavBtn, els.mobileRunNavBtn, els.mobileEditNavBtn, els.mobileRobotNavBtn].filter(Boolean);
+    const primaryNavButtons = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn].filter(Boolean);
     primaryNavButtons.forEach(button => button.addEventListener("click", () => navigateApp(button.dataset.appNav, { push: true })));
     [els.topBackBtn, els.runBackBtn, els.editorBackBtn, els.robotBackBtn].filter(Boolean).forEach(button => button.addEventListener("click", goBackApp));
     els.runRobotBtn?.addEventListener("click", () => navigateApp("robot", { push: true }));
@@ -8161,7 +8632,6 @@ STATUS
     els.runDrillMenuBtn?.addEventListener("click", openDrillDetails);
     els.drillDetailsBtn?.addEventListener("click", openDrillDetails);
     els.inspectorBackBtn?.addEventListener("click", closeInspectorScreen);
-    els.inspectorCloseBtn?.addEventListener("click", closeInspectorScreen);
 
     els.addNodeMenuBtn?.addEventListener("click", openAddNodeMenu);
     els.closeAddNodeDialogBtn?.addEventListener("click", () => els.addNodeDialog.close());
@@ -8466,6 +8936,7 @@ STATUS
     library = initializeLibrary();
     repairLibraryIfNeeded();
     liveTuning = loadLiveTuningPreference();
+    shotEditorMode = loadShotEditorModePreference();
     // Always start the browser at its root. The active drill can live in any
     // folder, but entering the app should show the library structure rather
     // than silently dropping the user inside that drill's folder.

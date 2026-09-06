@@ -11,6 +11,20 @@
   const NOTIFY_UUID = "02f00000-0000-0000-0000-00000000ff02";
   const SALT = "Mjgx1jAwXDBaMFcxCz3JBgNVBAYT4kJF7Rkw";
 
+  // Bounds enforced by Nova MCU firmware 30.0.6 when it sanitizes each
+  // 24-byte ball record. Keep these wire-level limits independent of UI units.
+  const FIRMWARE_LIMITS = Object.freeze({
+    wheelRawMin: 0,
+    wheelRawMax: 7500,
+    pitchDegMin: -20,
+    pitchDegMax: 30,
+    yawDegMin: -22,
+    yawDegMax: 22,
+    frequencyHzMin: 0.5,
+    frequencyHzMax: 1.5,
+    recordsPerPacketMax: 10,
+  });
+
   const COMMANDS = Object.freeze({
     info: new Uint8Array([0x01, 0x00, 0x00]),
     status: new Uint8Array([0x02, 0x00, 0x00]),
@@ -227,7 +241,8 @@
 
   function frequencyHzFromPercent(percent) {
     const value = Math.max(0, Math.min(100, Number(percent)));
-    return 0.5 + value / 100;
+    return FIRMWARE_LIMITS.frequencyHzMin
+      + value / 100 * (FIRMWARE_LIMITS.frequencyHzMax - FIRMWARE_LIMITS.frequencyHzMin);
   }
 
   function delaySecondsFromFrequencyHz(frequencyHz) {
@@ -258,6 +273,9 @@
 
   function buildStartPacket(records, { mode = 1, value = 1, sequence = 0 } = {}) {
     const balls = records.map(toUint8);
+    if (balls.length > FIRMWARE_LIMITS.recordsPerPacketMax) {
+      throw new Error(`Start packet exceeds firmware limit of ${FIRMWARE_LIMITS.recordsPerPacketMax} ball records`);
+    }
     for (const ball of balls) {
       if (ball.length !== 24) throw new Error(`Ball record must be 24 bytes, got ${ball.length}`);
     }
@@ -282,6 +300,9 @@
   function buildLiveAdjustPacket(records) {
     const balls = records.map(toUint8);
     if (!balls.length) throw new Error("Live-adjust packet needs at least one ball record");
+    if (balls.length > FIRMWARE_LIMITS.recordsPerPacketMax) {
+      throw new Error(`Live-adjust packet exceeds firmware limit of ${FIRMWARE_LIMITS.recordsPerPacketMax} ball records`);
+    }
     for (const ball of balls) {
       if (ball.length !== 24) throw new Error(`Ball record must be 24 bytes, got ${ball.length}`);
     }
@@ -316,6 +337,12 @@
     expect("frequency 10%", String(frequencyHzFromPercent(10)), "0.6");
     expect("frequency 20% prepause", delaySecondsFromFrequencyHz(frequencyHzFromPercent(20)).toFixed(6), "1.428571");
     expect("frequency 50% prepause", delaySecondsFromFrequencyHz(frequencyHzFromPercent(50)).toFixed(6), "1.000000");
+    expect("firmware wheel minimum", String(FIRMWARE_LIMITS.wheelRawMin), "0");
+    expect("firmware wheel maximum", String(FIRMWARE_LIMITS.wheelRawMax), "7500");
+    expect("firmware pitch range", `${FIRMWARE_LIMITS.pitchDegMin}..${FIRMWARE_LIMITS.pitchDegMax}`, "-20..30");
+    expect("firmware yaw range", `${FIRMWARE_LIMITS.yawDegMin}..${FIRMWARE_LIMITS.yawDegMax}`, "-22..22");
+    expect("firmware frequency range", `${FIRMWARE_LIMITS.frequencyHzMin}..${FIRMWARE_LIMITS.frequencyHzMax}`, "0.5..1.5");
+    expect("firmware record limit", String(FIRMWARE_LIMITS.recordsPerPacketMax), "10");
 
     const record = packBallRecord({
       wheelA: 2861,
@@ -346,6 +373,7 @@
     WRITE_UUID,
     NOTIFY_UUID,
     SALT,
+    FIRMWARE_LIMITS,
     COMMANDS,
     DEVICE_STATES,
     stateName,

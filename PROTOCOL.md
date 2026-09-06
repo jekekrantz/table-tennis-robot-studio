@@ -300,8 +300,18 @@ yaw_deg   = 2.2 * placement
 placement = yaw_deg / 2.2
 ```
 
-Community clients clamp wheel speeds around the physical operating envelope;
-Table Tennis Robot Studio clamps these fields to raw command values 100–7500. The lower bound was validated with empty-feed cycles down to zero; 100 retains operating margin. The project does **not** treat these integers as measured physical wheel RPM.
+Firmware 30.0.6 sanitizes every ball record to these bounds before use:
+
+```text
+wheel_a, wheel_b  0..7500 raw
+pitch             -20..30 degrees
+yaw               -22..22 degrees
+frequency         0.5..1.5 Hz
+records/packet    at most 10
+```
+
+Table Tennis Robot Studio uses the full firmware wheel range, including zero.
+The project does **not** treat these integers as measured physical wheel RPM.
 
 ## Evidence and provenance
 
@@ -313,7 +323,7 @@ active buffer resizing/second START.
 
 **Community evidence used operationally:** Web Bluetooth UUID confirmation,
 one-run Start metadata `01 01 00 00`, completion signature state5/detail1,
-frequency/pre-pause stopwatch interpretation, 100–7500 raw-command clamp, and historical 6-record
+frequency/pre-pause stopwatch interpretation and historical 6-record
 chunking strategy.
 
 

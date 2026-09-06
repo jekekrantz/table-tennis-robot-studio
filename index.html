@@ -134,7 +134,7 @@
           </section>
 
           <aside class="inspector panel editor-inspector" aria-label="Details">
-            <header class="inspector-screen-header"><button id="inspectorBackBtn" class="screen-back-button" type="button" aria-label="Back to graph">←</button><strong>Details</strong><button id="inspectorCloseBtn" class="icon-button" type="button" aria-label="Close details">×</button></header>
+            <header class="inspector-screen-header"><button id="inspectorBackBtn" class="screen-back-button" type="button" aria-label="Back to graph">←</button><input id="inspectorNameField" type="text" maxlength="90" aria-label="Name" hidden><span id="inspectorAiMount"></span></header>
             <div id="inspectorContent" class="inspector-content"><div class="empty-inspector"><h2>Nothing selected</h2><p>Tap a node or connection to inspect it.</p></div></div>
           </aside>
         </div>
@@ -160,13 +160,6 @@
       </section>
     </main>
   </div>
-
-  <nav class="mobile-primary-nav" aria-label="Primary navigation">
-    <button id="mobileLibraryNavBtn" class="mobile-primary-tab active" type="button" data-app-nav="library"><span aria-hidden="true">▤</span><span>Library</span></button>
-    <button id="mobileRunNavBtn" class="mobile-primary-tab" type="button" data-app-nav="run"><span aria-hidden="true">▶</span><span>Run</span></button>
-    <button id="mobileEditNavBtn" class="mobile-primary-tab" type="button" data-app-nav="editor"><span aria-hidden="true">⌘</span><span>Edit</span></button>
-    <button id="mobileRobotNavBtn" class="mobile-primary-tab" type="button" data-app-nav="robot"><span aria-hidden="true">◎</span><span>Robot</span></button>
-  </nav>
 
   <dialog id="addNodeDialog" class="app-dialog add-node-dialog">
     <div class="dialog-frame add-node-frame">
@@ -592,7 +585,7 @@ STOP</pre>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-04.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-06.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

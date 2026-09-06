@@ -33,17 +33,33 @@
       finite(baseParams.speedMps, 6) - 0.6, finite(baseParams.speedMps, 6) + 0.6);
     const spin = orderedRange(input.spin?.minRps, input.spin?.maxRps,
       finite(baseParams.spinRps, 0) - 5, finite(baseParams.spinRps, 0) + 5);
+    const nominalClearanceCm = finite(nominalClearanceM, 0.08) * 100;
     const clearance = orderedRange(input.clearance?.minCm, input.clearance?.maxCm,
-      nominalClearanceM * 100, nominalClearanceM * 100);
+      nominalClearanceCm, nominalClearanceCm);
+    const elevation = orderedRange(input.launch?.minElevationDeg, input.launch?.maxElevationDeg,
+      DEFAULT_LIMITS.elevationDeg[0], DEFAULT_LIMITS.elevationDeg[1]);
+    const aim = orderedRange(input.launch?.minAimDeg, input.launch?.maxAimDeg,
+      DEFAULT_LIMITS.aimDeg[0], DEFAULT_LIMITS.aimDeg[1]);
+    const rectangleRequested = ["depthMinCm", "depthMaxCm", "lateralMinCm", "lateralMaxCm"]
+      .every(key => Number.isFinite(Number(input.placement?.[key])));
+    const depthRange = orderedRange(input.placement?.depthMinCm, input.placement?.depthMaxCm, 0, 137);
+    const lateralRange = orderedRange(input.placement?.lateralMinCm, input.placement?.lateralMaxCm, -76.25, 76.25);
     return {
       enabled: Boolean(input.enabled),
+      mode: input.mode === "launch" ? "launch" : "outcome",
       placement: {
         depthCm: clamp(Math.abs(finite(input.placement?.depthCm, 15)), 0, 120),
         lateralCm: clamp(Math.abs(finite(input.placement?.lateralCm, 20)), 0, 120),
+        ...(rectangleRequested ? {
+          depthMinCm: clamp(depthRange[0], 0, 500),
+          depthMaxCm: clamp(depthRange[1], 0, 500),
+          lateralMinCm: clamp(lateralRange[0], -250, 250),
+          lateralMaxCm: clamp(lateralRange[1], -250, 250),
+        } : {}),
       },
       clearance: {
-        minCm: clamp(clearance[0], 0.2, 80),
-        maxCm: clamp(clearance[1], 0.2, 80),
+        minCm: clamp(clearance[0], -30, 100),
+        maxCm: clamp(clearance[1], -30, 100),
       },
       speed: {
         minMps: clamp(speed[0], DEFAULT_LIMITS.speedMps[0], DEFAULT_LIMITS.speedMps[1]),
@@ -52,6 +68,12 @@
       spin: {
         minRps: clamp(spin[0], DEFAULT_LIMITS.spinRps[0], DEFAULT_LIMITS.spinRps[1]),
         maxRps: clamp(spin[1], DEFAULT_LIMITS.spinRps[0], DEFAULT_LIMITS.spinRps[1]),
+      },
+      launch: {
+        minElevationDeg: clamp(elevation[0], DEFAULT_LIMITS.elevationDeg[0], DEFAULT_LIMITS.elevationDeg[1]),
+        maxElevationDeg: clamp(elevation[1], DEFAULT_LIMITS.elevationDeg[0], DEFAULT_LIMITS.elevationDeg[1]),
+        minAimDeg: clamp(aim[0], DEFAULT_LIMITS.aimDeg[0], DEFAULT_LIMITS.aimDeg[1]),
+        maxAimDeg: clamp(aim[1], DEFAULT_LIMITS.aimDeg[0], DEFAULT_LIMITS.aimDeg[1]),
       },
     };
   }
@@ -67,9 +89,15 @@
   }
 
   function outcome(prediction) {
+    if (prediction?.hardwareRepresentable === false) return null;
     if (prediction?.serve && !prediction.serve.valid) return null;
-    if (!prediction?.landing || !prediction?.net?.crossed || !Number.isFinite(prediction.net.clearanceM)) return null;
-    return [prediction.landing.x, prediction.landing.y, prediction.net.clearanceM];
+    const landing = prediction?.serve ? prediction.secondBounce : prediction?.landing;
+    if (!landing || prediction?.status === "net" || prediction?.status === "edge" || prediction?.net?.hit
+      || !prediction?.net?.crossed || !Number.isFinite(prediction.net.clearanceM)) return null;
+    if (!prediction.serve && (prediction.onTable === false
+      || (prediction.table && (landing.x < prediction.table.length / 2 || landing.x > prediction.table.length
+        || Math.abs(landing.y) > prediction.table.width / 2)))) return null;
+    return [landing.x, landing.y, prediction.net.clearanceM];
   }
 
   function determinant3(m) {
@@ -151,29 +179,43 @@
     const started = typeof performance !== "undefined" ? performance.now() : Date.now();
     const basePrediction = evaluate(baseParams);
     const baseOutcome = outcome(basePrediction);
+    const variation = normalizeVariation(variationInput, baseParams, baseOutcome?.[2]);
+    if (variation.mode === "launch") return {
+      ok: true,
+      baseParams: Object.fromEntries(CONTROL_KEYS.map(key => [key, finite(baseParams[key], 0)])),
+      baseOutcome,
+      basePrediction,
+      variation,
+      evaluations: 1,
+      preparationEvaluations: 1,
+      preparedMs: (typeof performance !== "undefined" ? performance.now() : Date.now()) - started,
+    };
     if (!baseOutcome) return { ok: false, reason: "The nominal shot has no usable landing/net crossing." };
-    const variation = normalizeVariation(variationInput, baseParams, baseOutcome[2]);
+    const rectanglePlacement = Number.isFinite(variation.placement.depthMinCm);
     const speedHalfRange = Math.max(0.2, (variation.speed.maxMps - variation.speed.minMps) / 2);
     const spinHalfRange = Math.max(2, (variation.spin.maxRps - variation.spin.minRps) / 2);
+    const elevationHalfRange = Math.max(.5, (variation.launch.maxElevationDeg - variation.launch.minElevationDeg) / 2);
+    const aimHalfRange = Math.max(.5, (variation.launch.maxAimDeg - variation.launch.minAimDeg) / 2);
     const prepared = {
       ok: true,
       baseParams: Object.fromEntries(CONTROL_KEYS.map(key => [key, finite(baseParams[key], 0)])),
       baseOutcome,
       basePrediction,
       variation,
-      controlScales: [speedHalfRange, spinHalfRange, finite(options.elevationScaleDeg, 8), finite(options.aimScaleDeg, 8)],
+      controlScales: [speedHalfRange, spinHalfRange, elevationHalfRange, aimHalfRange],
       controlLimits: {
         speedMps: [variation.speed.minMps, variation.speed.maxMps],
         spinRps: [variation.spin.minRps, variation.spin.maxRps],
-        elevationDeg: [...DEFAULT_LIMITS.elevationDeg],
-        aimDeg: [...DEFAULT_LIMITS.aimDeg],
+        elevationDeg: [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
+        aimDeg: [variation.launch.minAimDeg, variation.launch.maxAimDeg],
       },
       outputScales: [
-        Math.max(0.06, variation.placement.depthCm / 100),
-        Math.max(0.06, variation.placement.lateralCm / 100),
+        Math.max(0.06, rectanglePlacement ? (variation.placement.depthMaxCm - variation.placement.depthMinCm) / 100 : variation.placement.depthCm / 100),
+        Math.max(0.06, rectanglePlacement ? (variation.placement.lateralMaxCm - variation.placement.lateralMinCm) / 100 : variation.placement.lateralCm / 100),
         Math.max(0.02, (variation.clearance.maxCm - variation.clearance.minCm) / 100),
       ],
       evaluations: 1,
+      preparationEvaluations: 5,
       preparedMs: 0,
     };
     const baseNormalized = [0, 0, 0, 0];
@@ -209,15 +251,21 @@
   }
 
   function sampleTarget(prepared, random) {
-    const angle = random() * Math.PI * 2;
-    const radius = Math.sqrt(random());
-    const depth = prepared.variation.placement.depthCm / 100;
-    const lateral = prepared.variation.placement.lateralCm / 100;
+    const placement = prepared.variation.placement;
+    const rectangle = Number.isFinite(placement.depthMinCm);
+    const angle = rectangle ? 0 : random() * Math.PI * 2;
+    const radius = rectangle ? 0 : Math.sqrt(random());
+    const depth = placement.depthCm / 100;
+    const lateral = placement.lateralCm / 100;
     const minClearance = prepared.variation.clearance.minCm / 100;
     const maxClearance = prepared.variation.clearance.maxCm / 100;
     return [
-      prepared.baseOutcome[0] + radius * Math.cos(angle) * depth,
-      prepared.baseOutcome[1] + radius * Math.sin(angle) * lateral,
+      rectangle
+        ? prepared.basePrediction.table.length / 2 + (placement.depthMinCm + random() * (placement.depthMaxCm - placement.depthMinCm)) / 100
+        : prepared.baseOutcome[0] + radius * Math.cos(angle) * depth,
+      rectangle
+        ? (placement.lateralMinCm + random() * (placement.lateralMaxCm - placement.lateralMinCm)) / 100
+        : prepared.baseOutcome[1] + radius * Math.sin(angle) * lateral,
       minClearance + random() * (maxClearance - minClearance),
     ];
   }
@@ -297,6 +345,34 @@
 
   function sample(prepared, evaluate, random = Math.random, options = {}) {
     if (!prepared?.ok || !prepared.variation?.enabled) return null;
+    if (prepared.variation.mode === "launch") {
+      const variation = prepared.variation;
+      const attempts = Math.round(clamp(Math.max(12, finite(options.attempts, 12)), 12, 24));
+      const ranges = {
+        speedMps: [variation.speed.minMps, variation.speed.maxMps],
+        spinRps: [variation.spin.minRps, variation.spin.maxRps],
+        elevationDeg: [variation.launch.minElevationDeg, variation.launch.maxElevationDeg],
+        aimDeg: [variation.launch.minAimDeg, variation.launch.maxAimDeg],
+      };
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const params = Object.fromEntries(CONTROL_KEYS.map(key => [key, ranges[key][0] + random() * (ranges[key][1] - ranges[key][0])]));
+        prepared.evaluations += 1;
+        const prediction = evaluate(params);
+        const actual = outcome(prediction);
+        if (!actual) continue;
+        return {
+          params,
+          prediction,
+          target: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+          actual: { landing: { x: actual[0], y: actual[1] }, clearanceM: actual[2] },
+          landingErrorM: 0,
+          clearanceErrorM: 0,
+          attempts: attempt + 1,
+          evaluations: attempt + 1,
+        };
+      }
+      return null;
+    }
     const attempts = Math.round(clamp(finite(options.attempts, 5), 1, 12));
     const maxEvaluations = Math.round(clamp(finite(options.maxEvaluations, 36), 1, 120));
     const startEvaluations = prepared.evaluations;

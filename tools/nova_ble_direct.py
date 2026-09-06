@@ -28,6 +28,13 @@ WRITE_UUID = "02f00000-0000-0000-0000-00000000ff01"
 NOTIFY_UUID = "02f00000-0000-0000-0000-00000000ff02"
 SALT = b"Mjgx1jAwXDBaMFcxCz3JBgNVBAYT4kJF7Rkw"
 
+FIRMWARE_WHEEL_RAW_MIN = 0
+FIRMWARE_WHEEL_RAW_MAX = 7500
+FIRMWARE_PITCH_DEG_MIN = -20.0
+FIRMWARE_PITCH_DEG_MAX = 30.0
+FIRMWARE_FREQUENCY_HZ_MIN = 0.5
+FIRMWARE_FREQUENCY_HZ_MAX = 1.5
+
 COMMANDS = {
     "info": bytes.fromhex("010000"),
     "status": bytes.fromhex("020000"),
@@ -619,12 +626,20 @@ def parser() -> argparse.ArgumentParser:
 
 async def main() -> int:
     args = parser().parse_args()
-    if not 100 <= args.wheels <= 7500:
-        raise SystemExit("--wheels must be within 100..7500")
+    if not FIRMWARE_WHEEL_RAW_MIN <= args.wheels <= FIRMWARE_WHEEL_RAW_MAX:
+        raise SystemExit(
+            f"--wheels must be within {FIRMWARE_WHEEL_RAW_MIN}..{FIRMWARE_WHEEL_RAW_MAX}"
+        )
+    if not FIRMWARE_PITCH_DEG_MIN <= args.pitch <= FIRMWARE_PITCH_DEG_MAX:
+        raise SystemExit(
+            f"--pitch must be within {FIRMWARE_PITCH_DEG_MIN:g}..{FIRMWARE_PITCH_DEG_MAX:g} degrees"
+        )
     if not 1 <= args.first_count <= 9 or not 1 <= args.update_count <= 9:
         raise SystemExit("record counts must be within 1..9")
-    if not 0.5 <= args.frequency <= 1.5:
-        raise SystemExit("--frequency must be within 0.5..1.5 Hz")
+    if not FIRMWARE_FREQUENCY_HZ_MIN <= args.frequency <= FIRMWARE_FREQUENCY_HZ_MAX:
+        raise SystemExit(
+            f"--frequency must be within {FIRMWARE_FREQUENCY_HZ_MIN:g}..{FIRMWARE_FREQUENCY_HZ_MAX:g} Hz"
+        )
     if not 0.5 <= args.update_after <= 30 or not 1 <= args.observe_seconds <= 60:
         raise SystemExit("timing arguments are outside bounded diagnostic limits")
     if not 2 <= args.shot_count <= 50:

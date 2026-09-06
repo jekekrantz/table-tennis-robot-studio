@@ -25,7 +25,8 @@ assert.strictEqual(LaunchModel.isRawCalibrated(1999, model), false);
 assert.strictEqual(LaunchModel.isRawCalibrated(2000, model), true);
 assert.strictEqual(LaunchModel.isRawCalibrated(3000, model), true);
 assert.strictEqual(LaunchModel.isRawCalibrated(3001, model), false);
-assert.strictEqual(LaunchModel.clampRawToHardware(50), 100);
+assert.strictEqual(LaunchModel.clampRawToHardware(-50), 0);
+assert.strictEqual(LaunchModel.clampRawToHardware(50), 50);
 assert.strictEqual(LaunchModel.clampRawToHardware(200), 200);
 assert.strictEqual(LaunchModel.clampRawToHardware(9000), 7500);
 
@@ -66,6 +67,12 @@ close(
   'edited spin-capacity curve is operational'
 );
 assert(LaunchModel.spinRpsFromRawWheels(wheelA, wheelB, scalingWithCurve) !== LaunchModel.spinRpsFromRawWheels(wheelA, wheelB, scaling), 'editing spin-capacity curve must change the spin model');
+
+const hardwareSpeeds = LaunchModel.hardwareSpeedRange(model);
+close(LaunchModel.maxSpinRpsAtExitSpeed(hardwareSpeeds.minMps, scaling, model), 0, 1e-9, 'no differential wheel headroom at minimum speed');
+close(LaunchModel.maxSpinRpsAtExitSpeed(hardwareSpeeds.maxMps, scaling, model), 0, 1e-9, 'no differential wheel headroom at maximum speed');
+assert(LaunchModel.maxSpinRpsAtExitSpeed(LaunchModel.exitSpeedFromRaw(3000, model), scalingWithCurve, model) > 0, 'mid-range speed must retain spin headroom');
+assert.strictEqual(LaunchModel.maxSpinRpsAtExitSpeed(hardwareSpeeds.maxMps + 1, scaling, model), 0, 'speed outside wheel range must have no representable spin');
 
 const source = require('fs').readFileSync(require('path').join(__dirname, 'launch-model.js'), 'utf8');
 for (const forbidden of ['LOCAL_EXIT_SPEED_MAP', 'USER_SEED_SPEED_MAP', 'speedFromMap(', 'interpolateExitSpeed']) {
