@@ -3584,6 +3584,7 @@
     return `
       <section class="intuitive-editor">
         ${intuitiveLandingSvg(prediction, selections, serve)}
+        ${intervalSideTrajectorySvg(node, variation)}
         <div class="intuitive-intervals">
           ${intuitiveRangeHtml("depth", selections.depth, domains.depth)}
           ${intuitiveRangeHtml("lateral", selections.lateral, domains.lateral)}
@@ -3623,6 +3624,7 @@
     return `
       <section class="manual-shot-editor">
         ${intuitiveLandingSvg(prediction, null, serve, true)}
+        ${intervalSideTrajectorySvg(node, variation)}
         <div class="intuitive-intervals">
           ${intuitiveRangeHtml("speed", selections.speed, domains.speed, "manual")}
           ${intuitiveRangeHtml("spin", selections.spin, domains.spin, "manual")}
@@ -4995,6 +4997,115 @@
       ${prediction.thirdBounce ? `<circle cx="${tr.sx(prediction.thirdBounce.x)}" cy="${tr.sy(prediction.ballRadius)}" r="7" fill="${THIRD_BOUNCE_COLOR}" stroke="#fff" stroke-width="2"/>` : ""}
       ${netHeightLabel}
     </svg>`;
+  }
+
+  function intervalSideTrajectorySvg(node, variation, width = 760, height = 270) {
+    const support = [...new Map(variationFeasibleSamples(node, variation)
+      .map(sample => [JSON.stringify(sample.params), sample])).values()];
+    const sampleLimit = 32;
+    const selected = support.length <= sampleLimit ? support : Array.from({ length: sampleLimit }, (_, index) =>
+      support[Math.round(index * (support.length - 1) / (sampleLimit - 1))]);
+    const options = trajectoryOptionsForNode(node, true);
+    const predictions = selected
+      .map(sample => novaFeasiblePrediction(sample.params, null, options))
+      .filter(prediction => receiverPredictionValid(node, prediction));
+    const feasibleNominal = novaFeasiblePrediction(node.params, null, options);
+    const representative = receiverPredictionValid(node, feasibleNominal) ? feasibleNominal : predictions[0];
+    if (!representative) return `<div class="interval-side-empty" role="img" aria-label="No feasible side-view trajectory">No feasible side-view trajectory</div>`;
+    if (!predictions.length) predictions.push(representative);
+
+    const calibration = library.calibration;
+    const table = representative.table;
+    const segments = prediction => [prediction.points, prediction.postBouncePoints || [], prediction.thirdArcPoints || []]
+      .filter(points => points.length > 1);
+    const allPoints = predictions.flatMap(prediction => segments(prediction).flat());
+    const representativePoints = segments(representative).flat();
+    const xs = allPoints.concat(representativePoints).map(point => point.x).concat([calibration.pose.x, 0, table.length]);
+    const zs = allPoints.concat(representativePoints).map(point => point.z).concat([table.netHeight]);
+    const bounds = {
+      minX: Math.min(...xs) - .16,
+      maxX: Math.max(...xs) + .16,
+      minY: -.055,
+      maxY: Math.max(...zs) + .09,
+    };
+    const tr = metricTransform(width, height, bounds, 22);
+    const clipId = `interval-side-${String(node.id).replace(/[^a-zA-Z0-9_-]/g, "")}`;
+    const color = node.type === "serve" ? "#70ead5" : "#66c7ff";
+
+    const zAtX = (prediction, x) => {
+      const values = [];
+      for (const points of segments(prediction)) {
+        for (let index = 1; index < points.length; index += 1) {
+          const a = points[index - 1], b = points[index];
+          if ((a.x - x) * (b.x - x) > 0 || Math.abs(b.x - a.x) < 1e-9) continue;
+          const ratio = (x - a.x) / (b.x - a.x);
+          if (ratio >= 0 && ratio <= 1) values.push(a.z + ratio * (b.z - a.z));
+        }
+      }
+      return values.length ? Math.max(...values) : null;
+    };
+    const quantile = (values, amount) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const position = (sorted.length - 1) * amount;
+      const lower = Math.floor(position), upper = Math.ceil(position);
+      return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+    };
+    const columns = Array.from({ length: 76 }, (_, index) => {
+      const x = bounds.minX + index / 75 * (bounds.maxX - bounds.minX);
+      const values = predictions.map(prediction => zAtX(prediction, x)).filter(Number.isFinite);
+      return values.length >= 2 ? {
+        x,
+        low90: quantile(values, .05), high90: quantile(values, .95),
+        low50: quantile(values, .25), high50: quantile(values, .75),
+      } : null;
+    }).filter(Boolean);
+    const bandPath = (lowKey, highKey) => columns.length < 2 ? "" : [
+      ...columns.map((column, index) => `${index ? "L" : "M"} ${fmt(tr.sx(column.x),2)} ${fmt(tr.sy(column[highKey]),2)}`),
+      ...[...columns].reverse().map(column => `L ${fmt(tr.sx(column.x),2)} ${fmt(tr.sy(column[lowKey]),2)}`),
+      "Z",
+    ].join(" ");
+    const outerBand = bandPath("low90", "high90");
+    const innerBand = bandPath("low50", "high50");
+    const faintPaths = predictions.map(prediction => segments(prediction).map(points =>
+      `<path d="${trajectoryPath(points, tr, "z")}" class="interval-side-sample"/>`).join("")).join("");
+    const representativePaths = segments(representative).map(points =>
+      `<path d="${trajectoryPath(points, tr, "z")}" class="interval-side-representative"/>`).join("");
+
+    const firstBounces = predictions.map(prediction => prediction.landing?.x).filter(Number.isFinite);
+    const receiverBounces = predictions.map(prediction => (node.type === "serve" ? prediction.secondBounce : prediction.landing)?.x).filter(Number.isFinite);
+    const bounceBand = (values, className) => values.length ? `<line x1="${tr.sx(Math.min(...values))}" y1="${tr.sy(0)-2}" x2="${tr.sx(Math.max(...values))}" y2="${tr.sy(0)-2}" class="${className}"/>` : "";
+    const netHeights = predictions.map(prediction => Number.isFinite(prediction.net?.z)
+      ? prediction.net.z : Number.isFinite(prediction.net?.clearanceM)
+        ? table.netHeight + representative.ballRadius + prediction.net.clearanceM : null).filter(Number.isFinite);
+    const clearanceBracket = netHeights.length ? `<g class="interval-clearance-bracket">
+      <line x1="${tr.sx(table.length/2)+9}" y1="${tr.sy(Math.min(...netHeights))}" x2="${tr.sx(table.length/2)+9}" y2="${tr.sy(Math.max(...netHeights))}"/>
+      <line x1="${tr.sx(table.length/2)+4}" y1="${tr.sy(Math.min(...netHeights))}" x2="${tr.sx(table.length/2)+14}" y2="${tr.sy(Math.min(...netHeights))}"/>
+      <line x1="${tr.sx(table.length/2)+4}" y1="${tr.sy(Math.max(...netHeights))}" x2="${tr.sx(table.length/2)+14}" y2="${tr.sy(Math.max(...netHeights))}"/>
+    </g>` : "";
+    const exact = predictions.length === 1;
+    const legend = exact
+      ? `<span><i class="representative"></i>Exact trajectory</span>`
+      : `<span><i class="representative"></i>Representative</span><span><i class="inner"></i>50%</span><span><i class="outer"></i>90%</span>`;
+
+    return `<figure class="interval-side-figure" style="--interval-trajectory:${color}">
+      <svg class="interval-side-view" viewBox="0 0 ${width} ${height}" role="img" aria-label="Feasible side-view trajectories for this ${node.type === "serve" ? "serve through both table bounces" : "shot"}">
+        <defs><clipPath id="${clipId}"><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="10"/></clipPath></defs>
+        <g clip-path="url(#${clipId})">
+          <line x1="${tr.sx(0)}" y1="${tr.sy(0)}" x2="${tr.sx(table.length)}" y2="${tr.sy(0)}" class="interval-side-table"/>
+          <line x1="${tr.sx(table.length/2)}" y1="${tr.sy(0)}" x2="${tr.sx(table.length/2)}" y2="${tr.sy(table.netHeight)}" class="interval-side-net"/>
+          ${outerBand ? `<path d="${outerBand}" class="interval-side-band outer"/>` : ""}
+          ${innerBand ? `<path d="${innerBand}" class="interval-side-band inner"/>` : ""}
+          ${faintPaths}
+          ${representativePaths}
+          ${bounceBand(receiverBounces, "interval-bounce-band receiver")}
+          ${node.type === "serve" ? bounceBand(firstBounces, "interval-bounce-band server") : ""}
+          ${clearanceBracket}
+          ${representative.landing ? `<circle cx="${tr.sx(representative.landing.x)}" cy="${tr.sy(representative.ballRadius)}" r="5" class="interval-bounce-point"/>` : ""}
+          ${representative.secondBounce ? `<circle cx="${tr.sx(representative.secondBounce.x)}" cy="${tr.sy(representative.ballRadius)}" r="5" class="interval-bounce-point"/>` : ""}
+        </g>
+      </svg>
+      <figcaption><strong>Feasible side view</strong><span class="interval-side-legend">${legend}</span></figcaption>
+    </figure>`;
   }
 
   function radians(deg) { return deg * Math.PI / 180; }
@@ -6688,7 +6799,7 @@
       elevation: [normalized.launch.minElevationDeg, normalized.launch.maxElevationDeg],
       aim: [normalized.launch.minAimDeg, normalized.launch.maxAimDeg],
     } : intuitiveSelections(node, prediction, normalized);
-    const matching = shotEnvelopeCloud(node, selections).filter(point => Object.entries(selections).every(([key, range]) =>
+    const matching = shotEnvelopeCloud(node).filter(point => Object.entries(selections).every(([key, range]) =>
       point[key] >= range[0] - 1e-9 && point[key] <= range[1] + 1e-9));
     // Bound cache size and preparation work while preserving the full region's
     // endpoints through deterministic, even sampling.

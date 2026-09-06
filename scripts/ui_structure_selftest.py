@@ -140,13 +140,17 @@ for token in ('data-shot-editor-mode="intuitive"', 'data-shot-editor-mode="manua
               'if (!receiverPredictionValid(node, prediction))',
               'landing-robot-strip',
               'landing-target-hatch', 'landing-table-edge', 'manual-shot-editor',
+              'intervalSideTrajectorySvg(node, variation)',
+              'Feasible side view', 'interval-side-band outer',
               'novaFeasiblePrediction(params', 'novaFeasibleBounds(library.calibration)',
               'LaunchModel.maxSpinRpsAtExitSpeed'):
     if token not in app:
         raise SystemExit(f"Missing intuitive shot-editor behavior: {token}")
 if 'if (isBallNodeType(type)) {' not in app or 'addNode(type);' not in app:
     raise SystemExit("Adding a ball must go directly to the intuitive shot editor")
-for token in ('.shot-editor-tabs', '.intuitive-landing-table', '.dual-range', '.interval-value'):
+for token in ('.shot-editor-tabs', '.intuitive-landing-table', '.interval-side-figure',
+              '.interval-side-representative', '.interval-side-band.outer',
+              '.dual-range', '.interval-value'):
     if token not in css:
         raise SystemExit(f"Missing intuitive shot-editor styling: {token}")
 for token in ('-webkit-appearance:none', 'grid-template-columns:52px minmax(0,1fr) 52px', 'max-width:100%'):

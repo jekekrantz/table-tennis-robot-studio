@@ -25,6 +25,8 @@ The intuitive editor starts new shots and serves as fixed, legal defaults: the t
 
 The Manual tab edits launch speed, spin, elevation and left/right aim as synchronized min/dual-slider/max intervals. It internally projects known-valid support independently onto those four ranges, skips combinations that are not robot-representable or do not make a valid receiver-side shot, and reports only when the interval set contains no valid shot. Its receiver-side table shows a representative valid landing point. Outcome intervals remain available in the Intuitive tab; switching back to Intuitive returns variation to outcome-solving mode.
 
+Both editor modes place a feasible side view directly below the receiver-side top view. A bright path shows the representative command, faint paths show up to 32 deterministic robot-representable support samples, and translucent bands show the central 50% and 90% height ranges at each horizontal position. Amber table bands summarize feasible bounce depth and a cyan bracket summarizes net height. Serve rendering uses the same support but continues through the robot-side first bounce and receiver-side second bounce. Exact intervals collapse naturally to a single trajectory without an uncertainty band.
+
 Clearance text input and its slider may extend down to −30 cm to deliberately request net contact and exercise impossible-shot feedback. Its endpoints remain the global editor bounds rather than changing with the other intervals.
 
 ## Performance limits
