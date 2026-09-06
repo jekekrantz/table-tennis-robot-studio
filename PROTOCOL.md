@@ -125,6 +125,7 @@ Successful status frame shape:
 Important state rule learned in direct testing:
 
 - **Do not Init when state is already 3 / Ready.**
+- The configurable idle lifecycle may send the known STOP command while Ready. It keeps GATT connected, confirms the resulting state is Ready or Uninitialized, and lets `ensureReadyForStart()` initialize only when the next Start actually requires it.
 - If state is 0, Init then wait until 3.
 - If state is 2, wait until 3 without another Init.
 - Require a fresh state 3 before Start.

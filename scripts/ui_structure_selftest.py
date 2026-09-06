@@ -30,7 +30,8 @@ for expected in [
     "addServeBtn",
     "editorRunBtn", "robotDiagnosticsBtn", "robotDialogContext",
     "robotDialogConnectBtn",
-    "aiGlobalBtn", "robotIdleDisconnectInput", "robotIdleStatus",
+    "aiGlobalBtn", "robotIdleStopInput", "robotIdleStopStatus",
+    "robotIdleDisconnectInput", "robotIdleStatus",
     "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
 ]:
     if expected not in ids:
@@ -225,10 +226,11 @@ for token in (
     'Connect once and the app will continue automatically', 'emergencyPageExit',
     'robot?.emergencyShutdown?.()', 'Copy this drill to edit it?',
     'disconnectRobotAfterIdle', 'enterRobotIdleState', 'disconnectAfterIdleMinutes',
+    'stopRobotAfterShotIdle', 'stopAfterNoShotMinutes', 'robot.addEventListener("ball", noteRobotShot)',
 ):
     if token not in app:
         raise SystemExit(f"Missing low-friction connection/safety/edit behavior: {token}")
-for token in ('emergencyShutdown()', 'best-effort STOP queued'):
+for token in ('emergencyShutdown()', 'best-effort STOP queued', 'stopForIdle()', 'Sending idle STOP'):
     if token not in ble:
         raise SystemExit(f"Missing BLE page-exit safety behavior: {token}")
 

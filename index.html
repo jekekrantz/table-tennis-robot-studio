@@ -158,10 +158,17 @@
             <button id="robotSettingsShortcutBtn" class="robot-menu-row" type="button"><span class="robot-menu-icon">⚙</span><span><strong>Robot / model settings</strong><small>Geometry, air model and Nova scaling</small></span><span>›</span></button>
           </section>
           <section class="robot-connection-settings panel-card">
-            <div><h3>Connection timeout</h3><p>Disconnect after Nova has not been used. Running drills and calibration never time out.</p></div>
-            <label class="field"><span>Disconnect when unused</span><select id="robotIdleDisconnectInput"><option value="0">Never</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
-            <p id="robotIdleStatus" class="helper" aria-live="polite"></p>
-            <details class="robot-rest-details"><summary>About the resting state</summary><p>When shooting finishes, the app confirms Nova is Ready and keeps the connection available for a fast restart. A separate physical head-parking move is not enabled until its non-firing protocol behavior and safe pose have been verified on the robot.</p></details>
+            <div><h3>Automatic idle actions</h3><p>STOP first to leave Nova quiet but quickly reusable, then disconnect BLE after longer inactivity.</p></div>
+            <div class="robot-idle-setting">
+              <div class="robot-idle-setting-title"><span>STOP after no shots</span><details class="info-disclosure"><summary aria-label="About automatic STOP">i</summary><div class="info-popover">STOP ends robot activity while keeping Bluetooth connected. If Nova becomes Uninitialized, the next drill initializes it automatically; this is normally much faster than reconnecting Bluetooth. A separate physical head-parking move remains disabled until verified non-firing on the robot.</div></details></div>
+              <select id="robotIdleStopInput" aria-label="STOP after no shots"><option value="0">Never</option><option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option></select>
+              <p id="robotIdleStopStatus" class="helper" aria-live="polite"></p>
+            </div>
+            <div class="robot-idle-setting">
+              <div class="robot-idle-setting-title"><span>Disconnect BLE when unused</span><details class="info-disclosure"><summary aria-label="About automatic BLE disconnect">i</summary><div class="info-popover">BLE disconnect performs the orderly STOP stage first, then closes the Bluetooth connection. Starting again requires the browser device chooser and Nova authentication, so this timeout is longer than STOP.</div></details></div>
+              <select id="robotIdleDisconnectInput" aria-label="Disconnect BLE when unused"><option value="0">Never</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
+              <p id="robotIdleStatus" class="helper" aria-live="polite"></p>
+            </div>
           </section>
           <section class="model-default-card panel-card"><h3>Current defaults</h3><dl><div><dt>Base → yaw pivot</dt><dd>24.2 cm</dd></div><div><dt>Yaw → pitch → wheels</dt><dd>7.5 + 7.5 cm</dd></div><div><dt>Yaw pivot height</dt><dd>24.0 cm</dd></div><div><dt>Exit speed model</dt><dd>One affine line</dd></div></dl></section>
         </div>
@@ -523,7 +530,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-06.3" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-06.4" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

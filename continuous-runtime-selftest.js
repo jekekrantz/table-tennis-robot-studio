@@ -14,6 +14,8 @@ assert(app.includes('maxBatchSize: 1'));
 assert(app.includes('mode: 3, value: 0'));
 assert(app.includes('value: segment.batches.length'));
 assert(app.includes('robot.waitForBallEvent('));
+assert(app.includes('robot.addEventListener("ball", noteRobotShot)'));
+assert(app.includes('stopRobotAfterShotIdle'));
 assert(app.includes('next streaming shot'));
 assert(app.includes('flushImmediateLiveRetune'));
 assert(app.includes('enqueuePlaybackUpdate'));

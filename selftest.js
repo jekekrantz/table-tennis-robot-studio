@@ -174,6 +174,12 @@ async function main() {
   const rawStatus = await controller.requestRaw(P.COMMANDS.status, 0x02, 2000, "mock raw status");
   const parsedRawStatus = P.parseStatusFrame(rawStatus);
   if (parsedRawStatus.state !== 3) throw new Error("requestRaw did not return the Ready status frame");
+  const idleStopWritesBefore = fake.write.writes.filter(hex => hex === P.hex(P.COMMANDS.stop)).length;
+  await controller.stopForIdle();
+  const idleStopWritesAfter = fake.write.writes.filter(hex => hex === P.hex(P.COMMANDS.stop)).length;
+  if (idleStopWritesAfter !== idleStopWritesBefore + 1 || !controller.ready) {
+    throw new Error("Idle STOP must be sent from Ready, confirmed, and retain BLE");
+  }
   await controller.sendRaw(P.COMMANDS.heartbeat, { label: "mock fire-and-forget heartbeat" });
   const ballEventPromise = controller.waitForBallEvent(controller.ballCounter, 2000);
   fake.notify.emit(frame(0x05, [1, 0, 0, 0, 1, 0, 0]));

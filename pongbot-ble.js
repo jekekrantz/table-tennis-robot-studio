@@ -333,6 +333,31 @@
       return this.waitForFree(timeoutMs);
     }
 
+    async stopForIdle() {
+      if (!this.connected || !this.authenticated) return null;
+      this.setPhase("stopping");
+      this.log("Sending idle STOP");
+      await this.requestCommand(P.COMMANDS.stop, 0x80, 6000, "idle stop");
+      const deadline = performance.now() + 25000;
+      let status = null;
+      while (performance.now() < deadline) {
+        await delay(350);
+        status = await this.queryStatus();
+        if (status.state === 0) {
+          this.setPhase("connected-busy");
+          this.log("Idle STOP confirmed · Nova Uninitialized · BLE retained");
+          return status;
+        }
+        if (status.state === 3) {
+          this.setPhase("ready");
+          this.log("Idle STOP confirmed · Nova Ready · BLE retained");
+          return status;
+        }
+        if (status.state === 202) throw new Error("Nova reported an error state after idle STOP");
+      }
+      throw new Error(`Timed out confirming idle STOP; last state was ${status ? P.stateName(status.state) : "unknown"}`);
+    }
+
     emergencyShutdown() {
       // Browser page-exit handlers cannot reliably await BLE writes. Start a
       // best-effort STOP immediately, then disconnect GATT and clear timers.

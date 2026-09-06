@@ -287,6 +287,8 @@
     robotPageDevice: $("robotPageDevice"),
     robotDiagnosticsBtn: $("robotDiagnosticsBtn"),
     robotSettingsShortcutBtn: $("robotSettingsShortcutBtn"),
+    robotIdleStopInput: $("robotIdleStopInput"),
+    robotIdleStopStatus: $("robotIdleStopStatus"),
     robotIdleDisconnectInput: $("robotIdleDisconnectInput"),
     robotIdleStatus: $("robotIdleStatus"),
   };
@@ -336,6 +338,10 @@
   let robotIdleTimer = null;
   let robotLastUseAt = Date.now();
   let robotIdleDisconnecting = false;
+  let robotIdleStopTimer = null;
+  let robotLastShotAt = Date.now();
+  let robotIdleStopping = false;
+  let robotIdleStopIssued = false;
   let poseCalibrationState = null;
   let poseCalibrationDrag = null;
   let poseMeasurementGesture = null;
@@ -554,13 +560,18 @@
   }
 
   function defaultRobotSettings() {
-    return { disconnectAfterIdleMinutes: 10 };
+    return { stopAfterNoShotMinutes: 2, disconnectAfterIdleMinutes: 10 };
   }
 
   function sanitizeRobotSettings(raw = {}) {
-    const allowed = new Set([0, 5, 10, 15, 30, 60]);
-    const minutes = Math.round(finite(raw.disconnectAfterIdleMinutes, 10));
-    return { disconnectAfterIdleMinutes: allowed.has(minutes) ? minutes : 10 };
+    const stopAllowed = new Set([0, 1, 2, 5, 10]);
+    const disconnectAllowed = new Set([0, 5, 10, 15, 30, 60]);
+    const stopMinutes = Math.round(finite(raw.stopAfterNoShotMinutes, 2));
+    const disconnectMinutes = Math.round(finite(raw.disconnectAfterIdleMinutes, 10));
+    return {
+      stopAfterNoShotMinutes: stopAllowed.has(stopMinutes) ? stopMinutes : 2,
+      disconnectAfterIdleMinutes: disconnectAllowed.has(disconnectMinutes) ? disconnectMinutes : 10,
+    };
   }
 
   function defaultDrill(name = "Custom drill") {
@@ -6173,6 +6184,7 @@
       return;
     }
     calibrationFeedRunning = true;
+    armRobotIdleStop();
     noteRobotUse();
     calibrationFeedToken += 1;
     const token = calibrationFeedToken;
@@ -7273,6 +7285,7 @@
     playbackToken += 1;
     const token = playbackToken;
     calibrationTestRunning = true;
+    armRobotIdleStop();
     noteRobotUse();
     calibrationTestMessage = robot.connected ? "Waiting for Nova Ready…" : "Opening Nova chooser…";
     updatePlayButton();
@@ -7396,6 +7409,7 @@
     playbackToken += 1;
     const token = playbackToken;
     playbackRunning = true;
+    armRobotIdleStop();
     noteRobotUse();
     liveRetunePending = false;
     if (liveRetuneTimer) clearTimeout(liveRetuneTimer);
@@ -8207,17 +8221,31 @@
   }
 
   function renderRobotIdleSettings() {
-    if (!els.robotIdleDisconnectInput || !els.robotIdleStatus || !library) return;
-    const minutes = library.robotSettings.disconnectAfterIdleMinutes;
-    els.robotIdleDisconnectInput.value = String(minutes);
+    if (!els.robotIdleStopInput || !els.robotIdleStopStatus || !els.robotIdleDisconnectInput || !els.robotIdleStatus || !library) return;
+    const stopMinutes = library.robotSettings.stopAfterNoShotMinutes;
+    const disconnectMinutes = library.robotSettings.disconnectAfterIdleMinutes;
+    els.robotIdleStopInput.value = String(stopMinutes);
+    els.robotIdleDisconnectInput.value = String(disconnectMinutes);
     if (!robot?.connected) {
-      els.robotIdleStatus.textContent = minutes ? `Nova will disconnect after ${minutes} minutes of no shooting or calibration use.` : "Automatic disconnect is off.";
-    } else if (!minutes) {
+      els.robotIdleStopStatus.textContent = stopMinutes ? `STOP will be sent after ${stopMinutes} minute${stopMinutes === 1 ? "" : "s"} without a shot.` : "Automatic STOP is off.";
+    } else if (!stopMinutes) {
+      els.robotIdleStopStatus.textContent = "Connected · automatic STOP is off.";
+    } else if (robotIdleStopping) {
+      els.robotIdleStopStatus.textContent = "Sending STOP and confirming Nova state…";
+    } else if (robotIdleStopIssued) {
+      els.robotIdleStopStatus.textContent = "STOP confirmed · BLE remains connected.";
+    } else {
+      const remainingMs = Math.max(0, robotLastShotAt + stopMinutes * 60000 - Date.now());
+      els.robotIdleStopStatus.textContent = `Connected · STOP in about ${Math.max(1, Math.ceil(remainingMs / 60000))} minute${remainingMs > 60000 ? "s" : ""} if no ball is served.`;
+    }
+    if (!robot?.connected) {
+      els.robotIdleStatus.textContent = disconnectMinutes ? `BLE will disconnect after ${disconnectMinutes} minutes without robot use.` : "Automatic BLE disconnect is off.";
+    } else if (!disconnectMinutes) {
       els.robotIdleStatus.textContent = "Connected · automatic disconnect is off.";
     } else if (robotIdleDisconnecting) {
       els.robotIdleStatus.textContent = "Stopping safely and disconnecting…";
     } else {
-      const remainingMs = Math.max(0, robotLastUseAt + minutes * 60000 - Date.now());
+      const remainingMs = Math.max(0, robotLastUseAt + disconnectMinutes * 60000 - Date.now());
       els.robotIdleStatus.textContent = `Connected · disconnects after about ${Math.max(1, Math.ceil(remainingMs / 60000))} minute${remainingMs > 60000 ? "s" : ""} without robot use.`;
     }
   }
@@ -8225,6 +8253,51 @@
   function clearRobotIdleTimer() {
     if (robotIdleTimer) clearTimeout(robotIdleTimer);
     robotIdleTimer = null;
+  }
+
+  function clearRobotIdleStopTimer() {
+    if (robotIdleStopTimer) clearTimeout(robotIdleStopTimer);
+    robotIdleStopTimer = null;
+  }
+
+  function scheduleRobotIdleStop() {
+    clearRobotIdleStopTimer();
+    renderRobotIdleSettings();
+    const minutes = library?.robotSettings?.stopAfterNoShotMinutes || 0;
+    if (!robot?.connected || !minutes || robotIdleStopping || robotIdleStopIssued) return;
+    const remainingMs = Math.max(250, robotLastShotAt + minutes * 60000 - Date.now());
+    robotIdleStopTimer = setTimeout(() => { void stopRobotAfterShotIdle(); }, remainingMs);
+  }
+
+  function armRobotIdleStop() {
+    robotLastShotAt = Date.now();
+    robotIdleStopIssued = false;
+    scheduleRobotIdleStop();
+  }
+
+  function noteRobotShot() {
+    armRobotIdleStop();
+    noteRobotUse();
+  }
+
+  async function stopRobotAfterShotIdle() {
+    if (!robot?.connected || robotIdleStopping || robotIdleStopIssued) return;
+    robotIdleStopping = true;
+    clearRobotIdleStopTimer();
+    renderRobotIdleSettings();
+    try {
+      if (calibrationFeedRunning) await stopGuidedFeed();
+      if (playbackRunning || calibrationTestRunning || robotIsActive()) await stopPlayback();
+      await robot.stopForIdle();
+      robotIdleStopIssued = true;
+      toast("Nova STOP confirmed · Bluetooth remains connected");
+    } catch (error) {
+      robot.log(`Automatic idle STOP was not confirmed: ${error.message}`, "error");
+      toast(`Nova STOP was not confirmed: ${error.message}`);
+    } finally {
+      robotIdleStopping = false;
+      updateRobotUI();
+    }
   }
 
   function scheduleRobotIdleDisconnect() {
@@ -8263,6 +8336,10 @@
     renderRobotIdleSettings();
     try {
       await enterRobotIdleState("Connection timeout");
+      if (!robotIdleStopIssued) {
+        await robot.stopForIdle();
+        robotIdleStopIssued = true;
+      }
       await robot.disconnect({ stopFirst: true });
       toast("Nova safely stopped and disconnected after inactivity");
     } catch (error) {
@@ -8334,6 +8411,12 @@
     }
     if (!snapshot.connected) clearRobotIdleTimer();
     else if (!robotIdleTimer && !robotIdleDisconnecting) scheduleRobotIdleDisconnect();
+    if (!snapshot.connected) {
+      clearRobotIdleStopTimer();
+      robotIdleStopIssued = false;
+    } else if (!robotIdleStopTimer && !robotIdleStopping && !robotIdleStopIssued) {
+      scheduleRobotIdleStop();
+    }
     renderRobotIdleSettings();
     updatePlayButton();
     renderCalibrationTestShotPanel();
@@ -8370,11 +8453,14 @@
         clearPendingRobotAction();
         if (calibrationFeedRunning) await stopGuidedFeed();
         if (playbackRunning || calibrationTestRunning || robotIsActive()) await stopPlayback();
+        if (!robotIdleStopIssued) await robot.stopForIdle();
         await robot.disconnect({ stopFirst: false });
         clearRobotIdleTimer();
+        clearRobotIdleStopTimer();
         toast("Nova disconnected");
       } else {
         await robot.connect();
+        armRobotIdleStop();
         noteRobotUse();
         const snapshot = robot.snapshot();
         toast(snapshot.ready ? `Connected to ${snapshot.deviceName || "Nova"} · Ready` : `Connected · ${snapshot.stateName}`);
@@ -8404,8 +8490,10 @@
     if (!robot?.connected) return;
     try {
       if (playbackRunning || robotIsActive()) await stopPlayback();
+      if (!robotIdleStopIssued) await robot.stopForIdle();
       await robot.disconnect({ stopFirst: false });
       clearRobotIdleTimer();
+      clearRobotIdleStopTimer();
       toast("Nova disconnected");
     } catch (error) {
       toast(error.message);
@@ -8434,6 +8522,8 @@
 
   function handleUnexpectedRobotDisconnect(event) {
     clearRobotIdleTimer();
+    clearRobotIdleStopTimer();
+    robotIdleStopIssued = false;
     renderRobotIdleSettings();
     if (event.detail?.expected) return;
     if (playbackRunning || calibrationTestRunning) {
@@ -8482,6 +8572,7 @@
     if (robot) {
       robot.addEventListener("statechange", updateRobotUI);
       robot.addEventListener("log", event => appendRobotLog(event.detail));
+      robot.addEventListener("ball", noteRobotShot);
       robot.addEventListener("disconnect", handleUnexpectedRobotDisconnect);
     }
 
@@ -8644,8 +8735,15 @@
 
     els.calibrationBtn.addEventListener("click", () => openCalibrationWorkspace("guided"));
     els.robotSettingsShortcutBtn?.addEventListener("click", () => openCalibrationWorkspace("pose"));
+    els.robotIdleStopInput?.addEventListener("change", () => {
+      library.robotSettings = sanitizeRobotSettings({ ...library.robotSettings, stopAfterNoShotMinutes: els.robotIdleStopInput.value });
+      saveLibrary();
+      armRobotIdleStop();
+      renderRobotIdleSettings();
+      toast(library.robotSettings.stopAfterNoShotMinutes ? `Automatic STOP set to ${library.robotSettings.stopAfterNoShotMinutes} minutes` : "Automatic STOP turned off");
+    });
     els.robotIdleDisconnectInput?.addEventListener("change", () => {
-      library.robotSettings = sanitizeRobotSettings({ disconnectAfterIdleMinutes: els.robotIdleDisconnectInput.value });
+      library.robotSettings = sanitizeRobotSettings({ ...library.robotSettings, disconnectAfterIdleMinutes: els.robotIdleDisconnectInput.value });
       saveLibrary();
       noteRobotUse();
       renderRobotIdleSettings();
@@ -8685,6 +8783,7 @@
     window.addEventListener("resize", () => renderGraph());
     const emergencyPageExit = () => {
       clearRobotIdleTimer();
+      clearRobotIdleStopTimer();
       playbackRunning = false;
       calibrationTestRunning = false;
       calibrationFeedRunning = false;

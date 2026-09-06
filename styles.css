@@ -1969,9 +1969,9 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .robot-connection-settings { display:grid; gap:12px; align-content:start; }
 .robot-connection-settings h3,.robot-connection-settings p { margin:0; }
 .robot-connection-settings > div > p { margin-top:5px; color:var(--muted); font-size:.72rem; line-height:1.45; }
-.robot-rest-details { border-top:1px solid var(--border); padding-top:10px; }
-.robot-rest-details summary { color:#cbd8e8; cursor:pointer; font-size:.72rem; font-weight:750; }
-.robot-rest-details p { margin-top:8px; color:var(--muted); font-size:.68rem; line-height:1.5; }
+.robot-idle-setting { display:grid; gap:8px; border-top:1px solid var(--border); padding-top:12px; }
+.robot-idle-setting-title { display:flex; align-items:center; justify-content:space-between; gap:10px; color:#d5deea; font-size:.74rem; font-weight:750; }
+.robot-idle-setting .info-popover { right:0; width:min(260px,calc(100vw - 48px)); }
 .robot-menu-icon { font-size:1.25rem; color:#9ecaff; }
 .model-default-card { grid-column:1 / -1; }
 .model-default-card dl { margin:10px 0 0; }
