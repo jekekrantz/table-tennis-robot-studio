@@ -34,7 +34,7 @@ git commit -m "Update Table Tennis Robot Studio"
 git push
 ```
 
-Use `git add -A`, not a hand-picked list of old files. New releases can add JavaScript sources, documentation, debug packs, vendor files, or other required assets.
+Use `git add -A`, not a hand-picked list of old files. New releases can add JavaScript sources, documentation, data files, vendor files, or other required assets.
 
 ## Failure mode this prevents
 

@@ -266,7 +266,7 @@ used up to 9. Their later client intentionally divides unlimited drills into
 individual custom-drill packets **never longer than 6 balls** for better
 reliability.
 
-Normal Table Tennis Robot Studio playback now uses a verified **one-record** active slot and same-size `0x84` replacements. The planner still limits look-ahead/debug packets to nine records because earlier community work found 10+ record START packets unreliable. Guided Debug retains explicit 16- and 20-record experiments for firmware comparison; those experiments do not change normal playback.
+Normal Table Tennis Robot Studio playback now uses a verified **one-record** active slot and same-size `0x84` replacements, so normal operation stays below the unreliable multi-record batch sizes described above.
 
 ## Recovered native parameter conversion
 
@@ -348,18 +348,3 @@ This makes the calibration shot useful as an end-to-end test of:
 - one-ball Start;
 - run-completion detection;
 - return-to-Ready confirmation.
-
-## In-app timed protocol debugger
-
-The Robot screen includes a protocol debugger so protocol experiments can be changed as data files rather than app deployments. The debugger deliberately sits above `NovaBleController.sendRaw()` / `requestRaw()` and does not reinterpret bytes.
-
-Script grammar:
-
-- `TX <hex>`: enqueue a raw GATT write and continue after the write completes.
-- `REQ <opcode> <hex> [TIMEOUT <duration>]`: write raw bytes and wait for a successful response carrying the expected opcode.
-- `WAIT 250ms` / `WAIT 1.5s`: explicit spacing between actions.
-- `MARK text`: log-only marker.
-- `STATUS`, `HEARTBEAT`, `PAUSE`, `CONTINUE`, `STOP`: macros for frames already represented by `PongbotProtocol.COMMANDS` / the known response opcode.
-- `#` and `//` start comments; blank lines are ignored.
-
-The existing controller heartbeat continues during debug scripts unless **Pause app heartbeat while script runs** is checked. This matters when isolating whether `0x83` is required or when comparing exact traces. The debugger records script timing separately while the normal robot protocol log continues to capture all TX/RX frames, including unsolicited notifications.

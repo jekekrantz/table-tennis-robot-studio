@@ -21,9 +21,7 @@ SOURCES = [
     "pose-calibration.js",
     "shot-variation.js",
     "table-bounce.js",
-    "protocol-debug.js",
     "studio-features-core.js",
-    "debug-advisor.js",
     "app.js",
     "studio-features.js",
 ]

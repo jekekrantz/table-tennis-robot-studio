@@ -5,10 +5,6 @@
   const MAX_FILE_BYTES=512*1024;
   const MAX_NODES=240;
   const MAX_EDGES=600;
-  const MAX_DEBUG_ACTIONS=120;
-  const MAX_DEBUG_TEST_MS=5*60*1000;
-  const MAX_RAW_BYTES=2048;
-  function finite(v,f=0){const n=Number(v);return Number.isFinite(n)?n:f;}
   function clone(v){return JSON.parse(JSON.stringify(v));}
   function makePortableDrill(drill,meta={}){
     if(!drill||typeof drill!=='object')throw new Error('A drill is required.');
@@ -85,26 +81,5 @@
   function buildValidatedExternalAiRequest(input){
     return buildExternalAiRequest(input).replace('"elevationDeg":-4,"aimDeg":0','"elevationDeg":-16,"aimDeg":0');
   }
-  function normalizeHexBytes(value){
-    if(value instanceof Uint8Array)return value;
-    if(Array.isArray(value)){if(value.length>MAX_RAW_BYTES)throw new Error('Raw command is too long.');const out=value.map(Number);if(out.some(n=>!Number.isInteger(n)||n<0||n>255))throw new Error('Raw command bytes must be 0..255.');return Uint8Array.from(out);}
-    const clean=String(value||'').replace(/0x/gi,' ').replace(/[^0-9a-fA-F]/g,'');if(clean.length%2)throw new Error('Raw command hex must contain complete bytes.');if(clean.length/2>MAX_RAW_BYTES)throw new Error('Raw command is too long.');const out=[];for(let i=0;i<clean.length;i+=2)out.push(parseInt(clean.slice(i,i+2),16));return Uint8Array.from(out);
-  }
-  function validateDebugPack(pack){
-    const errors=[];if(!pack||typeof pack!=='object')errors.push('Test pack must be an object.');if(!Array.isArray(pack?.tests)||!pack.tests.length)errors.push('Test pack needs at least one test.');if((pack?.tests||[]).length>80)errors.push('Test pack is too large.');const ids=new Set();
-    for(const test of pack?.tests||[]){const id=String(test?.id||'');if(!id)errors.push('Every test needs an id.');if(ids.has(id))errors.push(`Duplicate test id ${id}.`);ids.add(id);if(!Array.isArray(test.actions)||test.actions.length>MAX_DEBUG_ACTIONS)errors.push(`${id||'Test'} has too many actions.`);let duration=0;for(const action of test.actions||[]){if(!['status','heartbeat','wait','raw','start_sequence','active_append','stop'].includes(action?.type))errors.push(`${id}: unsupported action ${String(action?.type)}.`);if(action?.type==='wait')duration+=Math.max(0,finite(action.ms,0));if(action?.type==='raw'){try{normalizeHexBytes(action.bytes);}catch(e){errors.push(`${id}: ${e.message}`);}}if(action?.type==='start_sequence'){const count=Math.max(1,Math.trunc(finite(action.count,1)));if(count>40)errors.push(`${id}: sequence count above 40.`);duration+=count*Math.max(667,finite(action.delayMs,1000));}}
-      if(duration>MAX_DEBUG_TEST_MS)errors.push(`${id}: estimated duration exceeds 5 minutes.`);
-    }
-    for(const test of pack?.tests||[]){for(const next of Object.values(test?.next||{})){if(next&&next!=='conclude'&&!ids.has(String(next)))errors.push(`${test.id}: branch target ${next} is missing.`);}}
-    return {valid:errors.length===0,errors:[...new Set(errors)]};
-  }
-  function chooseDebugNext(test,answer){if(!test)return null;const key=String(answer||'').toLowerCase();return test.next?.[key]??test.next?.other??test.next?.default??null;}
-  function compactTelemetry(events,{limit=120}={}){
-    const list=Array.isArray(events)?events:[];if(list.length<=limit)return clone(list);const keep=[];const head=Math.min(20,list.length);keep.push(...list.slice(0,head));const anomaly=list.filter(e=>e.kind==='error'||e.direction==='error'||e.direction==='warn'||e.kind==='disconnect'||e.kind==='observation');for(const e of anomaly)if(!keep.includes(e))keep.push(e);keep.push(...list.slice(-Math.max(30,limit-keep.length)));return clone(keep.slice(0,limit));
-  }
-  function validateAdvisorResponse(value){
-    const allowed=['explain','propose_test','ask_user','conclude','request_more_telemetry'];if(!value||typeof value!=='object'||!allowed.includes(value.type))return {valid:false,error:'Unsupported advisor action.'};if(value.type==='propose_test'){const check=validateDebugPack({tests:[value.test]});if(!check.valid)return {valid:false,error:check.errors[0]};}return {valid:true,value:clone(value)};
-  }
-  function debugHandoff(session){return {format:'table-tennis-robot-studio/debug-handoff',version:1,objective:session?.objective||'',currentTestId:session?.currentTestId||null,observations:clone(session?.observations||[]),tests:clone(session?.testsRun||[]),telemetry:compactTelemetry(session?.telemetry||[],{limit:100}),conclusions:clone(session?.conclusions||[])};}
-  return Object.freeze({DRILL_FORMAT,DRILL_VERSION,MAX_SHARE_CHARS,MAX_FILE_BYTES,makePortableDrill,validatePortableDrill,serializePortableDrill,deserializePortableDrill,makeShareUrl,parseShareHash,safeFilename,parseExternalAiResult,buildExternalAiRequest:buildValidatedExternalAiRequest,validateDebugPack,chooseDebugNext,compactTelemetry,validateAdvisorResponse,normalizeHexBytes,debugHandoff});
+  return Object.freeze({DRILL_FORMAT,DRILL_VERSION,MAX_SHARE_CHARS,MAX_FILE_BYTES,makePortableDrill,validatePortableDrill,serializePortableDrill,deserializePortableDrill,makeShareUrl,parseShareHash,safeFilename,parseExternalAiResult,buildExternalAiRequest:buildValidatedExternalAiRequest});
 });

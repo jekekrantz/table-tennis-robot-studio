@@ -11,7 +11,7 @@ core = (root / "studio-features-core.js").read_text(encoding="utf-8")
 ble = (root / "pongbot-ble.js").read_text(encoding="utf-8")
 ids = set(re.findall(r'\bid="([^"]+)"', html))
 
-# Core guided calibration / navigation / debug controls.
+# Core guided calibration and navigation controls.
 for expected in [
     "calibrationGuidedPanel", "guidedPlacementTable", "guidedPlacementGround",
     "guidedDistanceInput", "guidedNetHeightInput", "guidedSaveNextBtn",
@@ -28,9 +28,7 @@ for expected in [
     "libraryScreen", "runScreen", "editorScreen", "robotScreen",
     "addNodeDialog", "drillDetailsDialog", "addNodeMenuBtn", "runEditDrillBtn",
     "addServeBtn",
-    "editorRunBtn", "robotDiagnosticsBtn", "protocolDebugBtn", "protocolDebugDialog",
-    "protocolDebugEditor", "protocolDebugRunBtn", "protocolDebugStopScriptBtn",
-    "protocolDebugStopNovaBtn", "protocolDebugFileInput", "robotDialogContext",
+    "editorRunBtn", "robotDiagnosticsBtn", "robotDialogContext",
     "robotDialogConnectBtn",
     "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
 ]:
@@ -44,8 +42,8 @@ if not re.search(r'<script src="runtime\.bundle\.js\?v=[A-Za-z0-9._-]+" onerror=
     raise SystemExit("index.html must load the versioned runtime.bundle.js")
 for obsolete_script in (
     "pongbot-protocol.js", "pongbot-ble.js", "robot-geometry.js", "launch-model.js",
-    "guided-calibration.js", "drill-adjustments.js", "table-bounce.js", "protocol-debug.js",
-    "studio-features-core.js", "debug-advisor.js", "app.js", "vendor/qrcode.min.js",
+    "guided-calibration.js", "drill-adjustments.js", "table-bounce.js",
+    "studio-features-core.js", "app.js", "vendor/qrcode.min.js",
     "studio-features.js",
 ):
     if f'<script src="{obsolete_script}"></script>' in html:
@@ -232,16 +230,14 @@ for token in ('emergencyShutdown()', 'best-effort STOP queued'):
     if token not in ble:
         raise SystemExit(f"Missing BLE page-exit safety behavior: {token}")
 
-# Feature modules: sharing + AI + guided debugger.
+# Feature modules: sharing + AI.
 for token in (
     'table-tennis-robot-studio/drill', 'makeShareUrl', 'parseShareHash',
-    'validateDebugPack', 'compactTelemetry', 'validateAdvisorResponse',
 ):
     if token not in core:
         raise SystemExit(f"Missing feature-core primitive: {token}")
 for token in (
-    'Share drill', 'AI assist', 'Guided debug', 'Copy AI request', 'Show QR code',
-    'Import test pack JSON', 'Copy ChatGPT handoff', 'SpeechRecognition',
+    'Share drill', 'AI assist', 'Copy AI request', 'Show QR code', 'SpeechRecognition',
     'promptRequestsFreshDrill', "proposalIntent==='create'", 'Create drill',
 ):
     if token not in features:
@@ -302,7 +298,7 @@ for token in ('labels: ["Variable topspin"], varied: true',
 
 # Responsive structure.
 for token in (".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell",
-              ".drill-library-card", ".flow-terminal", ".add-node-choice-grid", ".feature-dialog", ".debug-frame"):
+              ".drill-library-card", ".flow-terminal", ".add-node-choice-grid", ".feature-dialog"):
     if token not in css:
         raise SystemExit(f"Missing responsive UI structure: {token}")
 if "mobile-primary-nav" in html or "mobile-primary-nav" in css:

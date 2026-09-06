@@ -13,14 +13,3 @@ The runtime treats a user drill as one logical session rather than independently
 - The verified combo-count field is bounded to 255 per continuous finite segment. Only longer sessions or unrepresentable delays require another START.
 
 Direct Nova tests verified six per-ball replacements, a same-size four-record endless replacement, and a same-size four-record/two-combo replacement without leaving Running.
-
-## Guided investigation
-
-Robot -> **Guided debug** contains deliberately experimental tests that go beyond normal runtime:
-
-- 16 records in one START;
-- 20 records with heartbeat traffic;
-- a second bounded START sent while the first sequence is active;
-- status/heartbeat traffic during playback.
-
-These experiments record exact TX/RX timing and then ask only whether a physical pause was observed. They remain useful for firmware comparisons, but normal playback now uses the directly verified fixed-size update path.

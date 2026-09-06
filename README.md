@@ -296,11 +296,8 @@ launch-model.js            One global affine raw-input → launch-speed model
 guided-calibration.js      Weighted robust calibration solver
 pongbot-protocol.js        Protocol encoding/decoding and parameter conversion
 pongbot-ble.js             Web Bluetooth transport, telemetry and Nova state machine
-protocol-debug.js          Raw timed protocol-script parser/executor
-studio-features-core.js    Portable drills, AI/debug validation and serialization
-studio-features.js         Sharing, AI assistant and Guided Debug UI
-debug-advisor.js           Deterministic/optional backend debug-advisor abstraction
-debug-packs/               Importable bounded diagnostic experiment packs
+studio-features-core.js    Portable drills and AI validation/serialization
+studio-features.js         Sharing and AI assistant UI
 docs/                      Feature and interchange-format documentation
 vendor/                    Small vendored browser dependencies with licenses
 tools/                     Optional local development companions
@@ -338,35 +335,6 @@ Normal playback keeps one record slot running. The first shot uses `START`; ever
 Drills can be shared without accounts or a backend. **Share** can create a URL-fragment link, use the native device share sheet when available, render a locally generated QR code, or save a human-readable `.ttdrill` file. Opening a shared link or importing a file always shows a preview before creating an independent copy in **My drills**.
 
 The editor also provides **AI assist**. The default local assistant handles common table-tennis creation/edit requests offline. Advanced options support session-memory-only BYOK provider calls (the user supplies both provider model ID and key) and a first-class external-AI handoff: copy/download one self-contained request, use any preferred assistant, then paste/import the returned versioned drill. Every proposal is validated locally before Apply and never bypasses the normal drill compiler or robot-control path. Browser speech recognition is used for prompt transcription when available and only after the user taps the microphone button.
-
-## Guided protocol debugger
-
-Robot -> **Guided debug** runs one bounded diagnostic experiment at a time and records outgoing/incoming BLE traffic, timings, heartbeat events, connection changes and errors automatically. Human input is limited to physical observations such as whether the robot paused. The built-in adaptive tree starts with continuous-play questions: long START packets, heartbeat traffic, active-buffer append attempts and status traffic during playback. Sessions can be exported as JSON or copied as a compact ChatGPT handoff. Imported test packs are schema-checked and bounded before they can run.
-
-## Protocol debugger
-
-Robot → **Protocol debugger** opens a developer tool for running timed raw BLE scripts without rebuilding the app. A `.nova` or `.txt` file can be uploaded, edited in the browser, validated, saved locally, and rerun as often as needed.
-
-Supported commands:
-
-```text
-# or // comment
-MARK free-form label
-TX <hex bytes>
-REQ <expected-opcode-hex> <hex bytes> [TIMEOUT <duration>]
-WAIT <duration>
-STATUS
-HEARTBEAT
-PAUSE
-CONTINUE
-STOP
-```
-
-Durations accept `ms` or `s`; bare numbers are milliseconds. Hex may be compact (`830600`) or spaced (`83 06 00`) with optional `0x` prefixes. `TX` is fire-and-forget, while `REQ` waits for a response with the specified opcode. Uploading or editing never transmits anything; **Run script** is explicit. The debugger can optionally pause the app's automatic 10-second heartbeat for deterministic protocol experiments and restores it afterward.
-
-`debug-scripts/status-heartbeat.nova` is a safe starter example. The debugger has a separate stop-script control and a **Stop Nova** control, and can download a combined execution + BLE protocol log for comparison between experiments.
-
-For fast iteration, select one or more lines in the editor and choose **Run line / selection**; with no selection, it runs the line containing the cursor. `Ctrl+Enter` / `Cmd+Enter` does the same thing. This is useful for tweaking one `0x84` candidate frame repeatedly while leaving the longer setup script untouched.
 
 ### Calibration fit diagnostics
 
