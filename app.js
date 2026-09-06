@@ -1859,20 +1859,42 @@
   }
 
   function getAiContext() {
-    const drill = activeDrill();
+    const calibrationOpen = Boolean(els.calibrationDialog?.open);
+    const screen = calibrationOpen ? "Calibration" : appViewLabel(appView);
+    const drillVisible = !calibrationOpen && (appView === "run" || appView === "editor");
+    const drill = drillVisible ? activeDrill() : null;
     const context = {
-      screen: els.calibrationDialog?.open ? "Calibration" : appViewLabel(appView),
+      screen,
       activeDrill: drill ? (isActiveBuiltIn() ? builtInDisplayName(drill.name) : drill.name) : null,
       drillSource: drill ? (isActiveBuiltIn() ? "Built-in" : "My drills") : null,
       selection: null,
+      localContext: [],
       robotStatus: robot?.connected ? robotPhaseLabel(robot.snapshot()) : "Disconnected",
       activity: playbackRunning ? "Running drill" : calibrationFeedRunning ? "Calibration feed" : calibrationTestRunning ? "Calibration test" : "Idle",
     };
-    if (appView === "editor" && selection?.kind === "node") {
+    if (!calibrationOpen && appView === "library") {
+      const path = folderPath(libraryView.root, libraryView.folderId).map(item => item.name).join(" / ");
+      context.localContext.push(`Browsing: ${libraryView.root === "builtin" ? "Built-in drills" : "My drills"}`);
+      context.localContext.push(`Folder: ${path}`);
+      context.localContext.push(libraryView.query ? `Search filter: ${libraryView.query}` : "Search filter: none");
+    } else if (!calibrationOpen && appView === "robot") {
+      context.localContext.push(`Idle STOP: ${robotSettings.stopAfterNoShotMinutes ? `${robotSettings.stopAfterNoShotMinutes} minutes after the last shot` : "Never"}`);
+      context.localContext.push(`BLE disconnect: ${robotSettings.disconnectAfterMinutes ? `${robotSettings.disconnectAfterMinutes} minutes unused` : "Never"}`);
+    } else if (!calibrationOpen && appView === "run" && drill) {
+      context.localContext.push(`Repetitions: ${drill.settings.repetitions > 0 ? drill.settings.repetitions : "Continuous"}`);
+      context.localContext.push(`Delay between sets: ${drill.settings.delayBetweenSets} seconds`);
+    } else if (!calibrationOpen && appView === "editor") {
+      context.localContext.push(`Editor controls: ${shotEditorMode === "manual" ? "Manual launch parameters" : "Intuitive placement"}`);
+    } else if (calibrationOpen) {
+      const section = els.calibrationPoseTab?.classList.contains("active") ? "Robot pose" : els.calibrationTableTab?.classList.contains("active") ? "Table and trajectory" : "Guided launch calibration";
+      context.localContext.push(`Open section: ${section}`);
+    }
+    if (!calibrationOpen && appView === "editor" && selection?.kind === "node") {
       const node = getNode(drill, selection.id);
       if (node) context.selection = `${node.type}: ${node.label}`;
-    } else if (appView === "editor" && selection?.kind === "edge") {
+    } else if (!calibrationOpen && appView === "editor" && selection?.kind === "edge") {
       context.selection = "shot transition";
+      context.localContext.push("Editing the delay between two drill nodes");
     }
     return context;
   }

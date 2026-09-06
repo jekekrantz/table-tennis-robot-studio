@@ -66,6 +66,9 @@ for token in ("postBouncePoints", "secondBounce", "postBounceClipped", "thirdArc
               'SECOND_BOUNCE_COLOR = "#ff79c6"', 'THIRD_BOUNCE_COLOR = "#ffd166"', "trajectory-bounce-legend"):
     if token not in app:
         raise SystemExit(f"Missing post-bounce trajectory integration: {token}")
+for token in ('drillVisible = !calibrationOpen', 'context.localContext.push(`Browsing:', 'contextualDrill(context)', 'APP_CAPABILITIES', 'Ask about drills or the library'):
+    if token not in app and token not in features and token not in core:
+        raise SystemExit(f"Missing screen-aware AI context behavior: {token}")
 if 'Math.abs(table.netHeight - regulationTable().netHeight) > 1e-6' not in app:
     raise SystemExit("default regulation net height label must stay hidden in trajectory views")
 

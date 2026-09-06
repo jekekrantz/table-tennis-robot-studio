@@ -88,8 +88,9 @@ Captured 2026-09-04. These are product observations and future work, not complet
 ### Global, context-aware AI assist — completed 2026-09-06
 
 - Added AI assist to the top app bar so it is reachable from every screen.
-- Added local help for common navigation, calibration, connection, and import/export questions while preserving validated drill creation and editing.
-- Shows the allow-listed context before use: screen, active drill name/source, visible selection, general Nova state, and current activity. Drill edits may also include the active drill definition.
+- Added local help for library browsing, running and editing drills, calibration, connection/idle behavior, and import/export/share questions while preserving validated drill creation and editing.
+- Context follows the visible surface: Library supplies collection/folder/search state without leaking the last active drill; Run and Editor supply the open drill; Editor adds the visible selection/mode; Robot supplies idle settings; Calibration supplies its open section.
+- Every provider request also includes a stable app-capabilities guide. The dialog discloses both this general knowledge and the allow-listed local context before use. Only Run/Editor drill requests may include the open drill definition.
 - Excludes Bluetooth logs, device identifiers, API keys, calibration values, unrelated stored drills, and arbitrary application state.
 
 ### Add safe idle and connection lifecycle — software completed 2026-09-06
