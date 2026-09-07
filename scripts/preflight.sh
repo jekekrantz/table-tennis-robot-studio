@@ -38,9 +38,10 @@ node shot-variation-selftest.js
 node table-bounce-selftest.js
 node built-in-library-selftest.js
 
-echo "[8/13] Sharing / AI / continuous-runtime logic"
+echo "[8/13] Sharing / AI / continuous-runtime / UX responsiveness"
 node studio-features-selftest.js
 node continuous-runtime-selftest.js
+node ux-responsiveness-selftest.js
 
 echo "[9/13] Python/shell/UI structure"
 python3 -m py_compile scripts/serve.py scripts/ui_structure_selftest.py scripts/default_library_trajectory_selftest.py scripts/nova_firmware_workbench_selftest.py scripts/build_runtime_bundle.py scripts/release_manifest.py tools/nova_firmware_workbench.py
@@ -58,7 +59,8 @@ python3 - <<'PY'
 from pathlib import Path
 for required in [
     'docs/drill-file-format.md','docs/ai-drill-assistant.md',
-    'docs/continuous-playback.md','docs/custom-firmware-readiness.md','docs/deployment.md','docs/shot-variation.md','docs/robot-pose-calibration.md','vendor/QRCode-LICENSE.txt'
+    'docs/continuous-playback.md','docs/custom-firmware-readiness.md','docs/deployment.md','docs/shot-variation.md','docs/robot-pose-calibration.md',
+    'docs/ux-responsiveness.md','vendor/QRCode-LICENSE.txt'
 ]:
     if not Path(required).is_file(): raise SystemExit(f'Missing {required}')
 print('Example/documentation check: PASS')

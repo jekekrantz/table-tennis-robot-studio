@@ -127,7 +127,7 @@ for token in ('intuitiveRangeHtml("speed", selections.speed, domains.speed, "man
               'intuitiveRangeHtml("elevation", selections.elevation, domains.elevation, "manual")',
               'intuitiveRangeHtml("aim", selections.aim, domains.aim, "manual")',
               'applyManualShot(node)', 'bindManualShotInspector(node)',
-              'intuitiveLandingSvg(prediction, null, serve, true)',
+              'intuitiveLandingSvg(node, prediction, null, serve, variation, true)',
               'trajectoryPlanWarning(node.label, prediction)'):
     if token not in app:
         raise SystemExit(f"Missing shot-editor behavior: {token}")
@@ -141,15 +141,36 @@ for token in ('data-shot-editor-mode="intuitive"', 'data-shot-editor-mode="manua
               'landing-robot-strip',
               'landing-target-hatch', 'landing-table-edge', 'manual-shot-editor',
               'intervalSideTrajectorySvg(node, variation)',
-              'Feasible side view', 'interval-side-band outer',
+              'data-interactive-landing="true"', 'bindInteractiveLandingTable(node)',
+              'data-landing-drag="nw"', 'data-landing-drag="ne"',
+              'data-landing-drag="sw"', 'data-landing-drag="se"',
+              'Math.min(next.depth, fixedDepth)', 'Math.max(next.lateral, fixedLateral)',
+              'controls = { ...(intuitivePlacementFromTable() || {}), ...controls }',
+              'landing-bounce-distribution', 'interval-bounce-band ${kind} arc-${arc}',
+              'surfaceY+offset', 'bounceBaseline = 21',
+              'table.length + .2', 'interval-metric-summary',
+              '<dt>Net clearance</dt>', '<dt>Post bounce height</dt>',
+              '<dt>Second bounce</dt>',
+              'node.type === "serve" ? prediction.thirdArcPoints',
+              'data-camera-lock="top"', 'data-camera-lock="side"',
+              'bindTrajectoryViewCameras(node)', 'pointers.size >= 2',
+              'state.scale * Math.exp(-event.deltaY * .0015)',
+              'prediction.thirdBounce : prediction.secondBounce',
+              'interval-side-band outer',
               'novaFeasiblePrediction(params', 'novaFeasibleBounds(library.calibration)',
               'LaunchModel.maxSpinRpsAtExitSpeed'):
     if token not in app:
         raise SystemExit(f"Missing intuitive shot-editor behavior: {token}")
+for obsolete in ('<strong>Feasible side view</strong>', '2nd receiver bounce:'):
+    if obsolete in app:
+        raise SystemExit(f"Obsolete side-view caption remains: {obsolete}")
 if 'if (isBallNodeType(type)) {' not in app or 'addNode(type);' not in app:
     raise SystemExit("Adding a ball must go directly to the intuitive shot editor")
 for token in ('.shot-editor-tabs', '.intuitive-landing-table', '.interval-side-figure',
               '.interval-side-representative', '.interval-side-band.outer',
+              '.landing-range-handle', '.landing-bounce-distribution',
+              '.interval-bounce-band.outer', '.interval-metric-summary',
+              '.view-lock-button', '.camera-unlocked', '.interval-metric-summary > div',
               '.dual-range', '.interval-value'):
     if token not in css:
         raise SystemExit(f"Missing intuitive shot-editor styling: {token}")
@@ -158,6 +179,8 @@ for token in ('-webkit-appearance:none', 'grid-template-columns:52px minmax(0,1f
         raise SystemExit(f"Missing mobile dual-range containment: {token}")
 if 'point[other] >= selections[other][0]' in app:
     raise SystemExit("Shot interval domains must not be conditioned on the other selected intervals")
+if 'landing-trajectory-sample' in app or 'landing-trajectory-representative' in app:
+    raise SystemExit("The compressed top view must not draw misleading trajectory paths")
 if 'difficult to sample' in app or 'Narrow one or more intervals' in app:
     raise SystemExit("Broad allowed intervals must be internally compressed rather than rejected")
 if 'id="inspectorCloseBtn"' in html or '<strong>Details</strong>' in html:

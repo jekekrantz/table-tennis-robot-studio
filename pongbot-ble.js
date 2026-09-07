@@ -228,19 +228,33 @@
       throw new Error(`Timed out waiting for Ready; last state was ${last ? P.stateName(last.state) : "unknown"}`);
     }
 
-    async startBatch(packet, { timeoutMs = 30000, description = "batch", expectedDurationMs = 0 } = {}) {
-      const doneBaseline = await this.beginBatch(packet, { description });
+    async startBatch(packet, { timeoutMs = 30000, description = "batch", expectedDurationMs = 0, shouldStart = null } = {}) {
+      const doneBaseline = await this.beginBatch(packet, { description, shouldStart });
+      if (doneBaseline == null) return null;
       return this.waitForBatchComplete(doneBaseline, timeoutMs, expectedDurationMs);
     }
 
-    async beginBatch(packet, { description = "batch" } = {}) {
+    async beginBatch(packet, { description = "batch", shouldStart = null } = {}) {
+      const startIsCurrent = () => typeof shouldStart !== "function" || shouldStart();
       await this.ensureReadyForStart();
       await this.sendHeartbeat().catch(() => null);
+      if (!startIsCurrent()) {
+        this.log(`Canceled ${description} before Start was sent`, "warn");
+        return null;
+      }
       const doneBaseline = this.doneCounter;
       this.lastStartAt = performance.now();
       this.lastBallSignature = "";
       this.log(`Starting ${description}`, "tx", packet);
       await this.requestCommand(packet, 0x81, 6000, "start", { logTx: false });
+      if (!startIsCurrent()) {
+        this.log(`Canceled ${description} while Start acknowledgement was pending; reconciling with STOP`, "warn");
+        // The last status notification can still say Ready for a short period
+        // after Start was accepted. Force STOP instead of allowing the usual
+        // Ready fast-path to mistake that stale state for a canceled command.
+        await this.stopAndWaitFree(25000, { force: true });
+        return null;
+      }
       this.setPhase("running");
       return doneBaseline;
     }
@@ -312,17 +326,19 @@
       });
     }
 
-    async stopAndWaitFree(timeoutMs = 25000) {
+    async stopAndWaitFree(timeoutMs = 25000, { force = false } = {}) {
       if (!this.connected || !this.authenticated) return null;
       let status;
-      try {
-        status = await this.queryStatus();
-      } catch (error) {
-        this.log(`Could not read status before Stop: ${error.message}`, "warn");
-      }
-      if (status?.state === 3) {
-        this.setPhase("ready");
-        return status;
+      if (!force) {
+        try {
+          status = await this.queryStatus();
+        } catch (error) {
+          this.log(`Could not read status before Stop: ${error.message}`, "warn");
+        }
+        if (status?.state === 3) {
+          this.setPhase("ready");
+          return status;
+        }
       }
 
       this.setPhase("stopping");

@@ -56,6 +56,15 @@ predictions are warnings: after a lightweight acknowledgement, a representable
 command may still be played. Invalid Nova encodings and unverified physical head
 orientations remain blocked.
 
+## User-experience performance
+
+Responsiveness is a tested product requirement, not an optional optimization.
+High-frequency controls such as sliders and Play/Stop have stricter tail-latency
+and state-safety budgets than occasional editor commits or rare calibration
+work. See [`docs/ux-responsiveness.md`](docs/ux-responsiveness.md) for the
+interaction tiers, justified thresholds, mitigation requirements, and the
+tests enforced by preflight.
+
 ## Run locally
 
 From the repository root:
