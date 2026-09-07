@@ -12,6 +12,8 @@ const context = {
   structuredClone,
   makeId: prefix => `${prefix}_${++nextId}`,
   library: { drills: [] },
+  clamp: (value, min, max, fallback = min) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : fallback)),
+  AdaptiveTiming: require('./adaptive-timing.js'),
 };
 vm.createContext(context);
 vm.runInContext(`${source.slice(start, end)}\nglobalThis.auditCatalog = {
@@ -32,6 +34,8 @@ let reachableShots = 0;
 let reachableServes = 0;
 const usedServeSignatures = new Set();
 for (const drill of sample.drills) {
+  assert.strictEqual(drill.settings.delayBetweenSets, 0, `${drill.name}: built-in set delay must be zero`);
+  assert.strictEqual(drill.settings.firstShotTiming.mode, 'adaptive', `${drill.name}: first shot must use adaptive timing`);
   assert(drill.startNodeId, `${drill.name}: missing start node`);
   const nodes = new Map(drill.nodes.map(node => [node.id, node]));
   assert.strictEqual(nodes.size, drill.nodes.length, `${drill.name}: duplicate node id`);
@@ -39,6 +43,7 @@ for (const drill of sample.drills) {
   for (const edge of drill.edges) {
     assert(nodes.has(edge.source), `${drill.name}: edge has missing source`);
     assert(nodes.has(edge.target), `${drill.name}: edge has missing target`);
+    assert.strictEqual(edge.timingMode, 'adaptive', `${drill.name}: edge must use adaptive timing`);
   }
 
   const reached = new Set();

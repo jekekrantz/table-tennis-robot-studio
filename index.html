@@ -82,7 +82,8 @@
             <section class="run-controls" aria-label="Drill playback controls">
               <button id="playBtn" class="play-button run-play-button" type="button"><span id="playIcon" aria-hidden="true">▶</span><span id="playText">Play</span></button>
               <label class="header-field"><span>Repetitions</span><span class="set-stepper"><button id="repetitionsDownBtn" type="button" aria-label="Decrease repetitions">−</button><input id="repetitionsInput" type="text" inputmode="numeric" value="3" aria-label="Number of repetitions; infinity means repeat indefinitely"><button id="repetitionsUpBtn" type="button" aria-label="Increase repetitions">＋</button></span></label>
-              <label class="header-field delay-field"><span>Delay between repetitions</span><span class="input-with-unit"><input id="setDelayInput" type="number" min="0" max="3600" step="0.1" value="1"><small>s</small></span></label>
+              <label class="header-field"><span>First ball / repetitions</span><select id="setTimingModeInput"><option value="adaptive">Adaptive Auto</option><option value="manual">Manual</option></select></label>
+              <label id="setDelayField" class="header-field delay-field" hidden><span>Manual repetition delay</span><span class="input-with-unit"><input id="setDelayInput" type="number" min="0" max="3600" step="0.1" value="1"><small>s</small></span></label>
               <div class="run-progress-block"><span id="runStatus" class="run-status" aria-live="polite">Ready</span><div class="progress-track" aria-hidden="true"><div id="runProgressBar" class="progress-bar"></div></div></div>
             </section>
           </section>
@@ -169,6 +170,29 @@
               <select id="robotIdleDisconnectInput" aria-label="Disconnect BLE when unused"><option value="0">Never</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
               <p id="robotIdleStatus" class="helper" aria-live="polite"></p>
             </div>
+          </section>
+          <section class="player-model-card panel-card">
+            <div class="section-title-row"><div><h3>Adaptive timing player</h3><p class="helper">The selected player model applies to every Adaptive Auto connection.</p></div><button id="newPlayerModelBtn" class="button compact ghost" type="button">New</button></div>
+            <label class="field"><span>Player model</span><select id="playerModelSelect"></select></label>
+            <label class="field"><span>Name</span><input id="playerModelName" type="text" maxlength="60"></label>
+            <label class="field"><span>Timing speed</span><span class="input-with-unit"><input id="playerTimingSpeed" type="range" min="50" max="200" step="5" value="100"><output id="playerTimingSpeedOutput">100%</output></span><small>The single everyday control. Higher values make all Adaptive Auto timing faster.</small></label>
+            <div class="library-actions-row"><button id="duplicatePlayerModelBtn" class="button compact ghost" type="button">Duplicate</button><button id="deletePlayerModelBtn" class="button compact danger" type="button">Delete</button></div>
+            <details class="player-model-advanced">
+              <summary>Advanced player model settings</summary>
+              <div class="field-grid two player-model-fields">
+                <label class="field"><span>Base stroke recovery</span><span class="input-with-unit"><input data-player-model-field="baseStrokeRecoverySeconds" type="number" min=".1" max="1.5" step=".01"><small>s</small></span></label>
+                <label class="field"><span>Minimum contact gap</span><span class="input-with-unit"><input data-player-model-field="minimumContactGapSeconds" type="number" min=".2" max="3" step=".01"><small>s</small></span></label>
+                <label class="field"><span>Lateral acceleration</span><span class="input-with-unit"><input data-player-model-field="lateralAccelerationMps2" type="number" min="1" max="20" step=".1"><small>m/s²</small></span></label>
+                <label class="field"><span>Lateral maximum speed</span><span class="input-with-unit"><input data-player-model-field="lateralMaxSpeedMps" type="number" min=".5" max="6" step=".1"><small>m/s</small></span></label>
+                <label class="field"><span>Depth acceleration</span><span class="input-with-unit"><input data-player-model-field="depthAccelerationMps2" type="number" min="1" max="20" step=".1"><small>m/s²</small></span></label>
+                <label class="field"><span>Depth maximum speed</span><span class="input-with-unit"><input data-player-model-field="depthMaxSpeedMps" type="number" min=".5" max="6" step=".1"><small>m/s</small></span></label>
+                <label class="field"><span>Return turnaround</span><span class="input-with-unit"><input data-player-model-field="returnTurnaroundSeconds" type="number" min="0" max="1" step=".01"><small>s</small></span></label>
+                <label class="field"><span>Return speed ratio</span><input data-player-model-field="returnSpeedRatio" type="number" min=".2" max="1.5" step=".05"></label>
+                <label class="field"><span>Minimum return speed</span><span class="input-with-unit"><input data-player-model-field="minimumReturnSpeedMps" type="number" min="1" max="15" step=".1"><small>m/s</small></span></label>
+                <label class="field"><span>Maximum return speed</span><span class="input-with-unit"><input data-player-model-field="maximumReturnSpeedMps" type="number" min="2" max="25" step=".1"><small>m/s</small></span></label>
+                <label class="field"><span>Prepare before next serve</span><span class="input-with-unit"><input data-player-model-field="servePreparationSeconds" type="number" min="0" max="5" step=".05"><small>s</small></span></label>
+              </div>
+            </details>
           </section>
           <section class="model-default-card panel-card"><h3>Current defaults</h3><dl><div><dt>Base → yaw pivot</dt><dd>24.2 cm</dd></div><div><dt>Yaw → pitch → wheels</dt><dd>7.5 + 7.5 cm</dd></div><div><dt>Yaw pivot height</dt><dd>24.0 cm</dd></div><div><dt>Exit speed model</dt><dd>One affine line</dd></div></dl></section>
         </div>
@@ -488,7 +512,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-07.10" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-09-07.11" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

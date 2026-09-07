@@ -10,7 +10,7 @@ for file in \
   app.js pongbot-protocol.js pongbot-ble.js selftest.js emergency-shutdown-selftest.js \
   robot-geometry.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
-  drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js \
+  drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js adaptive-timing.js adaptive-timing-selftest.js \
   built-in-library-selftest.js \
   studio-features-core.js studio-features-selftest.js studio-features.js \
   continuous-runtime-selftest.js vendor/qrcode.min.js; do
@@ -36,6 +36,7 @@ node drill-adjustments-selftest.js
 node pose-calibration-selftest.js
 node shot-variation-selftest.js
 node table-bounce-selftest.js
+node adaptive-timing-selftest.js
 node built-in-library-selftest.js
 
 echo "[8/13] Sharing / AI / continuous-runtime / UX responsiveness"

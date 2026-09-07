@@ -144,8 +144,8 @@
   function newShot(id, label, params, x, y) { return { id, type: params.type==='serve'?'serve':'shot', label, x, y, params: { speedMps: clamp(params.speedMps, 1, 20), spinRps: clamp(params.spinRps, -120, 120), elevationDeg: clamp(params.elevationDeg, -20, 45), aimDeg: clamp(params.aimDeg, -60, 60) } }; }
   function makeLinearDrill(name, description, shots, delay = 0.9) {
     const nodes = shots.map((s, i) => newShot(`shot-${Date.now()}-${i}`, s.label || `Ball ${i+1}`, s, 260 + i*270, 260));
-    const edges = nodes.slice(0,-1).map((n,i) => ({ id:`edge-${Date.now()}-${i}`, source:n.id, sourceSlot:'next', target:nodes[i+1].id, weight:1, delaySeconds:delay }));
-    return { id:`ai-${Date.now()}`, name, description, tags:['ai-created'], robotPoseReference:'base_back', robotPose:{x:0,y:0,yawDeg:0}, startNodeId:nodes[0]?.id||null, settings:{repetitions:3,delayBetweenSets:1}, nodes, edges };
+    const edges = nodes.slice(0,-1).map((n,i) => ({ id:`edge-${Date.now()}-${i}`, source:n.id, sourceSlot:'next', target:nodes[i+1].id, weight:1, delaySeconds:delay, timingMode:'adaptive', autoSpeedPct:100 }));
+    return { id:`ai-${Date.now()}`, name, description, tags:['ai-created'], robotPoseReference:'base_back', robotPose:{x:0,y:0,yawDeg:0}, startNodeId:nodes[0]?.id||null, settings:{repetitions:3,delayBetweenSets:0,firstShotTiming:{mode:'adaptive',speedPct:100}}, nodes, edges };
   }
   function promptRequestsFreshDrill(prompt) { return /\b(give me|create(?: me)?|new drill|make me|build me|design me)\b/i.test(String(prompt || '')); }
   function promptRequestsAppHelp(prompt) { const text=String(prompt||'').trim();return !promptRequestsFreshDrill(text)&&(/^(how|where|what|why|help)\b/i.test(text)||/\b(calibrat|connect|disconnect|setting|menu|screen|button|import|export)\b/i.test(text)); }
@@ -183,7 +183,7 @@
     if (current && /\badd\b.*\bserve\b/.test(p) && !drill.nodes.some(n=>n.type==='serve')) {
       const id=`serve-${Date.now()}`; const serve=newShot(id,'Serve',{type:'serve',speedMps:5,spinRps:-8,elevationDeg:-16,aimDeg:0},260+drill.nodes.length*270,260);
       const terminal=drill.nodes.find(n=>['shot','serve','drill'].includes(n.type)&&!drill.edges.some(e=>e.source===n.id)); drill.nodes.push(serve);
-      if(terminal)drill.edges.push({id:`edge-${Date.now()}-serve`,source:terminal.id,sourceSlot:'next',target:id,weight:1,delaySeconds:1});
+      if(terminal)drill.edges.push({id:`edge-${Date.now()}-serve`,source:terminal.id,sourceSlot:'next',target:id,weight:1,delaySeconds:1,timingMode:'adaptive',autoSpeedPct:100});
       if(!drill.startNodeId)drill.startNodeId=id; summary.push('Added a dedicated Serve node.');
     }
     const shots = drill.nodes.filter(n => n.type === 'shot' || n.type === 'serve');
@@ -192,10 +192,10 @@
     if (p.includes('slower')) { shots.forEach(n=>n.params.speedMps=clamp(n.params.speedMps*.9,1,20)); summary.push('Reduced ball speed by about 10%.'); }
     if (p.includes('less spin') || p.includes('reduce the spin')) { shots.forEach(n=>n.params.spinRps*=.8); summary.push('Reduced spin by about 20%.'); }
     if (p.includes('more spin') || p.includes('heavy')) { shots.forEach(n=>n.params.spinRps=clamp(n.params.spinRps*1.2,-120,120)); summary.push('Increased spin while preserving the pattern.'); }
-    if (p.includes('recovery') || p.includes('longer delay')) { drill.edges.forEach(e=>e.delaySeconds=Math.min(2,e.delaySeconds+.2)); summary.push('Added recovery time between balls.'); }
+    if (p.includes('recovery') || p.includes('longer delay')) { drill.edges.forEach(e=>{e.timingMode='adaptive';e.autoSpeedPct=Math.max(50,(e.autoSpeedPct||100)-15);}); summary.push('Added recovery time between balls.'); }
     if (p.includes('wide forehand')) { const last=shots.at(-1); if(last){last.params.aimDeg=Math.max(last.params.aimDeg,14); last.label='Wide forehand'; summary.push('Added/emphasized a wide forehand placement.');} }
-    if (p.includes('harder')) { shots.forEach(n=>{n.params.speedMps=clamp(n.params.speedMps*1.08,1,20); n.params.spinRps=clamp(n.params.spinRps*1.1,-120,120);}); drill.edges.forEach(e=>e.delaySeconds=Math.max(.667,e.delaySeconds*.92)); summary.push('Made the drill harder with modestly more speed/spin and less recovery time.'); }
-    if (p.includes('easier')) { shots.forEach(n=>{n.params.speedMps=clamp(n.params.speedMps*.9,1,20); n.params.spinRps*=.85;}); drill.edges.forEach(e=>e.delaySeconds=Math.min(2,e.delaySeconds*1.1)); summary.push('Made the drill easier with less speed/spin and more recovery time.'); }
+    if (p.includes('harder')) { shots.forEach(n=>{n.params.speedMps=clamp(n.params.speedMps*1.08,1,20); n.params.spinRps=clamp(n.params.spinRps*1.1,-120,120);}); drill.edges.forEach(e=>{e.timingMode='adaptive';e.autoSpeedPct=Math.min(200,(e.autoSpeedPct||100)+10);}); summary.push('Made the drill harder with modestly more speed/spin and faster adaptive timing.'); }
+    if (p.includes('easier')) { shots.forEach(n=>{n.params.speedMps=clamp(n.params.speedMps*.9,1,20); n.params.spinRps*=.85;}); drill.edges.forEach(e=>{e.timingMode='adaptive';e.autoSpeedPct=Math.max(50,(e.autoSpeedPct||100)-10);}); summary.push('Made the drill easier with less speed/spin and slower adaptive timing.'); }
     if (p.includes('match-like')) { drill.tags=[...new Set([...(drill.tags||[]),'match-like'])]; shots.forEach((n,i)=>{if(i%2)n.params.aimDeg=clamp(n.params.aimDeg*1.12,-60,60);}); summary.push('Made placements a little more demanding while preserving the training pattern.'); }
     drill.description = drill.description || String(prompt).slice(0,300); return { drill, summary:summary.join(' ')||'Prepared a validated drill proposal.' };
   }

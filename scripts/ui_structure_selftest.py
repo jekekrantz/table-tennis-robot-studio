@@ -30,6 +30,8 @@ for expected in [
     "robotDialogConnectBtn",
     "aiGlobalBtn", "robotIdleStopInput", "robotIdleStopStatus",
     "robotIdleDisconnectInput", "robotIdleStatus",
+    "playerModelSelect", "playerTimingSpeed", "newPlayerModelBtn",
+    "duplicatePlayerModelBtn", "deletePlayerModelBtn", "setTimingModeInput",
     "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
 ]:
     if expected not in ids:
@@ -323,7 +325,7 @@ if 'name: "Serve / receive"' not in app:
 for token in ("makeBuiltInCatalog", "sanitizeLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
     if token not in app:
         raise SystemExit(f"Missing separated-library model: {token}")
-for token in ('const DEFAULT_LIBRARY_VERSION = 7;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
+for token in ('const DEFAULT_LIBRARY_VERSION = 8;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
               'variationProfile: "shortNeutral"', 'variationProfile: "short"', 'variationProfile: "rally"',
               'variationProfile: "deep"', 'variationProfile: "spin"',
               'variationProfile: "fast"', 'variationProfile: "serveShort"', 'variationProfile: "serveFast"',

@@ -20,7 +20,7 @@ Built-in drills are not written to browser storage. This prevents app upgrades f
 The user-facing navigation is organized around intent rather than editor internals:
 
 1. **Library** is the start page. Tapping a drill opens **Run**; the pencil action opens **Edit**. **New drill** creates an empty `START → END` drill and opens the editor.
-2. **Run** contains Play/Stop, repetitions, delay between repetitions, persistent player tuning, current-vs-authored robot pose, preview, saving the effective setup, and an **Edit drill** action.
+2. **Run** contains Play/Stop, repetitions, Adaptive Auto or manual repetition timing, persistent player tuning, current-vs-authored robot pose, preview, saving the effective setup, and an **Edit drill** action.
 3. **Edit** contains the graph. Every drill has a structural START and at least one terminating END path. On phones the graph is laid out vertically with branch siblings separated into collision-free rows; read-only built-ins use a deterministic horizontal layered layout on desktop. Node cards size themselves to their rendered contents, and ball cards keep compact speed/spin metrics on one line. The floating `+` opens a configure-before-create menu for shots, serves, random choices, repeaters and sub-drills.
 4. Node/connection **Details** are a separate screen on phones and a side pane on desktop, so editing controls never cover the graph. Drill name, description, tags, folder and expected robot pose live in **Drill details** rather than on the canvas.
 5. **Robot** is global. It owns Connect/Disconnect, diagnostics, calibration and model/geometry settings. The compact Nova status in the top bar opens the same Robot page.
@@ -30,7 +30,7 @@ Back arrows use large touch targets and pop navigation history; close buttons di
 ## Current capabilities
 
 - Visual drill graph with shots, serves, weighted-random branches, sub-drills and repeaters.
-- Per-drill repetition count and delay between repetitions.
+- Per-connection Adaptive Auto or manual timing, plus repetition timing.
 - Local browser persistence plus JSON import/export.
 - Web Bluetooth connection, authentication and state-aware Nova control.
 - Real Start/Stop execution with Ready-state gating and heartbeat handling.
@@ -224,9 +224,13 @@ frequency_hz = 0.5 + percentage / 100
 pre_pause_seconds = 1 / frequency_hz
 ```
 
-The editor exposes delay-before-target in seconds and converts it to frequency when
-building the target record. Directly encodable delays are approximately 0.667–2.000 s;
-longer delays are split between browser-side waiting and the robot's encoded pause.
+Connections can use a constant Manual delay or Adaptive Auto timing. Adaptive timing
+uses the exact varied source and target balls, their modeled post-bounce contact times,
+player movement and return rhythm, and additional preparation before a new serve.
+The active saved player model applies globally; Timing speed is its single routine
+control, while movement and recovery parameters are under Advanced settings on Robot.
+Directly encodable delays are approximately 0.667–2.000 s; longer delays are split
+between browser-side waiting and the robot's encoded pause.
 
 See `PROTOCOL.md` for packet-level details and provenance.
 
@@ -330,7 +334,7 @@ Pongbot.
 
 The graph toolbar includes **Live tuning**, a non-destructive player-preference layer for quick drill fine-tuning. The tuning profile is saved separately in browser storage so an advanced player can keep a faster/lower style across sessions while a beginner can keep a gentler profile. It is intentionally **not** written into drills and is not exported with the drill library.
 
-- **Pace** uses 5% steps from -50% to +100%. Pace is treated as a rate: +100% is twice the pace (half the delays), and -50% is half the pace. The between-set delay is scaled too because it is also the inter-ball interval for single-shot drills.
+- **Pace** uses 1% steps from -50% to +100%. Pace is treated as a rate: +100% is twice the pace (half the delays), and -50% is half the pace. It scales both Manual and computed Adaptive Auto timing for the current session.
 - **Net clearance** uses 5% steps from -100% to +200%. The -100% endpoint targets about 0.2 cm of modeled clearance rather than forcing an exact numerical net contact. The runtime solver adjusts elevation and exit speed together to preserve the stored landing point; spin/exit-speed ratio is kept constant where the modeled/hardware range permits it.
 - **Spin** uses 5% steps from -100% to +300%. It scales spin magnitude while keeping exit speed fixed, then solves elevation to minimize landing shift. A no-spin shot remains no-spin.
 - **Speed** uses smaller 2% steps from -50% to +50%. It changes exit speed while keeping spin fixed, then solves elevation to minimize landing shift. Hardware/model speed limits still apply.

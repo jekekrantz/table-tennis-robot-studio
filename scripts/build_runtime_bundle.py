@@ -21,6 +21,7 @@ SOURCES = [
     "pose-calibration.js",
     "shot-variation.js",
     "table-bounce.js",
+    "adaptive-timing.js",
     "studio-features-core.js",
     "app.js",
     "studio-features.js",

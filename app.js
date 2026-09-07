@@ -33,11 +33,14 @@
   const PoseCalibration = globalThis.PoseCalibration;
   const ShotVariation = globalThis.ShotVariation;
   const TableBounce = globalThis.TableBounce;
+  const AdaptiveTiming = globalThis.AdaptiveTiming;
   const els = {
     repetitionsInput: $("repetitionsInput"),
     repetitionsDownBtn: $("repetitionsDownBtn"),
     repetitionsUpBtn: $("repetitionsUpBtn"),
     setDelayInput: $("setDelayInput"),
+    setDelayField: $("setDelayField"),
+    setTimingModeInput: $("setTimingModeInput"),
     playBtn: $("playBtn"),
     playIcon: $("playIcon"),
     playText: $("playText"),
@@ -279,6 +282,13 @@
     robotIdleStopStatus: $("robotIdleStopStatus"),
     robotIdleDisconnectInput: $("robotIdleDisconnectInput"),
     robotIdleStatus: $("robotIdleStatus"),
+    playerModelSelect: $("playerModelSelect"),
+    playerModelName: $("playerModelName"),
+    playerTimingSpeed: $("playerTimingSpeed"),
+    playerTimingSpeedOutput: $("playerTimingSpeedOutput"),
+    newPlayerModelBtn: $("newPlayerModelBtn"),
+    duplicatePlayerModelBtn: $("duplicatePlayerModelBtn"),
+    deletePlayerModelBtn: $("deletePlayerModelBtn"),
   };
 
   let startupNotice = "";
@@ -337,6 +347,7 @@
   const shotEnvelopeCache = new Map();
   const intuitiveFeedbackByNodeId = new Map();
   const manualFeedbackByNodeId = new Map();
+  const timingRangeCache = new Map();
   let shotVariationRng = ShotVariation?.createRng(Date.now());
 
   const Protocol = globalThis.PongbotProtocol;
@@ -361,12 +372,15 @@
   }
 
   function makeUserLibrary(calibration = defaultCalibration()) {
+    const playerModel = AdaptiveTiming.normalizePlayerModel(AdaptiveTiming.DEFAULT_PLAYER_MODEL);
     return {
       schemaVersion: SCHEMA_VERSION,
       activeDrillSource: "builtin",
       activeDrillId: builtInCatalog?.defaultDrillId ?? null,
       calibration: sanitizeCalibration(calibration),
       robotSettings: defaultRobotSettings(),
+      playerModels: [playerModel],
+      activePlayerModelId: playerModel.id,
       folders: [],
       drills: [],
     };
@@ -379,6 +393,10 @@
     library.schemaVersion = SCHEMA_VERSION;
     if (!library.calibration) library.calibration = defaultCalibration();
     library.robotSettings = sanitizeRobotSettings(library.robotSettings);
+    library.playerModels = sanitizePlayerModels(library.playerModels);
+    if (!library.playerModels.some(model => model.id === library.activePlayerModelId)) {
+      library.activePlayerModelId = library.playerModels[0].id;
+    }
 
     const folderIds = new Set(library.folders.map(folder => folder.id));
     library.folders = library.folders
@@ -571,10 +589,36 @@
       robotPoseReference: "base_back",
       robotPose: { x: 0, y: 0, yawDeg: 0 },
       startNodeId: null,
-      settings: { repetitions: 3, delayBetweenSets: 1.0 },
+      settings: { repetitions: 3, delayBetweenSets: 0, firstShotTiming: { mode: "adaptive", speedPct: 100 } },
       nodes: [],
       edges: [],
     };
+  }
+
+  function adaptiveTimingSpec(speedPct = 100) {
+    return { mode: "adaptive", speedPct: clamp(speedPct, 50, 200, 100) };
+  }
+
+  function manualTimingSpec(delaySeconds = 0) {
+    return { mode: "manual", delaySeconds: clamp(delaySeconds, 0, 3600, 0) };
+  }
+
+  function activePlayerModel() {
+    const models = library?.playerModels || [];
+    return models.find(model => model.id === library.activePlayerModelId)
+      || models[0]
+      || AdaptiveTiming.normalizePlayerModel(AdaptiveTiming.DEFAULT_PLAYER_MODEL);
+  }
+
+  function sanitizePlayerModels(rawModels) {
+    const source = Array.isArray(rawModels) && rawModels.length ? rawModels : [AdaptiveTiming.DEFAULT_PLAYER_MODEL];
+    const used = new Set();
+    return source.slice(0, 24).map((raw, index) => {
+      let id = String(raw?.id || `player-${index + 1}`);
+      while (used.has(id)) id = `${id}-${index + 1}`;
+      used.add(id);
+      return AdaptiveTiming.normalizePlayerModel(raw, id);
+    });
   }
 
   function uniqueDrillName(base, excludeId = null) {
@@ -678,7 +722,7 @@
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  const DEFAULT_LIBRARY_VERSION = 7;
+  const DEFAULT_LIBRARY_VERSION = 8;
 
   const DEFAULT_VARIATION_PROFILES = Object.freeze({
     neutral: Object.freeze({ depthCm: 10, lateralCm: 12, clearanceDeltaCm: 2, speedDeltaMps: .5, spinDeltaRps: 2 }),
@@ -1356,8 +1400,7 @@
       singleShotDrill("Shot: Fast deep center", "fastDeepCenter", { intervalSeconds: .72 }),
     ];
 
-    return {
-      drills: [
+    const drills = [
         alternating,
         twoTwo,
         falkenberg,
@@ -1389,8 +1432,16 @@
         mixedServeThirdBall,
         serveCombination,
         ...shotDrills,
-      ],
-    };
+      ];
+    for (const drill of drills) {
+      drill.settings.delayBetweenSets = 0;
+      drill.settings.firstShotTiming = adaptiveTimingSpec(100);
+      for (const edge of drill.edges) {
+        edge.timingMode = "adaptive";
+        edge.autoSpeedPct = 100;
+      }
+    }
+    return { drills };
   }
 
 
@@ -1459,6 +1510,12 @@
       drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name]
         || (/^Serve(?: receive)?:/.test(drill.name) ? "builtin-serve-receive" : "builtin-random");
       drill.builtIn = true;
+      drill.settings.delayBetweenSets = 0;
+      drill.settings.firstShotTiming = adaptiveTimingSpec(100);
+      for (const edge of drill.edges) {
+        edge.timingMode = "adaptive";
+        edge.autoSpeedPct = 100;
+      }
       const folderName = BUILT_IN_FOLDER_DEFS.find(folder => folder.id === drill.libraryFolderId)?.name || "Training";
       const hasShotVariation = drill.nodes.some(node => isBallNode(node) && node.variation?.enabled);
       const matchLike = drill.name.startsWith("Match:") || drill.name.startsWith("Serve receive:");
@@ -1712,6 +1769,8 @@
         target: String(e.target),
         weight: clamp(e.weight, .01, 100000, 1),
         delaySeconds: clamp(e.delaySeconds, 0, 3600, 0),
+        timingMode: e.timingMode === "adaptive" ? "adaptive" : "manual",
+        autoSpeedPct: clamp(e.autoSpeedPct, 50, 200, 100),
       }));
 
     drill.description = String(raw?.description || "").trim().slice(0, 600);
@@ -1728,9 +1787,16 @@
 
     const settings = raw?.settings || {};
     const repetitions = Math.round(finite(settings.repetitions, 1));
+    const legacySetDelay = clamp(settings.delayBetweenSets, 0, 3600, 0);
+    const hasFirstShotTiming = settings.firstShotTiming?.mode === "manual" || settings.firstShotTiming?.mode === "adaptive";
     drill.settings = {
       repetitions: repetitions <= 0 ? 0 : Math.min(999999, repetitions),
-      delayBetweenSets: clamp(settings.delayBetweenSets, 0, 3600, 0),
+      delayBetweenSets: hasFirstShotTiming ? legacySetDelay : 0,
+      firstShotTiming: !hasFirstShotTiming
+        ? manualTimingSpec(legacySetDelay)
+        : settings.firstShotTiming.mode === "manual"
+        ? manualTimingSpec(settings.firstShotTiming.delaySeconds)
+        : adaptiveTimingSpec(settings.firstShotTiming?.speedPct),
     };
     drill.startNodeId = nodeIds.has(String(raw?.startNodeId)) ? String(raw.startNodeId) : (drill.nodes[0]?.id ?? null);
     return drill;
@@ -1776,6 +1842,8 @@
       activeDrillId: activeId,
       calibration: sanitizeCalibration(raw.calibration),
       robotSettings: sanitizeRobotSettings(raw.robotSettings),
+      playerModels: sanitizePlayerModels(raw.playerModels),
+      activePlayerModelId: String(raw.activePlayerModelId || AdaptiveTiming.DEFAULT_PLAYER_MODEL.id),
       folders,
       drills,
     };
@@ -1849,7 +1917,10 @@
     const drill = activeDrill();
     if (!drill) return;
     els.repetitionsInput.value = repetitionsDisplay(drill.settings.repetitions);
-    els.setDelayInput.value = drill.settings.delayBetweenSets;
+    const timing = drill.settings.firstShotTiming || adaptiveTimingSpec(100);
+    els.setTimingModeInput.value = timing.mode;
+    els.setDelayInput.value = timing.mode === "manual" ? timing.delaySeconds : 1;
+    els.setDelayField.hidden = timing.mode !== "manual";
   }
 
   function appViewLabel(view) {
@@ -1878,9 +1949,10 @@
     } else if (!calibrationOpen && appView === "robot") {
       context.localContext.push(`Idle STOP: ${robotSettings.stopAfterNoShotMinutes ? `${robotSettings.stopAfterNoShotMinutes} minutes after the last shot` : "Never"}`);
       context.localContext.push(`BLE disconnect: ${robotSettings.disconnectAfterMinutes ? `${robotSettings.disconnectAfterMinutes} minutes unused` : "Never"}`);
+      context.localContext.push(`Adaptive timing player: ${activePlayerModel().name} at ${fmt(activePlayerModel().timingSpeedPct,0)}%`);
     } else if (!calibrationOpen && appView === "run" && drill) {
       context.localContext.push(`Repetitions: ${drill.settings.repetitions > 0 ? drill.settings.repetitions : "Continuous"}`);
-      context.localContext.push(`Delay between sets: ${drill.settings.delayBetweenSets} seconds`);
+      context.localContext.push(`Repetition timing: ${(drill.settings.firstShotTiming || adaptiveTimingSpec()).mode === "adaptive" ? "Adaptive Auto" : `${fmt(drill.settings.firstShotTiming.delaySeconds,2)} seconds Manual`}`);
     } else if (!calibrationOpen && appView === "editor") {
       context.localContext.push(`Editor controls: ${shotEditorMode === "manual" ? "Manual launch parameters" : "Intuitive placement"}`);
     } else if (calibrationOpen) {
@@ -2066,6 +2138,7 @@
     renderLibraryEditState();
     renderRunPage();
     renderRobotIdleSettings();
+    renderPlayerModelSettings();
   }
 
   function libraryFolderDefs(root = libraryView.root) {
@@ -2728,7 +2801,7 @@
       const labelParts = [];
       if (source.type === "random") labelParts.push(`w ${fmt(edge.weight)}`);
       if (source.type === "counter") labelParts.push(edge.sourceSlot === "A" ? "Repeat" : "Finish");
-      labelParts.push(`${fmt(edge.delaySeconds, 2)}s`);
+      labelParts.push(edgeTimingLabel(drill, edge));
       const label = labelParts.join(" · ");
       const width = Math.max(44, 15 + label.length * 7);
       const rect = svg("rect", { x: String(route.label.x - width / 2), y: String(route.label.y - 11), width: String(width), height: "21", rx: "8", class: "edge-label-bg" });
@@ -2755,6 +2828,60 @@
         els.edgeLayer.appendChild(svg("path", { d: path, class: "temp-edge" }));
       }
     }
+  }
+
+  function nominalTimingContact(drill, node) {
+    if (!isBallNode(node)) return null;
+    const prediction = predictTrajectory(node.params, calibrationAtPose(drillPose(drill)), { serve: node.type === "serve", includePostBounce: true });
+    return timingContactForShot({ params: node.params, nodeType: node.type }, prediction);
+  }
+
+  function edgeTimingRange(drill, edge) {
+    const source = getNode(drill, edge.source);
+    const target = getNode(drill, edge.target);
+    let estimate = .95 / Math.max(.1, finite(edge.autoSpeedPct, 100) / 100);
+    if (isBallNode(source) && isBallNode(target)) {
+      const cacheKey = JSON.stringify([source.params, source.variation, target.params, target.variation, activePlayerModel(), edge.autoSpeedPct, drillPose(drill), library.calibration.table]);
+      if (timingRangeCache.has(cacheKey)) return timingRangeCache.get(cacheKey);
+      const contactsFor = node => {
+        const nominal = nominalTimingContact(drill, node);
+        if (!node.variation?.enabled) return [nominal].filter(Boolean);
+        const support = variationFeasibleSamples(node, node.variation);
+        const stride = Math.max(1, Math.floor(support.length / 4));
+        const sampled = support.filter((_, index) => index % stride === 0).slice(0, 5).map(point => timingContactForShot({ params: point.params, nodeType: node.type }, point.prediction));
+        return [nominal, ...sampled].filter(Boolean);
+      };
+      const values = [];
+      for (const contactA of contactsFor(source)) {
+        for (const contactB of contactsFor(target)) {
+          values.push(AdaptiveTiming.delaySeconds({
+            contactA,
+            contactB,
+            targetType: target.type,
+            table: library.calibration.table,
+            playerModel: activePlayerModel(),
+            edgeSpeedPct: edge.autoSpeedPct,
+          }));
+        }
+      }
+      if (values.length) {
+        const range = [Math.max(1 / NOVA_LIMITS.frequencyHzMax, Math.min(...values)), Math.max(...values)];
+        if (timingRangeCache.size > 80) timingRangeCache.clear();
+        timingRangeCache.set(cacheKey, range);
+        return range;
+      }
+    } else if (target?.type === "serve") {
+      estimate += activePlayerModel().servePreparationSeconds;
+    }
+    const varied = Boolean(source?.variation?.enabled || target?.variation?.enabled);
+    const spread = varied ? .15 : .06;
+    return [Math.max(1 / NOVA_LIMITS.frequencyHzMax, estimate * (1 - spread)), estimate * (1 + spread)];
+  }
+
+  function edgeTimingLabel(drill, edge) {
+    if (edge.timingMode !== "adaptive") return `M: ${fmt(edge.delaySeconds, 2)}s`;
+    const [minimum, maximum] = edgeTimingRange(drill, edge);
+    return `A: ${fmt(minimum, 2)}s-${fmt(maximum, 2)}s`;
   }
 
   function routeEdge(drill, edge, from, to, previousRoutes, index) {
@@ -3120,6 +3247,8 @@
       target: targetId,
       weight: 1,
       delaySeconds: 0,
+      timingMode: "adaptive",
+      autoSpeedPct: 100,
     };
     drill.edges.push(edge);
     selection = { kind: "edge", id: edge.id };
@@ -3254,12 +3383,12 @@
     } else if (selectedEdge) {
       const oldTarget = selectedEdge.target;
       selectedEdge.target = node.id;
-      drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: node.type === "counter" ? "B" : node.type === "random" ? "branch" : "next", target: oldTarget, weight: 1, delaySeconds: 0 });
+      drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: node.type === "counter" ? "B" : node.type === "random" ? "branch" : "next", target: oldTarget, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
     } else if (selectedNode) {
       if (selectedNode.type === "random") {
-        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: "branch", target: node.id, weight: 1, delaySeconds: 0 });
+        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: "branch", target: node.id, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
       } else if (!outgoing(drill, selectedNode.id).length) {
-        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: selectedNode.type === "counter" ? "B" : "next", target: node.id, weight: 1, delaySeconds: 0 });
+        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: selectedNode.type === "counter" ? "B" : "next", target: node.id, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
       }
     }
 
@@ -3746,7 +3875,7 @@
         <h3>Incoming paths</h3>
         ${edges.length ? edges.map(edge => {
           const source = getNode(drill, edge.source);
-          return `<button class="button wide ghost incoming-edge-button" data-edge-id="${attr(edge.id)}" type="button">← ${escapeHtml(source?.label || "Missing")} · ${fmt(edge.delaySeconds,2)}s</button>`;
+          return `<button class="button wide ghost incoming-edge-button" data-edge-id="${attr(edge.id)}" type="button">← ${escapeHtml(source?.label || "Missing")} · ${edgeTimingLabel(drill, edge)}</button>`;
         }).join("") : `<p class="helper">No incoming paths.</p>`}
       </section>
     `;
@@ -3758,7 +3887,7 @@
         <label><span>Next node</span><select class="edge-target-field" data-edge-id="${attr(edge?.id || "")}" data-source-id="${attr(node.id)}" data-slot="${slot}">${nodeOptions(drill, edge?.target || null, true)}</select></label>
         <button class="remove-connection" data-remove-edge="${attr(edge?.id || "")}" type="button" title="Remove path"${edge ? "" : " disabled"}>×</button>
       </div>
-      ${edge ? `<p class="edge-timing-help">Click the edge or its ${fmt(edge.delaySeconds,2)}s label on the canvas to edit timing.</p>` : ""}
+      ${edge ? `<p class="edge-timing-help">Click the edge or its ${edgeTimingLabel(drill, edge)} label on the canvas to edit timing.</p>` : ""}
     `;
   }
 
@@ -3769,7 +3898,7 @@
         <label><span>Target</span><select class="edge-target-field" data-edge-id="${attr(edge.id)}">${nodeOptions(drill, edge.target, false)}</select></label>
         <button class="remove-connection" data-remove-edge="${attr(edge.id)}" type="button">×</button>
       </div>
-      <p class="edge-timing-help">Timing: ${fmt(edge.delaySeconds,2)}s. Click this edge on the canvas to change it.</p>
+      <p class="edge-timing-help">Timing: ${edgeTimingLabel(drill, edge)}. Click this edge on the canvas to change it.</p>
     `;
   }
 
@@ -3779,7 +3908,7 @@
         <label><span>Target</span><select class="edge-target-field" data-edge-id="${attr(edge?.id || "")}" data-source-id="${attr(node.id)}" data-slot="${slot}">${nodeOptions(drill, edge?.target || null, true)}</select></label>
         <button class="remove-connection" data-remove-edge="${attr(edge?.id || "")}" type="button"${edge ? "" : " disabled"}>×</button>
       </div>
-      ${edge ? `<p class="edge-timing-help">Click the ${slot === "A" ? "Repeat" : "Finish"} edge on the canvas to edit its ${fmt(edge.delaySeconds,2)}s delay.</p>` : ""}
+      ${edge ? `<p class="edge-timing-help">Click the ${slot === "A" ? "Repeat" : "Finish"} edge on the canvas to edit its ${edgeTimingLabel(drill, edge)} timing.</p>` : ""}
     `;
   }
 
@@ -4240,7 +4369,7 @@
     $("randomAddBtn")?.addEventListener("click", () => {
       const target = $("randomAddTarget")?.value;
       if (!target) return;
-      drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: "branch", target, weight: 1, delaySeconds: 0 });
+      drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: "branch", target, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
       commit({ message: "Weighted path added" });
     });
     bindConnectionRows(drill);
@@ -4284,6 +4413,8 @@
           target,
           weight: 1,
           delaySeconds: 0,
+          timingMode: "adaptive",
+          autoSpeedPct: 100,
         };
         drill.edges.push(edge);
       } else {
@@ -4317,13 +4448,22 @@
       ${source?.type === "counter" ? `<div class="counter-state-card">Repeater output: ${edge.sourceSlot === "A" ? "Repeat" : "Finish"}</div>` : ""}
       <label class="field"><span>Target node</span><select id="edgeInspectorTarget">${nodeOptions(drill, edge.target, false)}</select></label>
       ${source?.type === "random" ? `<label class="field"><span>Relative weight</span><input id="edgeInspectorWeight" type="number" min=".01" max="100000" step=".01" value="${edge.weight}"></label>` : ""}
-      <div class="landing-card"><strong>Edge timing</strong><br>The source node completes, then this delay elapses before the target node begins. Nova encodes 0.667–2.00 s as a 1.5–0.5 Hz pre-pause; longer delays are split across batches.</div>
-      <label class="field"><span>Delay before target</span><span class="input-with-unit"><input id="edgeInspectorDelay" type="number" min="0" max="3600" step=".05" value="${edge.delaySeconds}"><small>s</small></span></label>
+      <div class="landing-card"><strong>Edge timing</strong><br>Adaptive uses the exact varied balls and active player model. Manual keeps a constant feed interval. Long delays are safely split across controller and robot timing.</div>
+      <label class="field"><span>Delay model</span><select id="edgeInspectorTimingMode"><option value="adaptive"${edge.timingMode === "adaptive" ? " selected" : ""}>Adaptive Auto</option><option value="manual"${edge.timingMode !== "adaptive" ? " selected" : ""}>Manual</option></select></label>
+      <label id="edgeInspectorManualField" class="field"${edge.timingMode === "adaptive" ? " hidden" : ""}><span>Manual delay</span><span class="input-with-unit"><input id="edgeInspectorDelay" type="number" min="0" max="3600" step=".05" value="${edge.delaySeconds}"><small>s</small></span></label>
+      <label id="edgeInspectorAutoField" class="field"${edge.timingMode === "adaptive" ? "" : " hidden"}><span>Timing speed</span><span class="input-with-unit"><input id="edgeInspectorAutoSpeed" type="number" min="50" max="200" step="5" value="${clamp(edge.autoSpeedPct,50,200,100)}"><small>%</small></span><small>One simple adjustment: higher is faster. Current estimate ${edgeTimingLabel(drill, edge)}.</small></label>
       <button id="edgeInspectorRemove" class="button wide danger" type="button">Remove connection</button>
     `;
     $("edgeInspectorTarget")?.addEventListener("change", event => { edge.target = event.target.value; commit(); });
     $("edgeInspectorWeight")?.addEventListener("change", event => { edge.weight = clamp(event.target.value, .01, 100000, 1); commit(); });
     $("edgeInspectorDelay")?.addEventListener("change", event => { edge.delaySeconds = clamp(event.target.value, 0, 3600, 0); commit(); });
+    $("edgeInspectorAutoSpeed")?.addEventListener("change", event => { edge.autoSpeedPct = clamp(event.target.value, 50, 200, 100); commit(); });
+    $("edgeInspectorTimingMode")?.addEventListener("change", event => {
+      edge.timingMode = event.target.value === "manual" ? "manual" : "adaptive";
+      if (!Number.isFinite(Number(edge.autoSpeedPct))) edge.autoSpeedPct = 100;
+      if (edge.timingMode === "manual" && !(finite(edge.delaySeconds, 0) > 0)) edge.delaySeconds = 1;
+      commit();
+    });
     $("edgeInspectorRemove")?.addEventListener("click", () => {
       drill.edges = drill.edges.filter(item => item.id !== edge.id);
       selection = null;
@@ -7180,23 +7320,27 @@
 
   function compileRobotSet(drillId) {
     const context = { shots: [], transitions: 0, warnings: [] };
-    const result = compileRobotInvocation(drillId, context, [], 0);
+    const drill = getDrill(drillId);
+    const firstTiming = drill?.settings?.firstShotTiming || adaptiveTimingSpec(100);
+    const result = compileRobotInvocation(drillId, context, [], 0, firstTiming);
     if (!result.ok) throw new Error(result.reason);
     return {
       shots: context.shots,
       trailingDelay: result.pendingDelay,
+      trailingTiming: result.pendingTiming,
       warnings: context.warnings,
       transitions: context.transitions,
     };
   }
 
-  function compileRobotInvocation(drillId, context, callStack, incomingDelay) {
-    if (callStack.includes(drillId)) return { ok: false, reason: "Recursive sub-drill call blocked.", pendingDelay: incomingDelay };
+  function compileRobotInvocation(drillId, context, callStack, incomingDelay, incomingTiming = null) {
+    if (callStack.includes(drillId)) return { ok: false, reason: "Recursive sub-drill call blocked.", pendingDelay: incomingDelay, pendingTiming: incomingTiming };
     const drill = getDrill(drillId);
-    if (!drill) return { ok: false, reason: "Referenced drill is missing.", pendingDelay: incomingDelay };
+    if (!drill) return { ok: false, reason: "Referenced drill is missing.", pendingDelay: incomingDelay, pendingTiming: incomingTiming };
     let node = getNode(drill, drill.startNodeId);
     const stack = [...callStack, drillId];
     let pendingDelay = Math.max(0, finite(incomingDelay, 0));
+    let pendingTiming = incomingTiming;
 
     // Repeater memory is scoped to this invocation. Every sub-drill call gets
     // a fresh map; calling a sub-drill never resets the parent's map.
@@ -7208,7 +7352,7 @@
     while (node) {
       context.transitions += 1;
       if (context.transitions > MAX_TRANSITIONS) {
-        return { ok: false, reason: "Transition guard reached; the flow may never end.", pendingDelay };
+        return { ok: false, reason: "Transition guard reached; the flow may never end.", pendingDelay, pendingTiming };
       }
 
       for (const repeater of drill.nodes.filter(candidate => candidate.type === "counter" && candidate.clearOnNodeIds.includes(node.id))) {
@@ -7231,16 +7375,21 @@
           variation: node.variation?.enabled ? structuredClone(node.variation) : null,
           tuningApplied: false,
           delayBefore: pendingDelay,
+          timingBefore: pendingTiming || manualTimingSpec(pendingDelay),
         });
         pendingDelay = 0;
+        pendingTiming = null;
         edge = outgoing(drill, node.id)[0] ?? null;
       } else if (node.type === "random") {
         edge = weightedChoice(outgoing(drill, node.id));
       } else if (node.type === "drill") {
-        if (!node.referencedDrillId) return { ok: false, reason: `“${node.label}” has no reusable drill selected.`, pendingDelay };
-        const nested = compileRobotInvocation(node.referencedDrillId, context, stack, pendingDelay);
+        if (!node.referencedDrillId) return { ok: false, reason: `“${node.label}” has no reusable drill selected.`, pendingDelay, pendingTiming };
+        const nestedDrill = getDrill(node.referencedDrillId);
+        const nestedStartTiming = pendingTiming || nestedDrill?.settings?.firstShotTiming || adaptiveTimingSpec(100);
+        const nested = compileRobotInvocation(node.referencedDrillId, context, stack, pendingDelay, nestedStartTiming);
         if (!nested.ok) return nested;
         pendingDelay = nested.pendingDelay;
+        pendingTiming = nested.pendingTiming;
         edge = outgoing(drill, node.id)[0] ?? null;
       } else if (node.type === "counter") {
         const remaining = repeaters.get(node.id) ?? node.startCount;
@@ -7253,15 +7402,21 @@
         }
       }
 
-      if (!edge) return { ok: true, reason: "Flow ended", pendingDelay };
+      if (!edge) return { ok: true, reason: "Flow ended", pendingDelay, pendingTiming };
       // Store the drill's raw delay. Pace tuning is applied when the execution
       // plan is built, just like speed/spin/clearance tuning.
-      pendingDelay += Math.max(0, finite(edge.delaySeconds, 0));
+      if (edge.timingMode === "adaptive") {
+        pendingTiming = adaptiveTimingSpec(edge.autoSpeedPct);
+        pendingDelay = 0;
+      } else if (finite(edge.delaySeconds, 0) > 0 || !pendingTiming) {
+        pendingDelay = Math.max(0, finite(edge.delaySeconds, 0));
+        pendingTiming = manualTimingSpec(pendingDelay);
+      }
       node = getNode(drill, edge.target);
-      if (!node) return { ok: false, reason: "A connection points to a missing node.", pendingDelay };
+      if (!node) return { ok: false, reason: "A connection points to a missing node.", pendingDelay, pendingTiming };
     }
 
-    return { ok: true, reason: "Flow ended", pendingDelay };
+    return { ok: true, reason: "Flow ended", pendingDelay, pendingTiming };
   }
 
   function robotShotPreflight(shot) {
@@ -7311,13 +7466,71 @@
     };
   }
 
-  function buildRobotExecutionPlan(compiled, { maxBatchSize = NOVA_SEQUENCE_RECORD_LIMIT } = {}) {
+  function timingContactForShot(shot, prediction = null) {
+    let trajectory = prediction || predictTrajectory(
+      shot.params,
+      calibrationAtPose(currentRobotPose()),
+      { serve: shot.nodeType === "serve", includePostBounce: true }
+    );
+    let arc = shot.nodeType === "serve" ? trajectory.thirdArcPoints : trajectory.postBouncePoints;
+    if (!arc?.length) {
+      trajectory = predictTrajectory(
+        shot.params,
+        calibrationAtPose(currentRobotPose()),
+        { serve: shot.nodeType === "serve", includePostBounce: true }
+      );
+      arc = shot.nodeType === "serve" ? trajectory.thirdArcPoints : trajectory.postBouncePoints;
+    }
+    const playable = (arc || []).filter(point => Number.isFinite(point?.t) && Number.isFinite(point?.z));
+    const apex = playable.reduce((best, point) => !best || point.z > best.z ? point : best, null);
+    if (!apex) return null;
+    return {
+      x: apex.x,
+      y: apex.y,
+      z: apex.z,
+      t: apex.t,
+      speedMps: shot.params.speedMps,
+      spinRps: shot.params.spinRps,
+    };
+  }
+
+  function adaptiveDelayForPreparedShot(prepared, current, timingSpec) {
+    const previous = prepared.at(-1);
+    if (!previous) {
+      const initial = current.nodeType === "serve"
+        ? .67 + activePlayerModel().servePreparationSeconds
+        : 1;
+      return initial / Math.max(.1, finite(timingSpec?.speedPct, 100) / 100);
+    }
+    return AdaptiveTiming.delaySeconds({
+      previousContact: prepared.length > 1 ? prepared.at(-2).timingContact : null,
+      contactA: previous.timingContact,
+      contactB: current.timingContact,
+      targetType: current.nodeType,
+      table: library.calibration.table,
+      playerModel: activePlayerModel(),
+      edgeSpeedPct: timingSpec?.speedPct,
+    });
+  }
+
+  function timingHistorySnapshot(shots = []) {
+    return shots.slice(-2).flatMap(shot => shot?.timingContact ? [{
+      timingContact: { ...shot.timingContact },
+    }] : []);
+  }
+
+  function timingHistoryAfter(history, shots = []) {
+    return timingHistorySnapshot([...timingHistorySnapshot(history), ...shots]);
+  }
+
+  function buildRobotExecutionPlan(compiled, { maxBatchSize = NOVA_SEQUENCE_RECORD_LIMIT, initialTimingHistory = [] } = {}) {
     if (!Protocol) throw new Error("Protocol module is unavailable");
     if (!compiled.shots.length) throw new Error("This traversal contains no shots to send to the robot.");
 
     const warnings = [...compiled.warnings];
     const errors = [];
     const prepared = [];
+    let timingHistory = timingHistorySnapshot(initialTimingHistory);
     const batchLimit = Math.max(1, Math.min(NOVA_SEQUENCE_RECORD_LIMIT, Math.trunc(finite(maxBatchSize, NOVA_SEQUENCE_RECORD_LIMIT)) || NOVA_SEQUENCE_RECORD_LIMIT));
 
     for (let index = 0; index < compiled.shots.length; index += 1) {
@@ -7344,10 +7557,13 @@
         variationApplied: Boolean(variation.result),
         variationResult: variation.result || null,
       };
+      const runtimePrediction = variation.result?.prediction || adjusted.prediction
+        || predictTrajectory(shot.params, calibrationAtPose(currentRobotPose()), { serve: shot.nodeType === "serve", includePostBounce: true });
+      shot.timingContact = timingContactForShot(shot, runtimePrediction);
       if (adjusted.warnings?.length) warnings.push(...adjusted.warnings.map(message => `“${shot.label}”: ${message}`));
       if (!adjusted.feasible) warnings.push(`“${shot.label}”: the requested pose/live adjustment could not preserve its modeled landing closely enough; the closest representable result will be sent.`);
       if (variation.error) warnings.push(`“${shot.label}”: ${variation.error} The nominal adjusted shot will be sent instead.`);
-      const trajectoryWarning = trajectoryPlanWarning(shot.label, variation.result?.prediction || adjusted.prediction || predictTrajectory(shot.params, calibrationAtPose(currentRobotPose()), { serve: shot.nodeType === "serve" }));
+      const trajectoryWarning = trajectoryPlanWarning(shot.label, runtimePrediction);
       if (trajectoryWarning) warnings.push(trajectoryWarning);
       const preflight = robotShotPreflight(shot);
       errors.push(...preflight.errors);
@@ -7357,7 +7573,11 @@
       // shows the pre-pause before this ball is 1/f: 0.5..1.5 Hz corresponds
       // to 2.00..0.667 s. Edge delays are therefore attached to the TARGET
       // shot, not the source shot. Pace is a runtime layer too.
-      const timing = novaFrequencyForDelay(tunedDelaySeconds(baseShot.delayBefore));
+      const timingSpec = baseShot.timingSpec || baseShot.timingBefore || manualTimingSpec(baseShot.delayBefore);
+      const modeledDelay = timingSpec.mode === "adaptive"
+        ? adaptiveDelayForPreparedShot(timingHistory, shot, timingSpec) + Math.max(0, finite(baseShot.delayBefore, 0))
+        : Math.max(finite(timingSpec.delaySeconds, 0), finite(baseShot.delayBefore, 0));
+      const timing = novaFrequencyForDelay(tunedDelaySeconds(modeledDelay));
       if (index > 0 && timing.tooFast) {
         warnings.push(`“${compiled.shots[index - 1].label}” → “${shot.label}”: ${fmt(timing.desiredDelay,2)} s is faster than the Nova timing range; ${fmt(timing.encodedDelay,3)} s will be used.`);
       }
@@ -7375,7 +7595,7 @@
         frequencyHz: timing.frequencyHz,
         count: 1,
       });
-      prepared.push({
+      const preparedShot = {
         ...shot,
         sourceIndex: Number.isInteger(baseShot.sourceIndex) ? baseShot.sourceIndex : index,
         wheelA,
@@ -7383,10 +7603,15 @@
         frequencyHz: timing.frequencyHz,
         encodedDelay: timing.encodedDelay,
         desiredDelay: timing.desiredDelay,
+        timingMode: timingSpec.mode,
+        timingSpec,
+        timingHistoryBefore: timingHistorySnapshot(timingHistory),
         forceBoundaryBefore: index > 0 && timing.tooSlow,
         hostDelayBefore: timing.extraHostDelay,
         record,
-      });
+      };
+      prepared.push(preparedShot);
+      timingHistory = timingHistoryAfter(timingHistory, [preparedShot]);
     }
 
     if (![0, 4].includes(library.calibration.rotationType)) {
@@ -7412,6 +7637,7 @@
         liveUpdatePacket: Protocol.buildLiveAdjustPacket(current.map(item => item.record)),
         encodedSeconds,
         hostDelayBefore: pendingHostDelay,
+        timingHistoryBefore: timingHistorySnapshot(current[0]?.timingHistoryBefore),
         tuningRevision: liveTuningRevision,
       });
       current = [];
@@ -7449,15 +7675,19 @@
     };
   }
 
-  function rebuildPlaybackBatchForLiveTuning(batch) {
+  function rebuildPlaybackBatchForLiveTuning(batch, timingHistory = batch.timingHistoryBefore) {
     const sourceShots = batch.shots.map(shot => ({
       ...shot,
       params: { ...shot.baseParams },
       baseParams: { ...shot.baseParams },
       record: undefined,
+      // Rebuild from authored timing. desiredDelay already includes the previous
+      // Pace value and must never be fed through live Pace a second time.
+      timingBefore: shot.timingSpec || shot.timingBefore || manualTimingSpec(shot.delayBefore),
     }));
     const rebuilt = buildRobotExecutionPlan({ shots: sourceShots, warnings: [], trailingDelay: 0 }, {
       maxBatchSize: NOVA_SEQUENCE_RECORD_LIMIT,
+      initialTimingHistory: timingHistorySnapshot(timingHistory),
     });
     const shots = rebuilt.batches.flatMap(item => item.shots);
     if (shots.length !== batch.shots.length) {
@@ -7474,6 +7704,7 @@
       liveUpdatePacket: Protocol.buildLiveAdjustPacket(records),
       encodedSeconds: shots.reduce((sum, shot) => sum + shot.encodedDelay, 0),
       hostDelayBefore: rebuilt.batches[0]?.hostDelayBefore ?? batch.hostDelayBefore,
+      timingHistoryBefore: timingHistorySnapshot(timingHistory),
       tuningRevision: liveTuningRevision,
       retuneWarnings: rebuilt.warnings,
     };
@@ -7503,7 +7734,7 @@
           const original = context.currentBatch;
           if (!original) return;
           const remainingFraction = clamp((context.expectedEndAt - performance.now()) / Math.max(1, original.encodedSeconds * 1000), 0, 1, 0);
-          const replacement = rebuildPlaybackBatchForLiveTuning(original);
+          const replacement = rebuildPlaybackBatchForLiveTuning(original, context.timingHistory);
           await robot.updateActiveSequence(replacement.liveUpdatePacket, {
             description: "live-tuned active streaming slot",
           });
@@ -7802,6 +8033,7 @@
     const infinite = configured <= 0;
     let completed = 0;
     let planned = 0;
+    let completedTimingHistory = [];
     let carryDelay = 0;
     let pendingBatches = [];
     let deferredBatch = null;
@@ -7813,12 +8045,15 @@
       warnings.forEach(message => robot.log(`Plan warning: ${message}`, "warn"));
       toast(warnings[0]);
     };
-    const planMore = () => {
+    const planMore = (initialTimingHistory = completedTimingHistory) => {
       if (!infinite && planned >= configured) return false;
       runtimeCounterDisplay = new Map();
       const window = compilePlaybackWindow(drill, planned, configured, infinite, carryDelay, NOVA_SEQUENCE_RECORD_LIMIT);
       if (!window.shots.length || !window.setsIncluded) throw new Error("The drill produced no playable shots.");
-      const plan = buildRobotExecutionPlan({ shots: window.shots, warnings: window.warnings, trailingDelay: 0 }, { maxBatchSize: 1 });
+      const plan = buildRobotExecutionPlan({ shots: window.shots, warnings: window.warnings, trailingDelay: 0 }, {
+        maxBatchSize: 1,
+        initialTimingHistory: timingHistorySnapshot(initialTimingHistory),
+      });
       for (let index = 0; index < plan.batches.length; index += 1) {
         const batch = plan.batches[index];
         const lastSet = batch.shots.at(-1)?.logicalSet ?? null;
@@ -7831,38 +8066,45 @@
       reportWarnings(plan.warnings);
       return true;
     };
-    const takeNextBatch = () => {
+    const takeNextBatch = (timingHistory = completedTimingHistory) => {
       if (deferredBatch) {
         const batch = deferredBatch;
         deferredBatch = null;
-        return batch;
+        if (batch.tuningRevision === liveTuningRevision) return batch;
+        const replacement = rebuildPlaybackBatchForLiveTuning(batch, timingHistory);
+        if (replacement.retuneWarnings?.length) reportWarnings(replacement.retuneWarnings);
+        return replacement;
       }
       while (!pendingBatches.length) {
-        if (!planMore()) return null;
+        if (!planMore(timingHistory)) return null;
       }
       let batch = pendingBatches.shift();
       if (batch.tuningRevision !== liveTuningRevision) {
-        batch = rebuildPlaybackBatchForLiveTuning(batch);
+        batch = rebuildPlaybackBatchForLiveTuning(batch, timingHistory);
         if (batch.retuneWarnings?.length) reportWarnings(batch.retuneWarnings);
       }
       return batch;
     };
     const takeFiniteSegment = () => {
-      const first = takeNextBatch();
+      let projectedTimingHistory = timingHistorySnapshot(completedTimingHistory);
+      const first = takeNextBatch(projectedTimingHistory);
       if (!first) return null;
       const batches = [first];
+      projectedTimingHistory = timingHistoryAfter(projectedTimingHistory, first.shots);
       while (batches.length < NOVA_STREAM_COMBO_LIMIT) {
-        const candidate = takeNextBatch();
+        const candidate = takeNextBatch(projectedTimingHistory);
         if (!candidate) break;
         if (candidate.hostDelayBefore > 0) {
           deferredBatch = candidate;
           break;
         }
         batches.push(candidate);
+        projectedTimingHistory = timingHistoryAfter(projectedTimingHistory, candidate.shots);
       }
       return { batches, hostDelayBefore: first.hostDelayBefore };
     };
     const markBatchComplete = batch => {
+      completedTimingHistory = timingHistoryAfter(completedTimingHistory, batch.shots);
       if (Number.isFinite(batch.completedSetThrough)) completed = Math.max(completed, batch.completedSetThrough);
       updateProgress(completed, configured, infinite, infinite ? `∞ · ${completed} repetitions completed` : `${completed} of ${configured} repetitions completed`);
     };
@@ -7877,11 +8119,19 @@
       els.runStatus.textContent = `${setText} · ${message} · ${batch.shots.length} ball${batch.shots.length === 1 ? "" : "s"}`;
       return setText;
     };
-    const retuneIfNeeded = batch => {
+    const retuneIfNeeded = (batch, timingHistory = completedTimingHistory) => {
       if (batch.tuningRevision === liveTuningRevision) return batch;
-      const replacement = rebuildPlaybackBatchForLiveTuning(batch);
+      const replacement = rebuildPlaybackBatchForLiveTuning(batch, timingHistory);
       if (replacement.retuneWarnings?.length) reportWarnings(replacement.retuneWarnings);
       return replacement;
+    };
+    const retuneBatchSequence = batches => {
+      let projectedTimingHistory = timingHistorySnapshot(completedTimingHistory);
+      return batches.map(batch => {
+        const replacement = retuneIfNeeded(batch, projectedTimingHistory);
+        projectedTimingHistory = timingHistoryAfter(projectedTimingHistory, replacement.shots);
+        return replacement;
+      });
     };
     const ballTimeoutMs = batch => Math.max(5000, Math.ceil((batch.encodedSeconds + 3) * 1000));
     const playbackStillRequested = () => playbackRunning && token === playbackToken;
@@ -7906,7 +8156,12 @@
           shouldStart: playbackStillRequested,
         });
         if (started == null || !playbackStillRequested()) return;
-        const liveContext = { token, currentBatch, expectedEndAt: performance.now() + currentBatch.encodedSeconds * 1000 };
+        const liveContext = {
+          token,
+          currentBatch,
+          timingHistory: timingHistorySnapshot(completedTimingHistory),
+          expectedEndAt: performance.now() + currentBatch.encodedSeconds * 1000,
+        };
         playbackLiveContext = liveContext;
 
         while (playbackRunning && token === playbackToken) {
@@ -7935,6 +8190,7 @@
               const replacement = retuneIfNeeded(candidate);
               await robot.updateActiveSequence(replacement.liveUpdatePacket, { description: "next streaming shot" });
               liveContext.currentBatch = replacement;
+              liveContext.timingHistory = timingHistorySnapshot(completedTimingHistory);
               liveContext.expectedEndAt = performance.now() + replacement.encodedSeconds * 1000;
               return replacement;
             });
@@ -7942,6 +8198,7 @@
           }
           if (liveContext.currentBatch !== candidate) {
             liveContext.currentBatch = candidate;
+            liveContext.timingHistory = timingHistorySnapshot(completedTimingHistory);
             liveContext.expectedEndAt = performance.now() + candidate.encodedSeconds * 1000;
           }
           showActiveBatch(candidate, "continuous stream");
@@ -7954,7 +8211,8 @@
             await waitWithStatus(segment.hostDelayBefore, token, "Long requested delay");
             if (!playbackRunning || token !== playbackToken) break;
           }
-          segment.batches = segment.batches.map(retuneIfNeeded);
+          segment.batches = retuneBatchSequence(segment.batches);
+          segment.hostDelayBefore = segment.batches[0]?.hostDelayBefore || 0;
           let currentBatch = segment.batches[0];
           const startPacket = Protocol.buildStartPacket([currentBatch.shots[0].record], {
             mode: 1,
@@ -7968,7 +8226,12 @@
             shouldStart: playbackStillRequested,
           });
           if (started == null || !playbackStillRequested()) break;
-          const liveContext = { token, currentBatch, expectedEndAt: performance.now() + currentBatch.encodedSeconds * 1000 };
+          const liveContext = {
+            token,
+            currentBatch,
+            timingHistory: timingHistorySnapshot(completedTimingHistory),
+            expectedEndAt: performance.now() + currentBatch.encodedSeconds * 1000,
+          };
           playbackLiveContext = liveContext;
 
           for (let index = 0; index < segment.batches.length && playbackRunning && token === playbackToken; index += 1) {
@@ -7982,6 +8245,7 @@
               const replacement = retuneIfNeeded(candidate);
               await robot.updateActiveSequence(replacement.liveUpdatePacket, { description: "next streaming shot" });
               liveContext.currentBatch = replacement;
+              liveContext.timingHistory = timingHistorySnapshot(completedTimingHistory);
               liveContext.expectedEndAt = performance.now() + replacement.encodedSeconds * 1000;
               return replacement;
             });
@@ -8180,10 +8444,14 @@
         }
       }
       if (!edge) return { ok: true, reason: `Set ended after “${node.label}”.` };
-      const effectiveDelay = tunedDelaySeconds(edge.delaySeconds);
-      if (effectiveDelay > 0) {
-        const tunedNote = Math.abs(effectiveDelay - edge.delaySeconds) > 1e-6 ? ` · stored ${fmt(edge.delaySeconds,2)} s` : "";
-        context.events.push({ kind: "delay", title: `Wait ${fmt(effectiveDelay,2)} seconds`, detail: `Before ${getNode(drill, edge.target)?.label || "next node"}${tunedNote}` });
+      if (edge.timingMode === "adaptive") {
+        context.events.push({ kind: "delay", title: edgeTimingLabel(drill, edge), detail: `Adaptive before ${getNode(drill, edge.target)?.label || "next node"} · exact delay is computed from the sampled balls` });
+      } else {
+        const effectiveDelay = tunedDelaySeconds(edge.delaySeconds);
+        if (effectiveDelay > 0) {
+          const tunedNote = Math.abs(effectiveDelay - edge.delaySeconds) > 1e-6 ? ` · stored ${fmt(edge.delaySeconds,2)} s` : "";
+          context.events.push({ kind: "delay", title: `M: ${fmt(effectiveDelay,2)}s`, detail: `Before ${getNode(drill, edge.target)?.label || "next node"}${tunedNote}` });
+        }
       }
       node = getNode(drill, edge.target);
     }
@@ -8503,7 +8771,7 @@
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    toast("My drills and calibration exported");
+    toast("My drills, player models and calibration exported");
   }
 
   function importLibrary(file) {
@@ -8514,7 +8782,7 @@
         libraryView = { root: library.activeDrillSource === "user" ? "user" : "builtin", folderId: library.activeDrillSource === "user" ? (activeDrill()?.folderId || null) : (activeDrill()?.libraryFolderId || "builtin-root"), query: "" };
         selection = null;
         stopPlayback();
-        commit({ message: "My drills and calibration imported" });
+        commit({ message: "My drills, player models and calibration imported" });
         setTimeout(fitGraph, 40);
       } catch (error) {
         toast(error instanceof Error ? error.message : "Import failed.");
@@ -8638,6 +8906,30 @@
       const remainingMs = Math.max(0, robotLastUseAt + disconnectMinutes * 60000 - Date.now());
       els.robotIdleStatus.textContent = `Connected · disconnects after about ${Math.max(1, Math.ceil(remainingMs / 60000))} minute${remainingMs > 60000 ? "s" : ""} without robot use.`;
     }
+  }
+
+  function renderPlayerModelSettings() {
+    if (!els.playerModelSelect || !library) return;
+    const model = activePlayerModel();
+    els.playerModelSelect.innerHTML = library.playerModels
+      .map(item => `<option value="${attr(item.id)}"${item.id === model.id ? " selected" : ""}>${escapeHtml(item.name)}</option>`)
+      .join("");
+    els.playerModelName.value = model.name;
+    els.playerTimingSpeed.value = String(model.timingSpeedPct);
+    els.playerTimingSpeedOutput.textContent = `${fmt(model.timingSpeedPct, 0)}%`;
+    document.querySelectorAll("[data-player-model-field]").forEach(input => {
+      input.value = String(model[input.dataset.playerModelField]);
+    });
+    els.deletePlayerModelBtn.disabled = library.playerModels.length <= 1;
+  }
+
+  function updateActivePlayerModel(patch) {
+    const index = library.playerModels.findIndex(model => model.id === library.activePlayerModelId);
+    if (index < 0) return;
+    library.playerModels[index] = AdaptiveTiming.normalizePlayerModel({ ...library.playerModels[index], ...patch }, library.playerModels[index].id);
+    saveLibrary();
+    renderPlayerModelSettings();
+    renderGraph();
   }
 
   function clearRobotIdleTimer() {
@@ -9106,8 +9398,19 @@
     els.setDelayInput.addEventListener("change", () => {
       const drill = activeDrill();
       if (!drill) return;
-      drill.settings.delayBetweenSets = clamp(els.setDelayInput.value, 0, 3600, 0);
-      els.setDelayInput.value = drill.settings.delayBetweenSets;
+      drill.settings.firstShotTiming = manualTimingSpec(els.setDelayInput.value);
+      drill.settings.delayBetweenSets = 0;
+      els.setDelayInput.value = drill.settings.firstShotTiming.delaySeconds;
+      if (activeDrillEditable()) saveLibrary();
+    });
+    els.setTimingModeInput.addEventListener("change", () => {
+      const drill = activeDrill();
+      if (!drill) return;
+      drill.settings.firstShotTiming = els.setTimingModeInput.value === "manual"
+        ? manualTimingSpec(els.setDelayInput.value || 1)
+        : adaptiveTimingSpec(100);
+      drill.settings.delayBetweenSets = 0;
+      els.setDelayField.hidden = drill.settings.firstShotTiming.mode !== "manual";
       if (activeDrillEditable()) saveLibrary();
     });
     els.playBtn.addEventListener("click", event => {
@@ -9136,6 +9439,39 @@
       noteRobotUse();
       renderRobotIdleSettings();
       toast(library.robotSettings.disconnectAfterIdleMinutes ? `Automatic disconnect set to ${library.robotSettings.disconnectAfterIdleMinutes} minutes` : "Automatic disconnect turned off");
+    });
+    els.playerModelSelect?.addEventListener("change", () => {
+      if (!library.playerModels.some(model => model.id === els.playerModelSelect.value)) return;
+      library.activePlayerModelId = els.playerModelSelect.value;
+      commit({ message: `Using ${activePlayerModel().name} for Adaptive Auto timing` });
+    });
+    els.playerModelName?.addEventListener("change", () => updateActivePlayerModel({ name: els.playerModelName.value }));
+    els.playerTimingSpeed?.addEventListener("input", () => {
+      els.playerTimingSpeedOutput.textContent = `${els.playerTimingSpeed.value}%`;
+    });
+    els.playerTimingSpeed?.addEventListener("change", () => updateActivePlayerModel({ timingSpeedPct: els.playerTimingSpeed.value }));
+    document.querySelectorAll("[data-player-model-field]").forEach(input => input.addEventListener("change", () => {
+      updateActivePlayerModel({ [input.dataset.playerModelField]: input.value });
+    }));
+    els.newPlayerModelBtn?.addEventListener("click", () => {
+      const id = makeId("player");
+      const model = AdaptiveTiming.normalizePlayerModel({ ...AdaptiveTiming.DEFAULT_PLAYER_MODEL, id, name: `Player ${library.playerModels.length + 1}` }, id);
+      library.playerModels.push(model);
+      library.activePlayerModelId = id;
+      commit({ message: "Player model created" });
+    });
+    els.duplicatePlayerModelBtn?.addEventListener("click", () => {
+      const source = activePlayerModel();
+      const id = makeId("player");
+      library.playerModels.push(AdaptiveTiming.normalizePlayerModel({ ...source, id, name: `${source.name} copy` }, id));
+      library.activePlayerModelId = id;
+      commit({ message: "Player model duplicated" });
+    });
+    els.deletePlayerModelBtn?.addEventListener("click", () => {
+      if (library.playerModels.length <= 1) return;
+      library.playerModels = library.playerModels.filter(model => model.id !== library.activePlayerModelId);
+      library.activePlayerModelId = library.playerModels[0].id;
+      commit({ message: "Player model deleted" });
     });
     els.closeCalibrationBtn.addEventListener("click", () => {
       if (calibrationFeedRunning || calibrationTestRunning || robotIsActive()) void enterRobotIdleState("Leaving calibration");
@@ -9285,6 +9621,7 @@
       ["pose calibration", PoseCalibration],
       ["shot variation", ShotVariation],
       ["table bounce", TableBounce],
+      ["adaptive timing", AdaptiveTiming],
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missingRuntimeModules.length) {
       throw new Error(`runtime deployment is incomplete; missing ${missingRuntimeModules.join(", ")}`);

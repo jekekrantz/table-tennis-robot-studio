@@ -10,6 +10,8 @@ assert.strictEqual(Core.deserializePortableDrill(Core.serializePortableDrill(ser
 const serveAiRequest=Core.buildExternalAiRequest({userRequest:'make a serve drill'});
 assert(serveAiRequest.includes('"type":"serve"'));
 assert(serveAiRequest.includes('"elevationDeg":-16'));
+assert(serveAiRequest.includes('"timingMode":"adaptive"'));
+assert(serveAiRequest.includes('"firstShotTiming":{"mode":"adaptive"'));
 const helpRequest=Core.buildExternalAiRequest({userRequest:'How do I calibrate?',requestKind:'help',appContext:{screen:'Robot',activeDrill:null,drillSource:null,selection:null,localContext:['Open section: Guided launch calibration'],secret:'do not include'}});
 assert(helpRequest.includes('TASK MODE: APP HELP'));
 assert(helpRequest.includes('"screen": "Robot"'));

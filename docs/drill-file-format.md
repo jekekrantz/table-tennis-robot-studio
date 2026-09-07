@@ -22,7 +22,7 @@ Portable drills use human-readable JSON and are shared by file import/export, UR
     "robotPoseReference": "base_back",
     "robotPose": {"x": 0, "y": 0, "yawDeg": 0},
     "startNodeId": "shot-1",
-    "settings": {"repetitions": 0, "delayBetweenSets": 1},
+    "settings": {"repetitions": 0, "delayBetweenSets": 0, "firstShotTiming": {"mode": "adaptive", "speedPct": 100}},
     "nodes": [
       {"id": "shot-1", "type": "shot", "label": "Backhand", "x": 300, "y": 260,
        "params": {"speedMps": 5.8, "spinRps": 8, "elevationDeg": 10.5, "aimDeg": -8},
@@ -32,9 +32,11 @@ Portable drills use human-readable JSON and are shared by file import/export, UR
          "clearance": {"minCm": 8, "maxCm": 12},
          "speed": {"minMps": 5.2, "maxMps": 6.4},
          "spin": {"minRps": 3, "maxRps": 13}
-       }}
+       }},
+      {"id": "shot-2", "type": "shot", "label": "Forehand", "x": 620, "y": 260,
+       "params": {"speedMps": 6.2, "spinRps": 12, "elevationDeg": 9.5, "aimDeg": 8}}
     ],
-    "edges": []
+    "edges": [{"id": "edge-1", "source": "shot-1", "sourceSlot": "next", "target": "shot-2", "weight": 1, "delaySeconds": 0, "timingMode": "adaptive", "autoSpeedPct": 100}]
   }
 }
 ```
@@ -51,6 +53,8 @@ Current Shot and Serve ranges exposed to portable/AI data are:
 Version 1 allows the same current graph node types as the app (`shot`, `serve`, `random`, `drill`, `counter`) and caps payload/node/edge sizes to avoid pathological imports. A `serve` uses the same semantic launch parameters as a `shot`, while the app validates and previews its required robot-side bounce, net crossing, and player-side bounce. Unknown optional wrapper metadata can be ignored, but unsupported `formatVersion` values fail with a controlled error.
 
 Shot `variation` is optional. Placement values are half-widths around the nominal modeled landing point. Clearance is measured from the top of the physical net to the bottom of the ball. Speed and spin ranges are physical launch values. Imported variation ranges are validated before the drill preview is shown.
+
+Connection timing is optional for compatibility. `timingMode: "adaptive"` derives the delay from the exact varied balls and uses `autoSpeedPct` as a rate from 50–200%. `timingMode: "manual"` uses `delaySeconds`. Missing timing fields retain the version-1 manual-delay behavior. `firstShotTiming` controls the first ball and the transition into the next repetition; the ordinary extra `delayBetweenSets` defaults to zero.
 
 ## Links and QR
 
