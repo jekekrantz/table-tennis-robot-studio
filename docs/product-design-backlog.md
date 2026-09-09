@@ -35,6 +35,10 @@ Captured 2026-09-04. These are product observations and future work, not complet
   Nova-representable, wheel-quantized trajectory used by feasibility checks.
 - Prevent a small interval expansion from excluding the otherwise unchanged
   default shot because its ideal and representable outcomes differ slightly.
+- Give a new Shot forgiving initial ranges around its nominal outcome: ±15 cm
+  depth, ±18 cm lateral placement, ±3 cm clearance, ±0.8 m/s speed, and ±10 rps
+  spin, clipped only at table and editor limits. Outcome-mode launch controls
+  remain free so the solver can satisfy those visible ranges.
 
 ### Improve back and folder navigation — completed 2026-09-04
 

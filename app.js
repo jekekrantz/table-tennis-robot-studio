@@ -697,19 +697,22 @@
     const depthCm = landing ? (landing.x - prediction.table.length / 2) * 100 : prediction.table.length * 25;
     const lateralCm = landing ? landing.y * 100 : 0;
     const clearanceCm = Number.isFinite(prediction.net?.clearanceM) ? prediction.net.clearanceM * 100 : 8;
+    const tableDepthCm = prediction.table.length * 50;
+    const tableHalfWidthCm = prediction.table.width * 50;
+    const spread = node.type === "serve"
+      ? { depthCm: 6, lateralCm: 8, clearanceCm: 1.5, speedMps: .3, spinRps: 4 }
+      : { depthCm: 15, lateralCm: 18, clearanceCm: 3, speedMps: .8, spinRps: 10 };
     return ShotVariation.normalizeVariation({
       enabled: true,
       placement: {
-        depthMinCm: depthCm, depthMaxCm: depthCm,
-        lateralMinCm: lateralCm, lateralMaxCm: lateralCm,
+        depthMinCm: Math.max(0, depthCm - spread.depthCm),
+        depthMaxCm: Math.min(tableDepthCm, depthCm + spread.depthCm),
+        lateralMinCm: Math.max(-tableHalfWidthCm, lateralCm - spread.lateralCm),
+        lateralMaxCm: Math.min(tableHalfWidthCm, lateralCm + spread.lateralCm),
       },
-      speed: { minMps: params.speedMps, maxMps: params.speedMps },
-      spin: { minRps: params.spinRps, maxRps: params.spinRps },
-      clearance: { minCm: clearanceCm, maxCm: clearanceCm },
-      launch: {
-        minElevationDeg: params.elevationDeg, maxElevationDeg: params.elevationDeg,
-        minAimDeg: params.aimDeg, maxAimDeg: params.aimDeg,
-      },
+      speed: { minMps: params.speedMps - spread.speedMps, maxMps: params.speedMps + spread.speedMps },
+      spin: { minRps: params.spinRps - spread.spinRps, maxRps: params.spinRps + spread.spinRps },
+      clearance: { minCm: clearanceCm - spread.clearanceCm, maxCm: clearanceCm + spread.clearanceCm },
     }, params, prediction.net?.clearanceM);
   }
 

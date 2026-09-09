@@ -209,6 +209,11 @@ if 'params: { speedMps: 6.26, spinRps: 10, elevationDeg: 10.3, aimDeg: 0 }' not 
     raise SystemExit("New-shot default must use the re-solved safe light-topspin ball")
 if 'let prediction = novaFeasiblePrediction(params, null, trajectoryOptionsForNode(node));' not in app:
     raise SystemExit("Default intuitive intervals must use the same Nova-representable trajectory as validation")
+for token in ('depthCm: 15, lateralCm: 18, clearanceCm: 3, speedMps: .8, spinRps: 10',
+              'depthMinCm: Math.max(0, depthCm - spread.depthCm)',
+              'speed: { minMps: params.speedMps - spread.speedMps, maxMps: params.speedMps + spread.speedMps }'):
+    if token not in app:
+        raise SystemExit("New shots must start with forgiving, non-zero outcome intervals")
 if 'const prediction = novaFeasiblePrediction(p, null, options) || predictTrajectory(p, null, options);' not in app:
     raise SystemExit("Intuitive shot display must prefer the Nova-representable trajectory")
 if 'params: { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 }' not in app:
