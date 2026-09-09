@@ -29,6 +29,13 @@ Captured 2026-09-04. These are product observations and future work, not complet
 - Added regression checks tying topspin, backspin, and no-spin preset names to
   the expected spin direction.
 
+### Keep default shot intervals self-consistent — completed 2026-09-09
+
+- Initialize and display intuitive outcome intervals from the same
+  Nova-representable, wheel-quantized trajectory used by feasibility checks.
+- Prevent a small interval expansion from excluding the otherwise unchanged
+  default shot because its ideal and representable outcomes differ slightly.
+
 ### Improve back and folder navigation — completed 2026-09-04
 
 - Increased Back controls to a minimum 48 × 48 px target, including on phones.

@@ -676,7 +676,10 @@
 
   function defaultIntuitiveVariation(node) {
     let params = node.params;
-    let prediction = predictTrajectory(params, null, trajectoryOptionsForNode(node));
+    // Initialize outcome intervals from the same Nova-representable trajectory
+    // the interval sampler validates. Using the ideal unquantized flight here
+    // could make the untouched default shot exclude itself.
+    let prediction = novaFeasiblePrediction(params, null, trajectoryOptionsForNode(node));
     if (!receiverPredictionValid(node, prediction)) {
       const nearest = shotEnvelopeCloud(node).reduce((best, point) => {
         const score = ((point.params.speedMps - params.speedMps) / 5) ** 2
@@ -3803,7 +3806,8 @@
   function intuitiveShotInspectorHtml(node) {
     const p = node.params;
     const serve = node.type === "serve";
-    const prediction = predictTrajectory(p, null, trajectoryOptionsForNode(node, true));
+    const options = trajectoryOptionsForNode(node, true);
+    const prediction = novaFeasiblePrediction(p, null, options) || predictTrajectory(p, null, options);
     const variation = node.variation?.enabled
       ? ShotVariation.normalizeVariation(node.variation, p, prediction.net?.clearanceM)
       : defaultIntuitiveVariation(node);

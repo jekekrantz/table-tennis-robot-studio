@@ -207,6 +207,10 @@ if 'distanceTrajectorySvg(' in app:
     raise SystemExit("Obsolete one-dimensional landing-distance visualization remains")
 if 'params: { speedMps: 6.26, spinRps: 10, elevationDeg: 10.3, aimDeg: 0 }' not in app:
     raise SystemExit("New-shot default must use the re-solved safe light-topspin ball")
+if 'let prediction = novaFeasiblePrediction(params, null, trajectoryOptionsForNode(node));' not in app:
+    raise SystemExit("Default intuitive intervals must use the same Nova-representable trajectory as validation")
+if 'const prediction = novaFeasiblePrediction(p, null, options) || predictTrajectory(p, null, options);' not in app:
+    raise SystemExit("Intuitive shot display must prefer the Nova-representable trajectory")
 if 'params: { speedMps: 5.0, spinRps: -8, elevationDeg: -16.0, aimDeg: 0 }' not in app:
     raise SystemExit("New-serve default must model two legal table bounces with a post-bounce net crossing")
 
