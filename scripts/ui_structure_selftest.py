@@ -37,6 +37,9 @@ for expected in [
     if expected not in ids:
         raise SystemExit(f"Missing required UI control: {expected}")
 
+if 'data-player-model-field="spinChangeRecognitionSeconds"' not in html:
+    raise SystemExit("Missing advanced spin-change recognition setting")
+
 # Production uses one generated runtime bundle so a partial GitHub Pages upload cannot
 # mix a new app shell with missing/old dependency files. Source files stay separate for
 # development/tests and scripts/build_runtime_bundle.py verifies bundle freshness.

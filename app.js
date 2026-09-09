@@ -2839,7 +2839,6 @@
   function edgeTimingRange(drill, edge) {
     const source = getNode(drill, edge.source);
     const target = getNode(drill, edge.target);
-    let estimate = .95 / Math.max(.1, finite(edge.autoSpeedPct, 100) / 100);
     if (isBallNode(source) && isBallNode(target)) {
       const cacheKey = JSON.stringify([source.params, source.variation, target.params, target.variation, activePlayerModel(), edge.autoSpeedPct, drillPose(drill), library.calibration.table]);
       if (timingRangeCache.has(cacheKey)) return timingRangeCache.get(cacheKey);
@@ -2870,17 +2869,15 @@
         timingRangeCache.set(cacheKey, range);
         return range;
       }
-    } else if (target?.type === "serve") {
-      estimate += activePlayerModel().servePreparationSeconds;
     }
-    const varied = Boolean(source?.variation?.enabled || target?.variation?.enabled);
-    const spread = varied ? .15 : .06;
-    return [Math.max(1 / NOVA_LIMITS.frequencyHzMax, estimate * (1 - spread)), estimate * (1 + spread)];
+    return null;
   }
 
   function edgeTimingLabel(drill, edge) {
     if (edge.timingMode !== "adaptive") return `M: ${fmt(edge.delaySeconds, 2)}s`;
-    const [minimum, maximum] = edgeTimingRange(drill, edge);
+    const range = edgeTimingRange(drill, edge);
+    if (!range) return "A: dynamic";
+    const [minimum, maximum] = range;
     return `A: ${fmt(minimum, 2)}s-${fmt(maximum, 2)}s`;
   }
 

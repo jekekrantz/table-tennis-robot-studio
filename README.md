@@ -226,7 +226,9 @@ pre_pause_seconds = 1 / frequency_hz
 
 Connections can use a constant Manual delay or Adaptive Auto timing. Adaptive timing
 uses the exact varied source and target balls, their modeled post-bounce contact times,
-player movement and return rhythm, and additional preparation before a new serve.
+player movement and return rhythm, recognition time for meaningful spin changes, and
+additional preparation before a new serve. Timing labels on control-flow connections
+are shown as `A: dynamic` because their exact ball-to-ball context is only known during traversal.
 The active saved player model applies globally; Timing speed is its single routine
 control, while movement and recovery parameters are under Advanced settings on Robot.
 Directly encodable delays are approximately 0.667–2.000 s; longer delays are split

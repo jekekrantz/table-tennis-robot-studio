@@ -8,7 +8,23 @@
   const DEFAULT_PLAYER_MODEL = Object.freeze({
     id: "player-balanced",
     name: "Balanced player",
+    modelVersion: 2,
     timingSpeedPct: 100,
+    baseStrokeRecoverySeconds: .25,
+    minimumContactGapSeconds: .46,
+    lateralAccelerationMps2: 8.5,
+    lateralMaxSpeedMps: 3,
+    depthAccelerationMps2: 6,
+    depthMaxSpeedMps: 2.3,
+    returnTurnaroundSeconds: .05,
+    returnSpeedRatio: .9,
+    minimumReturnSpeedMps: 4.5,
+    maximumReturnSpeedMps: 11,
+    spinChangeRecognitionSeconds: .14,
+    servePreparationSeconds: .9,
+  });
+
+  const LEGACY_BALANCED_MODEL_V1 = Object.freeze({
     baseStrokeRecoverySeconds: .30,
     minimumContactGapSeconds: .50,
     lateralAccelerationMps2: 7,
@@ -27,12 +43,20 @@
 
   function normalizePlayerModel(raw = {}, fallbackId = DEFAULT_PLAYER_MODEL.id) {
     const d = DEFAULT_PLAYER_MODEL;
-    const value = { ...d, ...(raw || {}) };
+    let source = { ...(raw || {}) };
+    if ((source.id || fallbackId) === d.id && finite(source.modelVersion, 1) < d.modelVersion) {
+      source = { ...source, modelVersion: d.modelVersion };
+      for (const [key, oldDefault] of Object.entries(LEGACY_BALANCED_MODEL_V1)) {
+        if (source[key] == null || Math.abs(finite(source[key], oldDefault) - oldDefault) < 1e-9) source[key] = d[key];
+      }
+    }
+    const value = { ...d, ...source };
     const minimumReturnSpeedMps = clamp(value.minimumReturnSpeedMps, 1, 15);
     const maximumReturnSpeedMps = Math.max(minimumReturnSpeedMps, clamp(value.maximumReturnSpeedMps, 2, 25));
     return {
       id: String(raw?.id || fallbackId),
       name: String(value.name || "Player").trim().slice(0, 60) || "Player",
+      modelVersion: Math.max(1, Math.trunc(finite(value.modelVersion, d.modelVersion))),
       timingSpeedPct: clamp(value.timingSpeedPct, 50, 200),
       baseStrokeRecoverySeconds: clamp(value.baseStrokeRecoverySeconds, .1, 1.5),
       minimumContactGapSeconds: clamp(value.minimumContactGapSeconds, .2, 3),
@@ -44,6 +68,7 @@
       returnSpeedRatio: clamp(value.returnSpeedRatio, .2, 1.5),
       minimumReturnSpeedMps,
       maximumReturnSpeedMps,
+      spinChangeRecognitionSeconds: clamp(value.spinChangeRecognitionSeconds, 0, .5),
       servePreparationSeconds: clamp(value.servePreparationSeconds, 0, 5),
     };
   }
@@ -82,6 +107,14 @@
     return .06 * speedScore + .05 * spinScore + .05 * lowScore;
   }
 
+  function spinChangeTime(a, b, model) {
+    const spinA = finite(a?.spinRps, 0);
+    const spinB = finite(b?.spinRps, 0);
+    const change = clamp(Math.abs(spinB - spinA) / 50, 0, 1);
+    const reversal = Math.abs(spinA) >= 5 && Math.abs(spinB) >= 5 && Math.sign(spinA) !== Math.sign(spinB) ? .35 : 0;
+    return model.spinChangeRecognitionSeconds * Math.min(1, change + reversal);
+  }
+
   function virtualReturnTime(contact, table, model) {
     const target = { x: Math.max(0, finite(table?.length, 2.74) * .25), y: 0 };
     const distance = Math.hypot(contact.x - target.x, contact.y - target.y);
@@ -100,7 +133,10 @@
     const playerGap = model.baseStrokeRecoverySeconds + move + difficultyTime(contactA)
       + reversalTime(previousContact, contactA, contactB);
     const rallyGap = virtualReturnTime(contactA, table, model) + contactB.t;
-    const desiredGap = Math.max(model.minimumContactGapSeconds, playerGap, rallyGap);
+    // Recognition affects the player regardless of whether movement or rally
+    // flight is otherwise the limiting term, so add it after selecting that limit.
+    const desiredGap = Math.max(model.minimumContactGapSeconds, playerGap, rallyGap)
+      + spinChangeTime(contactA, contactB, model);
     const servePreparation = targetType === "serve" ? model.servePreparationSeconds : 0;
     const speedMultiplier = Math.max(.1, model.timingSpeedPct / 100) * Math.max(.1, finite(edgeSpeedPct, 100) / 100);
     return Math.max(0, (desiredGap + contactA.t - contactB.t + servePreparation) / speedMultiplier);
@@ -113,6 +149,7 @@
     movementTime,
     reversalTime,
     difficultyTime,
+    spinChangeTime,
     virtualReturnTime,
     delaySeconds,
   };

@@ -28,6 +28,7 @@ assert(app.includes('initialTimingHistory: timingHistorySnapshot(timingHistory)'
 assert(app.includes('rebuildPlaybackBatchForLiveTuning(original, context.timingHistory)'), 'active-slot tuning must use the contacts preceding that slot');
 assert(app.includes('completedTimingHistory = timingHistoryAfter(completedTimingHistory, batch.shots)'), 'completed shots must become timing context across set and sub-drill boundaries');
 assert(app.includes('if (!planMore(timingHistory)) return null'), 'new planning windows must inherit preceding contacts instead of resetting adaptive timing');
+assert(app.includes('if (!range) return "A: dynamic"'), 'control-flow edges must not display invented numeric timing ranges');
 const pacedOnce = Adjustments.delayWithPace(1.2, { pacePct: -50 });
 assert.strictEqual(pacedOnce, 2.4, 'the authored delay must receive Pace exactly once');
 assert.notStrictEqual(pacedOnce, Adjustments.delayWithPace(pacedOnce, { pacePct: -50 }), 'a second Pace pass would regress live timing');
