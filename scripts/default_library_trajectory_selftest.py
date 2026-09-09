@@ -325,8 +325,15 @@ def main():
     assert default_serve[2][0] > 0, f"default serve hits the net: {default_serve[2][0]*100:.2f} cm"
 
     presets = parse_presets()
-    assert len(presets) >= 18, f"expected an expanded preset library, found {len(presets)}"
+    assert len(presets) >= 21, f"expected an expanded preset library, found {len(presets)}"
     for preset in presets:
+        key = preset["key"].lower()
+        if "topspin" in key or key.startswith("fastdeep"):
+            assert preset["spin"] > 0, f"{preset['key']}: attacking/rally feed must have topspin"
+        if "backspin" in key:
+            assert preset["spin"] < 0, f"{preset['key']}: push/underspin feed must have backspin"
+        if "nospin" in key:
+            assert preset["spin"] == 0, f"{preset['key']}: explicitly no-spin feed is not neutral"
         landing, net = simulate(preset["speed"], preset["spin"], preset["elev"], preset["aim"])
         assert landing is not None and net is not None, f"{preset['key']}: no complete table trajectory"
         target_error = math.hypot(landing[0] - preset["x"], landing[1] - preset["y"])

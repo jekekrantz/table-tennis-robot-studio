@@ -5616,7 +5616,7 @@ root.TTRSQRCode={
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  const DEFAULT_LIBRARY_VERSION = 8;
+  const DEFAULT_LIBRARY_VERSION = 9;
 
   const DEFAULT_VARIATION_PROFILES = Object.freeze({
     neutral: Object.freeze({ depthCm: 10, lateralCm: 12, clearanceDeltaCm: 2, speedDeltaMps: .5, spinDeltaRps: 2 }),
@@ -5710,6 +5710,24 @@ root.TTRSQRCode={
       variationProfile: "spin",
       params: { speedMps: 4.84, spinRps: -18, elevationDeg: 13.4, aimDeg: 0 },
       target: { xM: 2.081, yM: 0, netClearanceCm: 12.0 },
+    },
+    deepBackspinForehand: {
+      label: "Deep push feed to forehand",
+      variationProfile: "spin",
+      params: { speedMps: 5.9, spinRps: -22, elevationDeg: 8, aimDeg: 11.5 },
+      target: { xM: 2.277, yM: 0.414, netClearanceCm: 9.8 },
+    },
+    deepBackspinBackhand: {
+      label: "Deep push feed to backhand",
+      variationProfile: "spin",
+      params: { speedMps: 5.9, spinRps: -22, elevationDeg: 8, aimDeg: -11.5 },
+      target: { xM: 2.277, yM: -0.414, netClearanceCm: 9.8 },
+    },
+    deepBackspinCenter: {
+      label: "Deep push feed to middle",
+      variationProfile: "spin",
+      params: { speedMps: 5.9, spinRps: -22, elevationDeg: 8, aimDeg: 0 },
+      target: { xM: 2.318, yM: 0, netClearanceCm: 10.1 },
     },
     fastDeepForehand: {
       label: "Fast deep to forehand",
@@ -6205,6 +6223,21 @@ root.TTRSQRCode={
       ["backspinBackhand", "backspinForehand"],
       { repetitions: 18, intervalSeconds: .92, labels: ["Backspin · backhand", "Backspin · forehand"], varied: true }
     );
+    const backhandPushConsistency = singleShotDrill(
+      "Push: Backhand consistency",
+      "deepBackspinBackhand",
+      { repetitions: 36, intervalSeconds: .95 }
+    );
+    const alternatingPushes = sequenceDrill(
+      "Push: Forehand / backhand alternating",
+      ["deepBackspinForehand", "deepBackspinBackhand"],
+      { repetitions: 18, intervalSeconds: .95, labels: ["Forehand push", "Backhand push"], varied: true }
+    );
+    const randomPushPlacement = randomDrill("Push: Random placement", [
+      { key: "deepBackspinBackhand", label: "Push · backhand", weight: 3 },
+      { key: "deepBackspinCenter", label: "Push · middle", weight: 2 },
+      { key: "deepBackspinForehand", label: "Push · forehand", weight: 3 },
+    ], { repetitions: 36, intervalSeconds: .95, randomLabel: "Read the push placement" });
     const fastDeepRandom = randomDrill("Drill: Fast deep random", [
       { key: "fastDeepBackhand", label: "Deep backhand" },
       { key: "fastDeepCenter", label: "Deep elbow" },
@@ -6306,6 +6339,9 @@ root.TTRSQRCode={
         threeSpots,
         spinSwitch,
         backspinCorners,
+        backhandPushConsistency,
+        alternatingPushes,
+        randomPushPlacement,
         fastDeepRandom,
         variableTopspin,
         variableShortReceive,
@@ -6360,6 +6396,9 @@ root.TTRSQRCode={
     "Drill: Three spots random": "builtin-random",
     "Drill: Topspin / backspin switching": "builtin-spin",
     "Drill: Backspin corners": "builtin-spin",
+    "Push: Backhand consistency": "builtin-spin",
+    "Push: Forehand / backhand alternating": "builtin-spin",
+    "Push: Random placement": "builtin-spin",
     "Drill: Fast deep random": "builtin-random",
     "Drill: Variable topspin rally": "builtin-random",
     "Drill: Variable short receive": "builtin-random",
@@ -6384,7 +6423,7 @@ root.TTRSQRCode={
   });
 
   function builtInDisplayName(name) {
-    return String(name || "").replace(/^(?:Drill|Shot|Match|Serve receive|Serve):\s*/, "");
+    return String(name || "").replace(/^(?:Drill|Shot|Match|Push|Serve receive|Serve):\s*/, "");
   }
 
   function stableBuiltInId(name) {
@@ -8263,23 +8302,36 @@ root.TTRSQRCode={
     }
 
     const selectedEdge = selection?.kind === "edge" ? getEdge(drill, selection.id) : null;
-    const selectedNode = selection?.kind === "node" ? getNode(drill, selection.id) : null;
+    const mostRecentlyCreatedNode = drill.nodes.at(-1) || null;
+    const previousStartNode = getNode(drill, drill.startNodeId);
     const placement = findFreeNodePosition(drill, node);
     node.x = placement.x;
     node.y = placement.y;
     drill.nodes.push(node);
 
-    if (!drill.startNodeId) {
+    const connect = (source, target, sourceSlot = source.type === "counter" ? "B" : source.type === "random" ? "branch" : "next") => {
+      drill.edges.push({ id: makeId("edge"), source: source.id, sourceSlot, target: target.id, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
+    };
+
+    if (node.type === "serve") {
+      // A serve begins the rally. Put it before the existing start rather than
+      // attaching it to whichever node happened to be selected.
+      drill.startNodeId = node.id;
+      if (previousStartNode) connect(node, previousStartNode);
+    } else if (!drill.startNodeId) {
       drill.startNodeId = node.id;
     } else if (selectedEdge) {
       const oldTarget = selectedEdge.target;
       selectedEdge.target = node.id;
-      drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: node.type === "counter" ? "B" : node.type === "random" ? "branch" : "next", target: oldTarget, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
-    } else if (selectedNode) {
-      if (selectedNode.type === "random") {
-        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: "branch", target: node.id, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
-      } else if (!outgoing(drill, selectedNode.id).length) {
-        drill.edges.push({ id: makeId("edge"), source: selectedNode.id, sourceSlot: selectedNode.type === "counter" ? "B" : "next", target: node.id, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
+      connect(node, getNode(drill, oldTarget));
+    } else if (mostRecentlyCreatedNode) {
+      if (mostRecentlyCreatedNode.type === "random") {
+        connect(mostRecentlyCreatedNode, node, "branch");
+      } else {
+        const sourceSlot = mostRecentlyCreatedNode.type === "counter" ? "B" : "next";
+        if (!edgeForSlot(drill, mostRecentlyCreatedNode.id, sourceSlot)) {
+          connect(mostRecentlyCreatedNode, node, sourceSlot);
+        }
       }
     }
 
@@ -8292,7 +8344,7 @@ root.TTRSQRCode={
   function openAddNodeMenu() {
     if (!activeDrillEditable()) { toast("Copy this built-in preset to My drills before editing it."); return; }
     els.addNodeDialogTitle.textContent = "Add to drill";
-    els.addNodeDialogSubtitle.textContent = selection?.kind === "edge" ? "The new step will be inserted into the selected path." : selection?.kind === "node" ? "The new step will be connected after the selected node when possible." : "Choose what to add.";
+    els.addNodeDialogSubtitle.textContent = selection?.kind === "edge" ? "The new step will be inserted into the selected path." : "The new step will follow the one you most recently added when possible.";
     els.addNodeChoicePanel.hidden = false;
     els.addNodeConfigPanel.hidden = true;
     els.addNodeConfigPanel.replaceChildren();
@@ -13501,7 +13553,10 @@ root.TTRSQRCode={
     selection = null;
     commit({ message: "New drill created" });
     navigateApp("editor", { push: true });
-    setTimeout(fitGraph, 30);
+    setTimeout(() => {
+      fitGraph();
+      openAddNodeMenu();
+    }, 30);
   }
 
   function copyActiveBuiltInToMyDrills() {

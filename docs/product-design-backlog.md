@@ -12,6 +12,23 @@ Captured 2026-09-04. These are product observations and future work, not complet
 
 ## Completed
 
+### Streamline new drill construction — completed 2026-09-09
+
+- Opening a new drill immediately opens the node-type chooser.
+- A newly added Serve becomes the first step and connects to the previous start
+  when one exists.
+- Other new nodes connect from the most recently created node when that output
+  is available; selecting an edge still inserts the node into that path.
+
+### Audit built-in club-training drills — completed 2026-09-09
+
+- Confirmed rally, footwork, and attacking feeds use positive topspin; zero-spin
+  remains limited to drills explicitly teaching or recognizing no-spin balls.
+- Added deep, heavy-underspin feeds and dedicated backhand consistency,
+  forehand/backhand alternating, and random-placement push drills.
+- Added regression checks tying topspin, backspin, and no-spin preset names to
+  the expected spin direction.
+
 ### Improve back and folder navigation — completed 2026-09-04
 
 - Increased Back controls to a minimum 48 × 48 px target, including on phones.

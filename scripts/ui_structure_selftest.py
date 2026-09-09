@@ -61,6 +61,16 @@ for token in ('type === "serve"', 'function makeServe', 'trajectoryOptionsForNod
               'Valid modeled serve', 'addNode(type, draft)'):
     if token not in app:
         raise SystemExit(f"Missing first-class Serve integration: {token}")
+for token in (
+    'const mostRecentlyCreatedNode = drill.nodes.at(-1) || null;',
+    'if (node.type === "serve") {',
+    'drill.startNodeId = node.id;',
+    'if (previousStartNode) connect(node, previousStartNode);',
+    'connect(mostRecentlyCreatedNode, node, "branch");',
+    'openAddNodeMenu();',
+):
+    if token not in app:
+        raise SystemExit(f"Missing low-friction drill creation behavior: {token}")
 if '["shot", "serve", "random", "drill", "counter"]' not in app:
     raise SystemExit("Serve must be accepted by saved/imported drill sanitization")
 if "['shot','serve','random','drill','counter']" not in core:
@@ -307,6 +317,8 @@ for name in (
     "Match: Short backhand underspin → forehand recovery", "Match: Short receive → random long attack",
     "Match: Backhand exchange → switch", "Match: Weighted rally", "Match: Random pattern mix",
     "Drill: Variable topspin rally", "Drill: Variable short receive",
+    "Push: Backhand consistency", "Push: Forehand / backhand alternating",
+    "Push: Random placement",
     "Serve: Short backspin to backhand", "Serve: Short no-spin to middle",
     "Serve: Fast long topspin to backhand", "Serve receive: Short backspin → third-ball attack",
     "Serve receive: Fast long → backhand pressure", "Serve receive: Backspin / no-spin recognition",
@@ -328,7 +340,7 @@ if 'name: "Serve / receive"' not in app:
 for token in ("makeBuiltInCatalog", "sanitizeLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
     if token not in app:
         raise SystemExit(f"Missing separated-library model: {token}")
-for token in ('const DEFAULT_LIBRARY_VERSION = 8;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
+for token in ('const DEFAULT_LIBRARY_VERSION = 9;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
               'variationProfile: "shortNeutral"', 'variationProfile: "short"', 'variationProfile: "rally"',
               'variationProfile: "deep"', 'variationProfile: "spin"',
               'variationProfile: "fast"', 'variationProfile: "serveShort"', 'variationProfile: "serveFast"',
@@ -336,7 +348,7 @@ for token in ('const DEFAULT_LIBRARY_VERSION = 8;', 'DEFAULT_VARIATION_PROFILES'
               'shot.variation = variationForPreset(DEFAULT_SHOT_PRESETS[key]);'):
     if token not in app:
         raise SystemExit(f"Built-in library variation integration missing: {token}")
-if app.count('variationProfile:') != 23:
+if app.count('variationProfile:') != 26:
     raise SystemExit("Every built-in shot and serve preset must select exactly one variation profile")
 for token in ('labels: ["Variable topspin"], varied: true',
               'randomLabel: "Variable short underspin"',

@@ -23,9 +23,9 @@ vm.runInContext(`${source.slice(start, end)}\nglobalThis.auditCatalog = {
 };`, context);
 
 const { sample, shotPresets, servePresets } = context.auditCatalog;
-assert.strictEqual(sample.drills.length, 42, 'the complete built-in catalog must contain 42 drills');
+assert.strictEqual(sample.drills.length, 45, 'the complete built-in catalog must contain 45 drills');
 const drillsById = new Map(sample.drills.map(drill => [drill.id, drill]));
-assert.strictEqual(drillsById.size, 42, 'built-in drill ids must be unique');
+assert.strictEqual(drillsById.size, 45, 'built-in drill ids must be unique');
 
 const shotSignatures = new Set(Object.values(shotPresets).map(preset => JSON.stringify(preset.params)));
 const serveSignatures = new Set(Object.values(servePresets).map(preset => JSON.stringify(preset.params)));
@@ -82,5 +82,12 @@ for (const drill of sample.drills) {
 }
 assert.strictEqual(reachableServes, 15, 'expected all 15 reachable serve nodes in the built-in drills');
 assert.strictEqual(usedServeSignatures.size, Object.keys(servePresets).length, 'every built-in serve preset must be exercised by a drill');
+for (const name of ['Push: Backhand consistency', 'Push: Forehand / backhand alternating', 'Push: Random placement']) {
+  const drill = sample.drills.find(candidate => candidate.name === name);
+  assert(drill, `${name}: missing push drill`);
+  const feeds = drill.nodes.filter(node => node.type === 'shot');
+  assert(feeds.length, `${name}: has no playable push feeds`);
+  assert(feeds.every(node => node.params.spinRps < 0), `${name}: every feed must carry backspin`);
+}
 
-console.log(`Built-in library self-test PASS (42 drills, ${reachableBallNodes} reachable ball nodes: ${reachableShots} shots + ${reachableServes} serves)`);
+console.log(`Built-in library self-test PASS (45 drills, ${reachableBallNodes} reachable ball nodes: ${reachableShots} shots + ${reachableServes} serves)`);
