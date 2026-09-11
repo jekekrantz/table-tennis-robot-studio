@@ -7,7 +7,7 @@
   const MAX_EDGES=600;
   const APP_CAPABILITIES=`Table Tennis Robot Studio is a browser-based controller and drill builder for Pongbot Nova.
 - Library: browse built-in drills or My drills, use folders and search, create drills, and import/export or share drills.
-- Run: connect the robot, review the selected drill and robot pose, set repetitions and Adaptive Auto or manual repetition timing, play/stop, and use live tuning while a drill runs.
+- Run: preview sampled receiver-side landing positions, calibrate the robot pose, play continuously until Stop, and use Player tuning while a drill runs. Timing is authored on drill graph connections.
 - Drill editor: build sequences with Shot, Serve, Random choice, Repeat/loop, and Sub-drill nodes; configure placement, speed, spin, trajectory, variation, and timing.
 - Robot: connect/disconnect Nova, select and edit saved player models for Adaptive Auto timing, inspect status and diagnostics, open calibration, and configure idle STOP and BLE-disconnect timers. Idle STOP leaves BLE connected for a quick re-initialization; BLE disconnect releases the radio and requires reconnecting later.
 - Calibration: guided launch calibration, robot-pose calibration, and table/trajectory model settings.

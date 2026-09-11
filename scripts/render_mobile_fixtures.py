@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = ROOT / "artifacts" / "visual-fixtures"
 FIXTURES = (
-    "library", "run", "editor-graph", "add-node", "add-random", "add-repeat",
+    "library", "run", "run-ball", "editor-graph", "add-node", "add-random", "add-repeat",
     "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
     "pose-calibration", "robot", "calibration",
 )
@@ -31,6 +31,7 @@ SEAM_COLOR = (235, 61, 73)
 # Primary navigation and contextual transitions represented by the fixture set.
 NAVIGATION_EDGES = (
     ("library", "run", "open drill", False, None),
+    ("run", "run-ball", "swipe ball", True, None),
     ("library", "editor-graph", "edit drill", False, None),
     ("library", "add-node", "New drill", False, "new-drill"),
     ("library", "robot", "robot", False, None),
@@ -50,6 +51,7 @@ NAVIGATION_EDGES = (
 NAVIGATION_COLUMNS = {
     "library": 0,
     "run": 0,
+    "run-ball": 1,
     "pose-calibration": 0,
     "editor-graph": 2,
     "shot-intuitive": 2,
@@ -64,7 +66,7 @@ NAVIGATION_COLUMNS = {
 }
 
 NAVIGATION_GROUPS = (
-    ("Drill workflow", ("library", "run"), "#274463"),
+    ("Drill workflow", ("library", "run", "run-ball"), "#274463"),
     ("Drill pose", ("pose-calibration",), "#315b55"),
     ("Edit and add to drill", ("editor-graph", "add-node", "shot-intuitive", "serve-intuitive", "add-random", "add-repeat", "add-subdrill", "shot-manual"), "#59406d"),
     ("Robot setup", ("robot", "calibration"), "#654a32"),
@@ -206,6 +208,7 @@ def navigation_map(rendered: dict[str, Path], output: Path, phone_width: int, ph
     workflow_y = node_tops["library"] + card_heights["library"] + gap_y
     node_tops.update({
         "run": workflow_y,
+        "run-ball": workflow_y,
         "editor-graph": workflow_y,
         "add-node": workflow_y,
     })

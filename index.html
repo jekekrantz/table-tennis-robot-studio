@@ -68,17 +68,24 @@
 
         <div class="run-page-grid">
           <section class="run-player-card panel-card">
-            <div class="run-connection-strip">
-              <span class="connection-label"><span id="runConnectionDot" class="status-dot disconnected"></span><strong id="runConnectionText">Nova disconnected</strong></span>
-              <button id="runRobotBtn" class="button compact ghost" type="button">Robot</button>
-            </div>
             <section class="run-controls" aria-label="Drill playback controls">
               <button id="playBtn" class="play-button run-play-button" type="button"><span id="playIcon" aria-hidden="true">▶</span><span id="playText">Play</span></button>
-              <label class="header-field"><span>Repetitions</span><span class="set-stepper"><button id="repetitionsDownBtn" type="button" aria-label="Decrease repetitions">−</button><input id="repetitionsInput" type="text" inputmode="numeric" value="3" aria-label="Number of repetitions; infinity means repeat indefinitely"><button id="repetitionsUpBtn" type="button" aria-label="Increase repetitions">＋</button></span></label>
-              <label class="header-field"><span>First ball / repetitions</span><select id="setTimingModeInput"><option value="adaptive">Adaptive Auto</option><option value="manual">Manual</option></select></label>
-              <label id="setDelayField" class="header-field delay-field" hidden><span>Manual repetition delay</span><span class="input-with-unit"><input id="setDelayInput" type="number" min="0" max="3600" step="0.1" value="1"><small>s</small></span></label>
-              <div class="run-progress-block"><span id="runStatus" class="run-status" aria-live="polite">Ready</span><div class="progress-track" aria-hidden="true"><div id="runProgressBar" class="progress-bar"></div></div></div>
+              <button id="updateRobotPoseBtn" class="button run-calibrate-button primary" type="button">Calibrate pose</button>
+              <span id="runStatus" class="run-status" aria-live="polite"></span>
             </section>
+          </section>
+
+          <section class="run-preview-card panel-card" aria-labelledby="runPreviewTitle">
+            <div class="run-preview-heading">
+              <h3 id="runPreviewTitle">Landing preview</h3>
+              <span class="preview-only-label">12 samples</span>
+            </div>
+            <div id="runLandingPreview" class="run-landing-preview" aria-live="polite"></div>
+            <div class="run-preview-navigation">
+              <button id="runPreviewPreviousBtn" class="run-preview-arrow" type="button" aria-label="Previous preview page">‹</button>
+              <div id="runPreviewPages" class="run-preview-pages" role="tablist" aria-label="Landing preview pages"></div>
+              <button id="runPreviewNextBtn" class="run-preview-arrow" type="button" aria-label="Next preview page">›</button>
+            </div>
           </section>
 
           <section class="session-adjustments-card panel-card">
@@ -89,15 +96,15 @@
               <div class="session-adjustment" data-run-tuning="speedPct"><strong>Speed</strong><div class="tuning-slider-row compact"><button type="button" data-tuning-key="speedPct" data-tuning-delta="-1" aria-label="Decrease speed by 1 percent">−</button><label class="tuning-range"><input type="range" min="-50" max="50" step="1" value="0" data-tuning-range="speedPct" aria-label="Speed"><output data-tuning-output="speedPct">0%</output></label><button type="button" data-tuning-key="speedPct" data-tuning-delta="1" aria-label="Increase speed by 1 percent">+</button></div></div>
               <div class="session-adjustment" data-run-tuning="spinPct"><strong>Spin</strong><div class="tuning-slider-row compact"><button type="button" data-tuning-key="spinPct" data-tuning-delta="-1" aria-label="Decrease spin by 1 percent">−</button><label class="tuning-range"><input type="range" min="-100" max="300" step="1" value="0" data-tuning-range="spinPct" aria-label="Spin"><output data-tuning-output="spinPct">0%</output></label><button type="button" data-tuning-key="spinPct" data-tuning-delta="1" aria-label="Increase spin by 1 percent">+</button></div></div>
             </div>
-            <p id="liveTuningSummary" class="session-adjustment-summary">No adjustments</p>
+            <p id="liveTuningSummary" class="session-adjustment-summary"></p>
           </section>
 
           <section class="run-setup-card panel-card">
-            <div class="section-title-row"><h3>Robot setup</h3><div class="section-title-actions"><details class="info-disclosure"><summary aria-label="About robot setup">i</summary><div class="info-popover">The current robot position is compensated at runtime. The source drill stays unchanged.</div></details><button id="updateRobotPoseBtn" class="button compact primary" type="button">Calibrate pose</button></div></div>
+            <div class="section-title-row"><h3>Robot setup</h3><div class="section-title-actions"><details class="info-disclosure"><summary aria-label="About robot setup">i</summary><div class="info-popover">The current robot position is compensated at runtime. The source drill stays unchanged.</div></details></div></div>
             <div id="runRobotSetup" class="robot-setup-summary"></div>
             <p id="runPoseStatus" class="session-adjustment-summary"></p>
             <div class="run-secondary-actions">
-              <button id="previewBtn" class="button ghost" type="button">Preview sequence</button>
+              <button id="previewBtn" class="button ghost" type="button">Sequence details</button>
               <button id="runEditDrillBtn" class="button primary" type="button">✎ Edit drill</button>
               <button id="saveEffectiveDrillBtn" class="button ghost" type="button">Save current setup as new drill</button>
             </div>

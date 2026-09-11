@@ -54,7 +54,7 @@ Version 1 allows the same current graph node types as the app (`shot`, `serve`, 
 
 Shot `variation` is optional. Placement values are half-widths around the nominal modeled landing point. Clearance is measured from the top of the physical net to the bottom of the ball. Speed and spin ranges are physical launch values. Imported variation ranges are validated before the drill preview is shown.
 
-Connection timing is optional for compatibility. `timingMode: "adaptive"` derives the delay from the exact varied balls and uses `autoSpeedPct` as a rate from 50–200%. `timingMode: "manual"` uses `delaySeconds`. Missing timing fields retain the version-1 manual-delay behavior. `firstShotTiming` controls the first ball and the transition into the next repetition; the ordinary extra `delayBetweenSets` defaults to zero.
+Connection timing is optional for compatibility. `timingMode: "adaptive"` derives the delay from the exact varied balls and uses `autoSpeedPct` as a rate from 50–200%. `timingMode: "manual"` uses `delaySeconds`. Missing timing fields retain the version-1 manual-delay behavior. Continuous Run uses the first traversed graph connection for loop-entry timing; a single-ball drill without an edge falls back to Adaptive Auto. The legacy `firstShotTiming` field remains accepted on import but is no longer a separate Run control.
 
 ## Links and QR
 

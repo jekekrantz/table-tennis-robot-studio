@@ -58,7 +58,7 @@ map is embedded in the repository README as a user-facing app overview.
 Chromium is installed at a non-standard path. `visual-harness.html` shows all
 fixtures as live 390 × 844 frames when a browsable gallery is useful.
 
-Current fixtures cover Library, Run, the graph editor, intuitive and manual Shot
+Current fixtures cover Library, the Run landing overview and individual-ball preview, the graph editor, intuitive and manual Shot
 details, Serve details, the Add node chooser, Random/Repeat/Sub-drill creation,
 drill-pose calibration, Robot, and robot-model Calibration. The navigation map
 shows Add branching to all five node types and groups related workflows. When a

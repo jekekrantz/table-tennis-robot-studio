@@ -4799,7 +4799,7 @@ root.TTRSQRCode={
   const MAX_EDGES=600;
   const APP_CAPABILITIES=`Table Tennis Robot Studio is a browser-based controller and drill builder for Pongbot Nova.
 - Library: browse built-in drills or My drills, use folders and search, create drills, and import/export or share drills.
-- Run: connect the robot, review the selected drill and robot pose, set repetitions and Adaptive Auto or manual repetition timing, play/stop, and use live tuning while a drill runs.
+- Run: preview sampled receiver-side landing positions, calibrate the robot pose, play continuously until Stop, and use Player tuning while a drill runs. Timing is authored on drill graph connections.
 - Drill editor: build sequences with Shot, Serve, Random choice, Repeat/loop, and Sub-drill nodes; configure placement, speed, spin, trajectory, variation, and timing.
 - Robot: connect/disconnect Nova, select and edit saved player models for Adaptive Auto timing, inspect status and diagnostics, open calibration, and configure idle STOP and BLE-disconnect timers. Idle STOP leaves BLE connected for a quick re-initialization; BLE disconnect releases the radio and requires reconnecting later.
 - Calibration: guided launch calibration, robot-pose calibration, and table/trajectory model settings.
@@ -4929,17 +4929,10 @@ root.TTRSQRCode={
   const TableBounce = globalThis.TableBounce;
   const AdaptiveTiming = globalThis.AdaptiveTiming;
   const els = {
-    repetitionsInput: $("repetitionsInput"),
-    repetitionsDownBtn: $("repetitionsDownBtn"),
-    repetitionsUpBtn: $("repetitionsUpBtn"),
-    setDelayInput: $("setDelayInput"),
-    setDelayField: $("setDelayField"),
-    setTimingModeInput: $("setTimingModeInput"),
     playBtn: $("playBtn"),
     playIcon: $("playIcon"),
     playText: $("playText"),
     runStatus: $("runStatus"),
-    runProgressBar: $("runProgressBar"),
     robotConnectBtn: $("robotConnectBtn"),
     robotStatusBtn: $("robotStatusBtn"),
     robotStatusText: $("robotStatusText"),
@@ -5132,11 +5125,12 @@ root.TTRSQRCode={
     robotBackBtn: $("robotBackBtn"),
     runDrillTitle: $("runDrillTitle"),
     runDrillDescription: $("runDrillDescription"),
+    runLandingPreview: $("runLandingPreview"),
+    runPreviewPages: $("runPreviewPages"),
+    runPreviewPreviousBtn: $("runPreviewPreviousBtn"),
+    runPreviewNextBtn: $("runPreviewNextBtn"),
     runDrillMenuBtn: $("runDrillMenuBtn"),
     runEditDrillBtn: $("runEditDrillBtn"),
-    runRobotBtn: $("runRobotBtn"),
-    runConnectionDot: $("runConnectionDot"),
-    runConnectionText: $("runConnectionText"),
     runRobotSetup: $("runRobotSetup"),
     runPoseStatus: $("runPoseStatus"),
     updateRobotPoseBtn: $("updateRobotPoseBtn"),
@@ -5219,6 +5213,10 @@ root.TTRSQRCode={
   let liveRetuneTimer = null;
   let liveRetunePending = false;
   let liveRetuneInFlight = false;
+  let runPreviewPage = 0;
+  let runPreviewCache = null;
+  let runPreviewTimer = null;
+  let runPreviewPointerStart = null;
   let pendingRobotAction = null;
   let pendingRobotReason = "";
   let robotIdleTimer = null;
@@ -6834,27 +6832,9 @@ root.TTRSQRCode={
     if (message) toast(message);
   }
 
-  function repetitionsDisplay(value) {
-    return value <= 0 ? "∞" : String(value);
-  }
-
-  function setRepetitions(value) {
-    const drill = activeDrill();
-    if (!drill) return;
-    const normalized = Math.round(finite(value, 0));
-    drill.settings.repetitions = normalized <= 0 ? 0 : Math.min(999999, normalized);
-    els.repetitionsInput.value = repetitionsDisplay(drill.settings.repetitions);
-    if (activeDrillEditable()) saveLibrary();
-  }
-
   function currentSettingsToHeader() {
-    const drill = activeDrill();
-    if (!drill) return;
-    els.repetitionsInput.value = repetitionsDisplay(drill.settings.repetitions);
-    const timing = drill.settings.firstShotTiming || adaptiveTimingSpec(100);
-    els.setTimingModeInput.value = timing.mode;
-    els.setDelayInput.value = timing.mode === "manual" ? timing.delaySeconds : 1;
-    els.setDelayField.hidden = timing.mode !== "manual";
+    // Run has no separate session timing control. Timing belongs to the
+    // authored drill graph and continuous playback reuses that plan.
   }
 
   function appViewLabel(view) {
@@ -6885,8 +6865,8 @@ root.TTRSQRCode={
       context.localContext.push(`BLE disconnect: ${robotSettings.disconnectAfterMinutes ? `${robotSettings.disconnectAfterMinutes} minutes unused` : "Never"}`);
       context.localContext.push(`Adaptive timing player: ${activePlayerModel().name} at ${fmt(activePlayerModel().timingSpeedPct,0)}%`);
     } else if (!calibrationOpen && appView === "run" && drill) {
-      context.localContext.push(`Repetitions: ${drill.settings.repetitions > 0 ? drill.settings.repetitions : "Continuous"}`);
-      context.localContext.push(`Repetition timing: ${(drill.settings.firstShotTiming || adaptiveTimingSpec()).mode === "adaptive" ? "Adaptive Auto" : `${fmt(drill.settings.firstShotTiming.delaySeconds,2)} seconds Manual`}`);
+      context.localContext.push("Playback: continuous loops until stopped");
+      context.localContext.push("Timing: authored by drill graph connections");
     } else if (!calibrationOpen && appView === "editor") {
       context.localContext.push(`Editor controls: ${shotEditorMode === "manual" ? "Manual launch parameters" : "Intuitive placement"}`);
     } else if (calibrationOpen) {
@@ -7027,6 +7007,194 @@ root.TTRSQRCode={
     if (els.runDrillTitle) els.runDrillTitle.textContent = drill ? (isActiveBuiltIn() ? builtInDisplayName(drill.name) : drill.name) : "Choose a drill";
     if (els.runDrillDescription) els.runDrillDescription.textContent = activeDrillDescription(drill);
     renderRobotSetupSummary();
+    renderRunPreview();
+  }
+
+  const RUN_PREVIEW_SAMPLES = 12;
+  const RUN_PREVIEW_COLORS = ["#62a8ff", "#ff79c6", "#ffd166", "#55c98c", "#b58cff", "#ff9466", "#65d6ce"];
+
+  function previewWeightedChoice(edges, random) {
+    const total = edges.reduce((sum, edge) => sum + Math.max(0, edge.weight), 0);
+    if (!(total > 0)) return edges[0] || null;
+    let value = random() * total;
+    for (const edge of edges) {
+      value -= Math.max(0, edge.weight);
+      if (value <= 0) return edge;
+    }
+    return edges.at(-1) || null;
+  }
+
+  function compileRunPreviewInvocation(drillId, random, output, stack = []) {
+    if (stack.includes(drillId) || output.length >= 80) return;
+    const drill = getDrill(drillId);
+    if (!drill) return;
+    let node = getNode(drill, drill.startNodeId);
+    const repeaters = new Map(drill.nodes.filter(candidate => candidate.type === "counter")
+      .map(candidate => [candidate.id, candidate.startCount]));
+    let transitions = 0;
+    while (node && transitions++ < MAX_TRANSITIONS && output.length < 80) {
+      for (const repeater of drill.nodes.filter(candidate => candidate.type === "counter" && candidate.clearOnNodeIds.includes(node.id))) {
+        repeaters.set(repeater.id, repeater.startCount);
+      }
+      let edge = null;
+      if (isBallNode(node)) {
+        output.push({ drillId, nodeId: node.id, nodeType: node.type, label: node.label, params: node.params, variation: node.variation });
+        edge = outgoing(drill, node.id)[0] || null;
+      } else if (node.type === "random") {
+        edge = previewWeightedChoice(outgoing(drill, node.id), random);
+      } else if (node.type === "drill") {
+        compileRunPreviewInvocation(node.referencedDrillId, random, output, [...stack, drillId]);
+        edge = outgoing(drill, node.id)[0] || null;
+      } else if (node.type === "counter") {
+        const remaining = repeaters.get(node.id) ?? node.startCount;
+        if (remaining > 0) {
+          repeaters.set(node.id, remaining - 1);
+          edge = edgeForSlot(drill, node.id, "A");
+        } else {
+          repeaters.set(node.id, node.startCount);
+          edge = edgeForSlot(drill, node.id, "B");
+        }
+      }
+      if (!edge) break;
+      node = getNode(drill, edge.target);
+    }
+  }
+
+  function sampleRunPreviewShot(source, random) {
+    const adjusted = adjustedShotForRuntime(source.params, source.drillId, source.nodeType);
+    let params = adjusted.params;
+    let prediction = adjusted.prediction;
+    if (source.variation?.enabled) {
+      const shifted = variationShiftedToEffectiveShot(source.variation, source.params, adjusted);
+      const entry = variationCacheEntry({ ...source, variation: shifted }, adjusted.params, true);
+      const sampled = entry?.prepared?.ok ? ShotVariation.sample(entry.prepared, entry.evaluate, random, {
+        attempts: 5, maxIterations: 7, landingToleranceM: .012, clearanceToleranceM: .004,
+      }) : null;
+      if (sampled) {
+        params = sampled.params;
+        prediction = sampled.prediction;
+      }
+    }
+    prediction = prediction || predictTrajectory(params, calibrationAtPose(currentRobotPose()), { serve: source.nodeType === "serve" });
+    const landing = source.nodeType === "serve" ? prediction.secondBounce : prediction.landing;
+    return landing ? { ...source, params, prediction, landing } : null;
+  }
+
+  function runPreviewSignature() {
+    const drill = activeDrill();
+    return drill ? JSON.stringify([drill.id, drill.nodes, drill.edges, liveTuning, currentRobotPose(), library.calibration.nova, library.calibration.physics]) : "none";
+  }
+
+  function buildRunPreview() {
+    const positions = [];
+    for (let repetition = 0; repetition < RUN_PREVIEW_SAMPLES; repetition += 1) {
+      const random = ShotVariation.createRng(0x5eed1234 + repetition * 0x9e3779b9);
+      const sequence = [];
+      compileRunPreviewInvocation(activeDrill().id, random, sequence);
+      sequence.forEach((source, index) => {
+        const sample = sampleRunPreviewShot(source, random);
+        if (sample) (positions[index] ||= []).push(sample);
+      });
+    }
+    return positions.filter(Boolean);
+  }
+
+  function runPreviewTableSvg(positions, page) {
+    const table = library.calibration.table;
+    const colors = RUN_PREVIEW_COLORS;
+    const { left, netY, width, receiverHeight, height } = LANDING_VIEW;
+    const sx = lateralM => left + (lateralM + table.width / 2) / table.width * width;
+    const sy = longitudinalM => netY + clamp((longitudinalM - table.length / 2) / (table.length / 2), 0, 1, 0) * receiverHeight;
+    const shown = page === 0 ? positions : [positions[page - 1] || []];
+    const pointMarkup = shown.map((samples, shownIndex) => {
+      const ballIndex = page === 0 ? shownIndex : page - 1;
+      const color = colors[ballIndex % colors.length];
+      return samples.map(sample => {
+        const x = sx(sample.landing.y);
+        const y = sy(sample.landing.x);
+        const opacity = page === 0 ? .68 : .45;
+        return `<g><circle cx="${fmt(x,2)}" cy="${fmt(y,2)}" r="${page === 0 ? 9 : 7}" fill="${color}" fill-opacity="${opacity}" stroke="${color}" stroke-width="1.5"/><text x="${fmt(x,2)}" y="${fmt(y + 3.2,2)}" text-anchor="middle" fill="#08111b" font-size="${page === 0 ? 9 : 8}" font-weight="900">${ballIndex + 1}</text></g>`;
+      }).join("");
+    }).join("");
+    return `<svg class="run-preview-table intuitive-landing-table" viewBox="0 0 360 ${height}" role="img" aria-label="Sampled receiver-side landing positions">
+      <rect x="${left}" y="0" width="${width}" height="${netY}" class="landing-table-surface landing-robot-strip"/>
+      <rect x="${left}" y="${netY}" width="${width}" height="${receiverHeight}" rx="3" class="landing-table-surface landing-receiver-half"/>
+      <line x1="${left}" y1="0" x2="${left}" y2="${netY + receiverHeight}" class="landing-table-edge"/>
+      <line x1="${left + width}" y1="0" x2="${left + width}" y2="${netY + receiverHeight}" class="landing-table-edge"/>
+      <line x1="${left}" y1="${netY + receiverHeight}" x2="${left + width}" y2="${netY + receiverHeight}" class="landing-table-edge"/>
+      <text x="180" y="12" class="landing-side-label">ROBOT SIDE</text>
+      <line x1="${left - 5}" y1="${netY}" x2="${left + width + 5}" y2="${netY}" class="landing-net"/>
+      <text x="180" y="${netY - 5}" class="landing-net-label">NET</text>
+      <line x1="180" y1="0" x2="180" y2="${netY + receiverHeight}" class="landing-centre-line"/>
+      ${pointMarkup}
+      <text x="180" y="${height - 4}" class="landing-side-label">RECEIVER END</text>
+    </svg>`;
+  }
+
+  function runPreviewSpinHtml(samples) {
+    const spins = samples.map(sample => sample.params.spinRps).filter(Number.isFinite);
+    const average = spins.reduce((sum, value) => sum + value, 0) / Math.max(1, spins.length);
+    const magnitude = Math.abs(average);
+    const strength = magnitude < 1 ? 0 : magnitude < 15 ? 1 : magnitude < 35 ? 2 : magnitude < 60 ? 3 : 4;
+    const direction = average > 1 ? "Topspin" : average < -1 ? "Underspin" : "No spin";
+    const label = strength === 0 ? "None" : ["", "Light", "Medium", "Strong", "Very strong"][strength];
+    const range = spins.length ? `${fmt(Math.min(...spins),0)}–${fmt(Math.max(...spins),0)} rps` : "—";
+    return `<div class="run-preview-spin" aria-label="${direction}, ${label.toLowerCase()}, ${range}">
+      <span class="spin-visual ${average < -1 ? "reverse" : average > 1 ? "forward" : "none"}" aria-hidden="true"><i>${average < -1 ? "↺" : average > 1 ? "↻" : "•"}</i></span>
+      <span><strong>${direction}</strong><small>${label} · ${range}</small></span>
+      <span class="spin-strength" aria-hidden="true">${[1,2,3,4].map(level => `<i class="${level <= strength ? "active" : ""}"></i>`).join("")}</span>
+    </div>`;
+  }
+
+  function renderRunPreview() {
+    if (!els.runLandingPreview) return;
+    const drill = activeDrill();
+    if (!drill) {
+      els.runLandingPreview.innerHTML = `<p class="run-preview-empty">Choose a drill to preview its landing pattern.</p>`;
+      return;
+    }
+    const signature = runPreviewSignature();
+    if (!runPreviewCache || runPreviewCache.signature !== signature) {
+      runPreviewCache = { signature, positions: buildRunPreview() };
+    }
+    const positions = runPreviewCache.positions;
+    runPreviewPage = Math.max(0, Math.min(runPreviewPage, positions.length));
+    if (!positions.length) {
+      els.runLandingPreview.innerHTML = `<p class="run-preview-empty">No modeled receiver-side landings are available.</p>`;
+      return;
+    }
+    const samples = runPreviewPage ? positions[runPreviewPage - 1] : [];
+    const labels = [...new Set(samples.map(sample => sample.label))];
+    const title = runPreviewPage === 0 ? "All balls" : `Ball ${runPreviewPage} of ${positions.length}`;
+    const subtitle = runPreviewPage === 0
+      ? `${positions.length} ball positions · ${RUN_PREVIEW_SAMPLES} samples each`
+      : labels.length === 1 ? labels[0] : `${labels.length} possible balls at this position`;
+    els.runLandingPreview.innerHTML = `<div class="run-preview-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(subtitle)}</span></div>
+      ${runPreviewTableSvg(positions, runPreviewPage)}
+      ${runPreviewPage === 0 ? `<div class="run-preview-legend">${positions.map((_, index) => `<span><i style="--preview-color:${RUN_PREVIEW_COLORS[index % RUN_PREVIEW_COLORS.length]}">${index + 1}</i>Ball ${index + 1}</span>`).join("")}</div>` : runPreviewSpinHtml(samples)}`;
+    els.runPreviewPages.replaceChildren();
+    ["All", ...positions.map((_, index) => String(index + 1))].forEach((label, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "tab";
+      button.textContent = label;
+      button.className = index === runPreviewPage ? "active" : "";
+      button.setAttribute("aria-selected", String(index === runPreviewPage));
+      button.setAttribute("aria-label", index ? `Show ball ${index}` : "Show all balls");
+      button.addEventListener("click", () => { runPreviewPage = index; renderRunPreview(); });
+      els.runPreviewPages.appendChild(button);
+    });
+    els.runPreviewPreviousBtn.disabled = runPreviewPage === 0;
+    els.runPreviewNextBtn.disabled = runPreviewPage === positions.length;
+  }
+
+  function scheduleRunPreviewRender() {
+    if (runPreviewTimer) clearTimeout(runPreviewTimer);
+    runPreviewTimer = setTimeout(() => {
+      runPreviewTimer = null;
+      runPreviewCache = null;
+      renderRunPreview();
+    }, 120);
   }
 
   function openDrillDetails() {
@@ -11842,7 +12010,7 @@ root.TTRSQRCode={
       });
     }
     const activeEntries = Object.entries(liveTuning).filter(([, value]) => Math.abs(value) > 1e-9);
-    if (els.liveTuningSummary) els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "No adjustments";
+    if (els.liveTuningSummary) els.liveTuningSummary.textContent = activeEntries.length ? `${activeEntries.length} active` : "";
   }
 
   function requestImmediateLiveRetune() {
@@ -11867,6 +12035,7 @@ root.TTRSQRCode={
     saveLiveTuningPreference();
     requestImmediateLiveRetune();
     renderLiveTuning();
+    scheduleRunPreviewRender();
     // Run-mode sliders are high-frequency controls. Rebuilding a hidden shot
     // inspector here can perform thousands of trajectory calculations per
     // input event, even though none of that output is visible on Run.
@@ -11879,6 +12048,7 @@ root.TTRSQRCode={
     saveLiveTuningPreference();
     requestImmediateLiveRetune();
     renderLiveTuning();
+    scheduleRunPreviewRender();
     if (appView === "editor") renderInspector();
   }
 
@@ -11987,10 +12157,26 @@ root.TTRSQRCode={
     };
   }
 
+  function timingSpecForEdge(edge) {
+    if (!edge) return null;
+    return edge.timingMode === "adaptive"
+      ? adaptiveTimingSpec(edge.autoSpeedPct)
+      : manualTimingSpec(edge.delaySeconds);
+  }
+
+  function initialTimingForDrill(drill) {
+    const start = drill ? getNode(drill, drill.startNodeId) : null;
+    if (!start) return adaptiveTimingSpec(100);
+    // A leading control node contributes its selected edge during traversal.
+    // A ball-first drill reuses its first outgoing connection for loop entry.
+    if (!isBallNode(start)) return null;
+    return timingSpecForEdge(outgoing(drill, start.id)[0]) || adaptiveTimingSpec(100);
+  }
+
   function compileRobotSet(drillId) {
     const context = { shots: [], transitions: 0, warnings: [] };
     const drill = getDrill(drillId);
-    const firstTiming = drill?.settings?.firstShotTiming || adaptiveTimingSpec(100);
+    const firstTiming = initialTimingForDrill(drill);
     const result = compileRobotInvocation(drillId, context, [], 0, firstTiming);
     if (!result.ok) throw new Error(result.reason);
     return {
@@ -12054,7 +12240,7 @@ root.TTRSQRCode={
       } else if (node.type === "drill") {
         if (!node.referencedDrillId) return { ok: false, reason: `“${node.label}” has no reusable drill selected.`, pendingDelay, pendingTiming };
         const nestedDrill = getDrill(node.referencedDrillId);
-        const nestedStartTiming = pendingTiming || nestedDrill?.settings?.firstShotTiming || adaptiveTimingSpec(100);
+        const nestedStartTiming = pendingTiming || initialTimingForDrill(nestedDrill);
         const nested = compileRobotInvocation(node.referencedDrillId, context, stack, pendingDelay, nestedStartTiming);
         if (!nested.ok) return nested;
         pendingDelay = nested.pendingDelay;
@@ -12698,8 +12884,10 @@ root.TTRSQRCode={
     currentPoseSession().lastRobotUseAt = new Date().toISOString();
     saveLibrary();
 
-    const configured = drill.settings.repetitions;
-    const infinite = configured <= 0;
+    // Run is deliberately continuous: completing the graph starts its next
+    // loop immediately and Stop is the only session boundary.
+    const configured = 0;
+    const infinite = true;
     let completed = 0;
     let planned = 0;
     let completedTimingHistory = [];
@@ -12775,7 +12963,7 @@ root.TTRSQRCode={
     const markBatchComplete = batch => {
       completedTimingHistory = timingHistoryAfter(completedTimingHistory, batch.shots);
       if (Number.isFinite(batch.completedSetThrough)) completed = Math.max(completed, batch.completedSetThrough);
-      updateProgress(completed, configured, infinite, infinite ? `∞ · ${completed} repetitions completed` : `${completed} of ${configured} repetitions completed`);
+      updateProgress(completed, configured, infinite, `${completed} loop${completed === 1 ? "" : "s"} completed`);
     };
     const showActiveBatch = (batch, message) => {
       const firstShot = batch.shots[0];
@@ -12930,8 +13118,7 @@ root.TTRSQRCode={
       }
 
       if (playbackRunning && token === playbackToken) {
-        els.runStatus.textContent = infinite ? `Stopped after ${completed} repetitions` : `Finished ${completed} repetitions · Nova Ready`;
-        if (!infinite) els.runProgressBar.style.width = "100%";
+        els.runStatus.textContent = `Stopped after ${completed} loops`;
       }
     } catch (error) {
       if (token === playbackToken && playbackRunning) {
@@ -13025,11 +13212,6 @@ root.TTRSQRCode={
 
   function updateProgress(completed, total, infinite, text) {
     els.runStatus.textContent = text;
-    if (infinite) {
-      els.runProgressBar.style.width = `${Math.min(95, 10 + (completed % 10) * 9)}%`;
-    } else {
-      els.runProgressBar.style.width = `${total ? completed / total * 100 : 0}%`;
-    }
   }
 
   function weightedChoice(edges) {
@@ -13705,8 +13887,7 @@ root.TTRSQRCode={
       : [2, 5, 7].includes(snapshot.wireState) ? "busy"
       : snapshot.wireState === 202 ? "error" : "connected";
     els.robotStatusBtn.classList.add(statusClass);
-    [els.runConnectionDot, els.robotPageDot].filter(Boolean).forEach(dot => { dot.className = `status-dot ${snapshot.connected ? "connected" : "disconnected"}`; });
-    if (els.runConnectionText) els.runConnectionText.textContent = snapshot.connected ? `Nova ${label}` : "Nova disconnected";
+    [els.robotPageDot].filter(Boolean).forEach(dot => { dot.className = `status-dot ${snapshot.connected ? "connected" : "disconnected"}`; });
     if (els.robotPageConnection) els.robotPageConnection.textContent = snapshot.connected ? `Nova ${label}` : "Nova disconnected";
     if (els.robotPageDevice) els.robotPageDevice.textContent = snapshot.connected ? (snapshot.deviceName || snapshot.serial || "Connected") : (snapshot.browserSupported ? "Web Bluetooth available" : "Web Bluetooth unavailable");
 
@@ -13903,7 +14084,6 @@ root.TTRSQRCode={
     }
 
     [els.topBackBtn, els.runBackBtn, els.editorBackBtn, els.robotBackBtn].filter(Boolean).forEach(button => button.addEventListener("click", goBackApp));
-    els.runRobotBtn?.addEventListener("click", () => navigateApp("robot", { push: true }));
     els.runEditDrillBtn?.addEventListener("click", () => navigateApp("editor", { push: true }));
     els.editorRunBtn?.addEventListener("click", () => navigateApp("run", { push: true }));
     els.runDrillMenuBtn?.addEventListener("click", openDrillDetails);
@@ -14011,50 +14191,6 @@ root.TTRSQRCode={
       }
     });
 
-    const commitRepetitionsText = () => {
-      const rawText = String(els.repetitionsInput.value).trim();
-      if (rawText === "∞" || rawText === "") setRepetitions(0);
-      else setRepetitions(finite(rawText, 0));
-    };
-    els.repetitionsInput.addEventListener("change", commitRepetitionsText);
-    els.repetitionsInput.addEventListener("blur", commitRepetitionsText);
-    els.repetitionsInput.addEventListener("keydown", event => {
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        const current = activeDrill()?.settings.repetitions ?? 0;
-        setRepetitions(current <= 0 ? 1 : current + 1);
-      } else if (event.key === "ArrowDown") {
-        event.preventDefault();
-        const current = activeDrill()?.settings.repetitions ?? 0;
-        if (current > 0) setRepetitions(current - 1);
-      }
-    });
-    els.repetitionsDownBtn.addEventListener("click", () => {
-      const current = activeDrill()?.settings.repetitions ?? 0;
-      if (current > 0) setRepetitions(current - 1);
-    });
-    els.repetitionsUpBtn.addEventListener("click", () => {
-      const current = activeDrill()?.settings.repetitions ?? 0;
-      setRepetitions(current <= 0 ? 1 : current + 1);
-    });
-    els.setDelayInput.addEventListener("change", () => {
-      const drill = activeDrill();
-      if (!drill) return;
-      drill.settings.firstShotTiming = manualTimingSpec(els.setDelayInput.value);
-      drill.settings.delayBetweenSets = 0;
-      els.setDelayInput.value = drill.settings.firstShotTiming.delaySeconds;
-      if (activeDrillEditable()) saveLibrary();
-    });
-    els.setTimingModeInput.addEventListener("change", () => {
-      const drill = activeDrill();
-      if (!drill) return;
-      drill.settings.firstShotTiming = els.setTimingModeInput.value === "manual"
-        ? manualTimingSpec(els.setDelayInput.value || 1)
-        : adaptiveTimingSpec(100);
-      drill.settings.delayBetweenSets = 0;
-      els.setDelayField.hidden = drill.settings.firstShotTiming.mode !== "manual";
-      if (activeDrillEditable()) saveLibrary();
-    });
     els.playBtn.addEventListener("click", event => {
       // A mouse double-click emits two click events. The first activation is
       // the user's command; treating the second as the opposite command makes
@@ -14129,6 +14265,20 @@ root.TTRSQRCode={
     });
     els.closePreviewBtn.addEventListener("click", () => els.previewDialog.close());
     els.rerunPreviewBtn.addEventListener("click", generateTrace);
+    els.runPreviewPreviousBtn.addEventListener("click", () => { runPreviewPage = Math.max(0, runPreviewPage - 1); renderRunPreview(); });
+    els.runPreviewNextBtn.addEventListener("click", () => { runPreviewPage = Math.min(runPreviewCache?.positions?.length || 0, runPreviewPage + 1); renderRunPreview(); });
+    els.runLandingPreview.addEventListener("pointerdown", event => { runPreviewPointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId }; });
+    els.runLandingPreview.addEventListener("pointerup", event => {
+      if (!runPreviewPointerStart || runPreviewPointerStart.id !== event.pointerId) return;
+      const dx = event.clientX - runPreviewPointerStart.x;
+      const dy = event.clientY - runPreviewPointerStart.y;
+      runPreviewPointerStart = null;
+      if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy)) return;
+      runPreviewPage = dx < 0
+        ? Math.min(runPreviewCache?.positions?.length || 0, runPreviewPage + 1)
+        : Math.max(0, runPreviewPage - 1);
+      renderRunPreview();
+    });
 
     els.importBtn.addEventListener("click", () => els.importInput.click());
     els.importInput.addEventListener("change", () => {
@@ -14162,7 +14312,7 @@ root.TTRSQRCode={
   }
 
   const VISUAL_FIXTURE_NAMES = Object.freeze([
-    "library", "run", "editor-graph", "add-node", "add-random", "add-repeat",
+    "library", "run", "run-ball", "editor-graph", "add-node", "add-random", "add-repeat",
     "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
     "pose-calibration", "robot", "calibration",
   ]);
@@ -14186,6 +14336,7 @@ root.TTRSQRCode={
     const rootScreen = {
       library: els.libraryScreen,
       run: els.runScreen,
+      "run-ball": els.runScreen,
       robot: els.robotScreen,
     }[name];
     let maximum = Math.max(0, target.scrollHeight - pageHeight);
@@ -14237,9 +14388,22 @@ root.TTRSQRCode={
       navigateApp("library", { push: false });
       renderAll();
     } else if (name === "run") {
-      selectBuiltIn("Drill: Forehand / backhand alternating");
+      const requestedIndex = Number(new URLSearchParams(location.search).get("visualDrillIndex"));
+      const fixtureDrill = Number.isInteger(requestedIndex) && requestedIndex >= 0
+        ? builtInCatalog.drills[requestedIndex]
+        : builtInCatalog.drills.find(candidate => candidate.name === "Drill: Forehand / backhand alternating");
+      if (!fixtureDrill) throw new Error(`Missing visual fixture drill index: ${requestedIndex}`);
+      selectBuiltIn(fixtureDrill.name);
       navigateApp("run", { push: false });
       renderAll();
+      document.body.dataset.visualBuiltinCount = String(builtInCatalog.drills.length);
+      document.body.dataset.visualBuiltinIndex = String(builtInCatalog.drills.indexOf(fixtureDrill));
+    } else if (name === "run-ball") {
+      selectBuiltIn("Drill: Variable topspin rally");
+      navigateApp("run", { push: false });
+      renderAll();
+      runPreviewPage = 1;
+      renderRunPreview();
     } else if (name === "editor-graph") {
       selectBuiltIn("Match: Weighted rally");
       navigateApp("editor", { push: false, allowBuiltInEditor: true });
@@ -14614,11 +14778,11 @@ root.TTRSQRCode={
     if(p.includes('add')&&p.includes('shot'))return 'In the Drill editor, use the + button over the graph, then choose Shot and configure its placement, speed, spin, and trajectory.';
     if(p.includes('connect'))return 'Open Robot, choose Connect Nova, and select the robot in the browser Bluetooth picker. The page must use HTTPS and a Web-Bluetooth-capable Chromium browser.';
     if(p.includes('folder')||p.includes('search')||p.includes('librar'))return 'Library separates Built-in drills from My drills. Use the tabs to switch collections, breadcrumbs to move through folders, and Search to filter the current collection. Built-in drills are read-only; copying or editing one creates a drill in My drills.';
-    if(p.includes('run')||p.includes('play')||p.includes('live tun'))return 'Open a drill from Library to reach Run. There you can review the robot pose, set repetitions and delay between sets, connect Nova, start or stop, and use Live tuning for temporary adjustments before optionally saving them.';
+    if(p.includes('run')||p.includes('play')||p.includes('live tun'))return 'Open a drill from Library to reach Run. There you can preview sampled landing positions, calibrate the robot pose, play continuously until Stop, and use Player tuning for temporary adjustments before optionally saving them.';
     if(p.includes('share'))return 'Open a drill and choose Share to copy a link, use the system share sheet, show a QR code, or save a portable .ttdrill file. Imported drills become independent copies in My drills.';
     if(p.includes('import')||p.includes('export'))return 'Open Library, expand Import / export, then choose Import My drills or Export My drills. Portable single-drill files can also be imported there.';
     if(context?.screen==='Drill library')return `You are in ${context.localContext?.find(item=>item.startsWith('Folder:'))?.replace('Folder: ','')||'the drill library'}. From here you can browse or search built-in drills and My drills, organize your drills in folders, import/export, or create a new drill. Opening a drill takes you to its Run screen.`;
-    if(context?.screen==='Run drill')return 'This Run screen is the operational view for the open drill. You can review setup, set repetitions and delay between sets, connect Nova, play or stop, use temporary Live tuning, edit the drill, or save the current setup as a new drill.';
+    if(context?.screen==='Run drill')return 'This Run screen is the operational view for the open drill. You can preview sampled landing positions, calibrate the robot pose, play continuously until Stop, use temporary Player tuning, edit the drill, or save the current setup as a new drill.';
     if(context?.screen==='Drill editor')return `This Editor changes the open drill as a node sequence. Add Shot, Serve, Random choice, Repeat/loop, or Sub-drill nodes, connect them, and edit the visible selection. The current parameter style is ${context.localContext?.some(item=>item.includes('Manual'))?'Manual launch parameters':'Intuitive placement'}.`;
     if(context?.screen==='Robot')return 'This Robot screen covers Nova connection and status, diagnostics, calibration, and automatic idle actions. Idle STOP keeps BLE connected for a fast restart; BLE disconnect releases the connection after its longer timeout.';
     if(context?.screen==='Calibration')return `Calibration is currently showing ${context.localContext?.[0]?.replace('Open section: ','')||'a calibration section'}. Use Guided launch calibration for measured launch behavior, Robot pose for table alignment, and Table and trajectory for table/model settings.`;

@@ -33,7 +33,7 @@ for expected in [
     "aiGlobalBtn", "robotIdleStopInput", "robotIdleStopStatus",
     "robotIdleDisconnectInput", "robotIdleStatus",
     "playerModelSelect", "playerTimingSpeed", "newPlayerModelBtn",
-    "duplicatePlayerModelBtn", "deletePlayerModelBtn", "setTimingModeInput",
+    "duplicatePlayerModelBtn", "deletePlayerModelBtn",
     "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
 ]:
     if expected not in ids:
@@ -384,7 +384,7 @@ for token in ('desktop-primary-nav', 'desktopBuiltInLayoutMap', 'mobileGraphLayo
         raise SystemExit(f"Desktop-only editor implementation must not return: {token}")
 if '.app-topbar,.app-layout { width:min(100%,430px); margin-inline:auto; }' not in css:
     raise SystemExit("The single product layout must remain phone-width on wide displays")
-for fixture in ("library", "run", "editor-graph", "add-node", "add-random", "add-repeat",
+for fixture in ("library", "run", "run-ball", "editor-graph", "add-node", "add-random", "add-repeat",
                 "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
                 "pose-calibration", "robot", "calibration"):
     if fixture not in app or fixture not in visual_harness or fixture not in visual_script:
