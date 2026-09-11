@@ -6,6 +6,13 @@ ball trajectories, and controlling a Pongbot Nova S Pro over Web Bluetooth.
 This repository is intended to be usable directly from GitHub Pages and for local
 development without a build step or package manager.
 
+## App overview
+
+The app starts in the Drill library. Red arrows show the primary navigation
+paths; arrows at both ends mean the transition works in both directions.
+
+![Table Tennis Robot Studio mobile navigation overview](artifacts/visual-fixtures/navigation-map-390x844.png)
+
 ## Drill library organization
 
 The drill browser deliberately separates two roots:
@@ -21,8 +28,8 @@ The user-facing navigation is organized around intent rather than editor interna
 
 1. **Library** is the start page. Tapping a drill opens **Run**; the pencil action opens **Edit**. **New drill** creates an empty `START → END` drill and opens the editor.
 2. **Run** contains Play/Stop, repetitions, Adaptive Auto or manual repetition timing, persistent player tuning, current-vs-authored robot pose, preview, saving the effective setup, and an **Edit drill** action.
-3. **Edit** contains the graph. Every drill has a structural START and at least one terminating END path. On phones the graph is laid out vertically with branch siblings separated into collision-free rows; read-only built-ins use a deterministic horizontal layered layout on desktop. Node cards size themselves to their rendered contents, and ball cards keep compact speed/spin metrics on one line. The floating `+` opens a configure-before-create menu for shots, serves, random choices, repeaters and sub-drills.
-4. Node/connection **Details** are a separate screen on phones and a side pane on desktop, so editing controls never cover the graph. Drill name, description, tags, folder and expected robot pose live in **Drill details** rather than on the canvas.
+3. **Edit** contains the graph. Every drill has a structural START and at least one terminating END path. The graph is laid out vertically with branch siblings separated into collision-free rows. Node cards size themselves to their rendered contents, and ball cards keep compact speed/spin metrics on one line. The floating `+` opens a configure-before-create menu for shots, serves, random choices, repeaters and sub-drills.
+4. Node/connection **Details** use a separate screen, so editing controls never cover the graph. Drill name, description, tags, folder and expected robot pose live in **Drill details** rather than on the canvas.
 5. **Robot** is global. It owns Connect/Disconnect, diagnostics, calibration and model/geometry settings. The compact Nova status in the top bar opens the same Robot page.
 
 Back arrows use large touch targets and pop navigation history; close buttons dismiss only the current dialog/details layer. Nested library folders also begin with an explicit parent-folder row, so breadcrumbs are never the only way upward.
@@ -64,6 +71,23 @@ and state-safety budgets than occasional editor commits or rare calibration
 work. See [`docs/ux-responsiveness.md`](docs/ux-responsiveness.md) for the
 interaction tiers, justified thresholds, mitigation requirements, and the
 tests enforced by preflight.
+
+## Mobile visual development
+
+The project intentionally uses one phone-oriented interface at every window
+size. GUI changes should be rendered through the deterministic headless fixture
+harness and presented at the standard 390 × 844 mobile viewport. This produces
+reviewable screenshots without opening or taking over an active browser:
+
+```bash
+python3 scripts/render_mobile_fixtures.py shot-intuitive
+```
+
+Scrollable surfaces are stitched from successive phone viewports with red seam
+markers. Rendering all fixtures also produces a navigation graph showing how
+the captured screens connect. See
+[`docs/visual-development.md`](docs/visual-development.md) for the fixture list,
+narrow-phone checks, and the required GUI-review workflow.
 
 ## Run locally
 

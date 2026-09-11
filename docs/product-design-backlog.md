@@ -8,9 +8,26 @@ Captured 2026-09-04. These are product observations and future work, not complet
 - Give users full control, including advanced and complicated features. The app is intended to replace the official Pongbot app where its limitations get in the way.
 - Make the interface as simple and intuitive as possible without achieving simplicity by restricting the user.
 - Treat phone screen space as valuable. Avoid persistent explanations that are irrelevant during routine use and avoid unused dead space.
+- Treat the phone layout as the sole product interface. Wide windows may add
+  surrounding space, but must not introduce a separate desktop UI or behavior.
 - Prefer progressive disclosure: show the control and the few words needed to use it, then make deeper explanations available on demand.
 
 ## Completed
+
+### Standardize mobile visual development — completed 2026-09-10
+
+- Use one phone-oriented product layout at every window width rather than
+  maintaining a separate desktop interaction model.
+- Keep one vertical editor graph implementation; do not retain alternate
+  desktop routing, node positioning, or drag behavior.
+- Provide deterministic fixtures for every primary screen and high-change
+  editor surface, rendered from production markup and CSS.
+- Generate 390 × 844 screenshots with an isolated headless Chromium profile so
+  visual review never takes over an active browser or touches personal state.
+- Stitch scrollable fixture views with visible red seams and organize the full
+  fixture set as a labeled navigation graph suitable for the GitHub README.
+- Require affected fixture screenshots when presenting GUI changes during
+  development, with 320 px renders for likely overflow risks.
 
 ### Streamline new drill construction — completed 2026-09-09
 
@@ -39,6 +56,13 @@ Captured 2026-09-04. These are product observations and future work, not complet
   depth, ±18 cm lateral placement, ±3 cm clearance, ±0.8 m/s speed, and ±10 rps
   spin, clipped only at table and editor limits. Outcome-mode launch controls
   remain free so the solver can satisfy those visible ranges.
+
+### Center shot range handles — completed 2026-09-09
+
+- Center dual-range tracks from their compact container height and explicitly
+  offset Chromium/WebKit thumbs by half the difference
+  between the track and thumb sizes.
+- Use one border-box thumb diameter across Chromium/WebKit and Firefox.
 
 ### Improve back and folder navigation — completed 2026-09-04
 

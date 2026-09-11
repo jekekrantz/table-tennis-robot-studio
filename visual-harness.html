@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mobile visual fixtures · Table Tennis Robot Studio</title>
+  <style>
+    :root { color-scheme:dark; font-family:system-ui,sans-serif; background:#090d13; color:#eef4fa; }
+    body { margin:0; padding:24px; }
+    header { max-width:900px; margin:0 auto 24px; }
+    h1 { margin:0; font-size:1.35rem; }
+    p { color:#aab7c6; line-height:1.5; }
+    main { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:center; gap:24px; }
+    article { width:390px; }
+    h2 { margin:0 0 8px; font-size:.85rem; text-transform:capitalize; }
+    iframe { display:block; width:390px; height:844px; border:1px solid #334155; border-radius:14px; background:#0b1017; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mobile visual fixtures</h1>
+    <p>Deterministic 390 × 844 development renderings of the primary product surfaces. Production markup and styles are loaded directly; fixture mode never connects to Nova.</p>
+  </header>
+  <main id="fixtures"></main>
+  <script>
+    const names = [
+      "library", "run", "editor-graph", "add-node", "add-random", "add-repeat",
+      "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
+      "pose-calibration", "robot", "calibration",
+    ];
+    const main = document.querySelector("#fixtures");
+    for (const name of names) {
+      const article = document.createElement("article");
+      article.innerHTML = `<h2>${name.replaceAll("-", " ")}</h2><iframe loading="lazy" title="${name}" src="index.html?visualFixture=${encodeURIComponent(name)}"></iframe>`;
+      main.appendChild(article);
+    }
+  </script>
+</body>
+</html>

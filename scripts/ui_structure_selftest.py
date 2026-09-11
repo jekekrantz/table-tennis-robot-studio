@@ -6,6 +6,8 @@ root = Path(__file__).resolve().parent.parent
 html = (root / "index.html").read_text(encoding="utf-8")
 app = (root / "app.js").read_text(encoding="utf-8")
 css = (root / "styles.css").read_text(encoding="utf-8")
+visual_harness = (root / "visual-harness.html").read_text(encoding="utf-8")
+visual_script = (root / "scripts" / "render_mobile_fixtures.py").read_text(encoding="utf-8")
 features = (root / "studio-features.js").read_text(encoding="utf-8")
 core = (root / "studio-features-core.js").read_text(encoding="utf-8")
 ble = (root / "pongbot-ble.js").read_text(encoding="utf-8")
@@ -192,6 +194,12 @@ for token in ('.shot-editor-tabs', '.intuitive-landing-table', '.interval-side-f
 for token in ('-webkit-appearance:none', 'grid-template-columns:52px minmax(0,1fr) 52px', 'max-width:100%'):
     if token not in css:
         raise SystemExit(f"Missing mobile dual-range containment: {token}")
+for token in ('--dual-range-track-height:4px', '--dual-range-thumb-size:20px',
+              'top:calc(50% - var(--dual-range-track-height) / 2)',
+              'margin-top:calc((var(--dual-range-track-height) - var(--dual-range-thumb-size)) / 2)',
+              'box-sizing:border-box'):
+    if token not in css:
+        raise SystemExit(f"Dual-range thumbs must remain vertically centered: {token}")
 if 'point[other] >= selections[other][0]' in app:
     raise SystemExit("Shot interval domains must not be conditioned on the other selected intervals")
 if 'landing-trajectory-sample' in app or 'landing-trajectory-representative' in app:
@@ -366,10 +374,24 @@ for token in ('labels: ["Variable topspin"], varied: true',
         raise SystemExit(f"Selective built-in variation behavior missing: {token}")
 
 # Responsive structure.
-for token in (".desktop-primary-nav", "body.details-open .editor-screen .canvas-shell",
+for token in ("body.details-open .editor-screen .canvas-shell",
               ".drill-library-card", ".flow-terminal", ".add-node-choice-grid", ".feature-dialog"):
     if token not in css:
         raise SystemExit(f"Missing responsive UI structure: {token}")
+for token in ('desktop-primary-nav', 'desktopBuiltInLayoutMap', 'mobileGraphLayoutEnabled',
+              'routeEdge(', 'roundedOrthogonalPath(', 'nodeDrag'):
+    if token in html or token in app:
+        raise SystemExit(f"Desktop-only editor implementation must not return: {token}")
+if '.app-topbar,.app-layout { width:min(100%,430px); margin-inline:auto; }' not in css:
+    raise SystemExit("The single product layout must remain phone-width on wide displays")
+for fixture in ("library", "run", "editor-graph", "add-node", "add-random", "add-repeat",
+                "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
+                "pose-calibration", "robot", "calibration"):
+    if fixture not in app or fixture not in visual_harness or fixture not in visual_script:
+        raise SystemExit(f"Mobile visual fixture is not registered everywhere: {fixture}")
+    artifact = root / "artifacts" / "visual-fixtures" / f"{fixture}-390x844.png"
+    if not artifact.is_file():
+        raise SystemExit(f"Missing independently saved mobile fixture: {artifact.name}")
 if "mobile-primary-nav" in html or "mobile-primary-nav" in css:
     raise SystemExit("Obsolete persistent mobile navigation remains")
 for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"',
@@ -378,6 +400,16 @@ for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor
         raise SystemExit(f"Missing app navigation/create flow: {token}")
 if 'navigateApp("library", { push: false })' not in app:
     raise SystemExit("App must start on the drill library")
+if 'function graphLayoutMap(' not in app or 'const GRAPH_CENTER_X = SURFACE_WIDTH / 2;' not in app:
+    raise SystemExit("The editor must retain its single vertical graph layout")
+for token in ('VISUAL_FIXTURE_NAMES', 'showVisualFixture', 'prepareVisualFixtureScroll',
+              'visualScrollPage', '__TTRS_VISUAL_FIXTURE_READY', 'visualFixtureNames'):
+    if token not in app:
+        raise SystemExit(f"Missing deterministic mobile visual fixture support: {token}")
+for token in ('SEAM_COLOR', 'stitch_pages', 'NAVIGATION_EDGES', 'NAVIGATION_GROUPS',
+              'navigation_map', '--map-only', 'navigation-map-', 'data-visual-scroll-pages'):
+    if token not in visual_script:
+        raise SystemExit(f"Missing stitched navigation fixture support: {token}")
 for token in ('description: ""', 'tags: []', 'robotPose: { x: 0, y: 0, yawDeg: 0 }'):
     if token not in app:
         raise SystemExit(f"Missing drill metadata model: {token}")
@@ -385,9 +417,7 @@ if 'set the step, then add it' not in app.lower():
     raise SystemExit("Add-node flow must configure before creating")
 if 'renderSyntheticEndpoints' not in app or 'START' not in app or 'END' not in app:
     raise SystemExit("Editor must always render synthetic Start and End nodes")
-if 'mobileGraphLayoutEnabled' not in app or 'mobileLayoutMap' not in app:
-    raise SystemExit("Mobile editor must use vertical graph layout")
-for token in ('measureRenderedNodeHeights', 'nodeHeightCache', 'MOBILE_LAYOUT_CENTER_X', 'horizontalGap = 48'):
+for token in ('measureRenderedNodeHeights', 'nodeHeightCache', 'GRAPH_CENTER_X', 'horizontalGap = 48'):
     if token not in app:
         raise SystemExit(f"Missing collision-free content-sized graph layout: {token}")
 for token in ('.spin-ball-icon', '.spin-direction-symbol', '.shot-metrics { display:flex; gap:5px; flex-wrap:nowrap'):

@@ -45,8 +45,9 @@ node continuous-runtime-selftest.js
 node ux-responsiveness-selftest.js
 
 echo "[9/13] Python/shell/UI structure"
-python3 -m py_compile scripts/serve.py scripts/ui_structure_selftest.py scripts/default_library_trajectory_selftest.py scripts/nova_firmware_workbench_selftest.py scripts/build_runtime_bundle.py scripts/release_manifest.py tools/nova_firmware_workbench.py
+python3 -m py_compile scripts/serve.py scripts/render_mobile_fixtures.py scripts/ui_structure_selftest.py scripts/default_library_trajectory_selftest.py scripts/nova_firmware_workbench_selftest.py scripts/build_runtime_bundle.py scripts/release_manifest.py tools/nova_firmware_workbench.py
 python3 scripts/ui_structure_selftest.py
+python3 scripts/render_mobile_fixtures.py --list >/dev/null
 python3 scripts/nova_firmware_workbench_selftest.py
 rm -rf scripts/__pycache__
 rm -rf tools/__pycache__
@@ -60,7 +61,7 @@ python3 - <<'PY'
 from pathlib import Path
 for required in [
     'docs/drill-file-format.md','docs/ai-drill-assistant.md',
-    'docs/continuous-playback.md','docs/custom-firmware-readiness.md','docs/deployment.md','docs/shot-variation.md','docs/robot-pose-calibration.md',
+    'docs/continuous-playback.md','docs/custom-firmware-readiness.md','docs/deployment.md','docs/shot-variation.md','docs/robot-pose-calibration.md','docs/visual-development.md',
     'docs/ux-responsiveness.md','vendor/QRCode-LICENSE.txt'
 ]:
     if not Path(required).is_file(): raise SystemExit(f'Missing {required}')

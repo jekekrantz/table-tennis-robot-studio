@@ -4916,7 +4916,7 @@ root.TTRSQRCode={
   // Combo mode stores the exact finite shot count in one byte on verified Nova
   // firmware. Longer finite sessions are split only at this protocol boundary.
   const NOVA_STREAM_COMBO_LIMIT = 255;
-  const MOBILE_LAYOUT_CENTER_X = SURFACE_WIDTH / 2;
+  const GRAPH_CENTER_X = SURFACE_WIDTH / 2;
   const nodeHeightCache = new Map();
 
   const $ = (id) => document.getElementById(id);
@@ -5127,10 +5127,6 @@ root.TTRSQRCode={
     runScreen: $("runScreen"),
     editorScreen: $("editorScreen"),
     robotScreen: $("robotScreen"),
-    desktopLibraryNavBtn: $("desktopLibraryNavBtn"),
-    desktopRunNavBtn: $("desktopRunNavBtn"),
-    desktopEditNavBtn: $("desktopEditNavBtn"),
-    desktopRobotNavBtn: $("desktopRobotNavBtn"),
     runBackBtn: $("runBackBtn"),
     editorBackBtn: $("editorBackBtn"),
     robotBackBtn: $("robotBackBtn"),
@@ -5191,7 +5187,6 @@ root.TTRSQRCode={
   let libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
   let folderDialogMode = null;
   let selection = null;
-  let nodeDrag = null;
   let connectionDrag = null;
   let canvasPan = null;
   let graphZoom = 1;
@@ -6933,13 +6928,6 @@ root.TTRSQRCode={
     document.body.dataset.appView = next;
     const screens = { library: els.libraryScreen, run: els.runScreen, editor: els.editorScreen, robot: els.robotScreen };
     Object.entries(screens).forEach(([key, screen]) => { if (screen) screen.hidden = key !== next; });
-    const navs = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn];
-    navs.forEach(button => {
-      if (!button) return;
-      const active = button.dataset.appNav === next;
-      button.classList.toggle("active", active);
-      if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
-    });
     if (els.topbarContext) els.topbarContext.textContent = appViewLabel(next);
     if (els.topBackBtn) els.topBackBtn.hidden = appHistory.length === 0;
     document.body.classList.remove("details-open");
@@ -7336,11 +7324,7 @@ root.TTRSQRCode={
     return changed;
   }
 
-  function mobileGraphLayoutEnabled() {
-    return Boolean(globalThis.matchMedia?.("(max-width: 760px)")?.matches);
-  }
-
-  function mobileLayoutMap(drill) {
+  function graphLayoutMap(drill) {
     const map = new Map();
     if (!drill?.nodes?.length) return map;
 
@@ -7380,7 +7364,7 @@ root.TTRSQRCode={
     for (const d of [...levels.keys()].sort((a,b) => a-b)) {
       const nodes = levels.get(d).slice().sort((a,b) => (a.y - b.y) || (a.x - b.x));
       const totalWidth = nodes.length * NODE_WIDTH + Math.max(0, nodes.length - 1) * horizontalGap;
-      const startX = clamp(MOBILE_LAYOUT_CENTER_X - totalWidth / 2, 40, SURFACE_WIDTH - totalWidth - 40, 40);
+      const startX = clamp(GRAPH_CENTER_X - totalWidth / 2, 40, SURFACE_WIDTH - totalWidth - 40, 40);
       let levelHeight = 0;
       nodes.forEach((node, index) => {
         map.set(node.id, { x: startX + index * (NODE_WIDTH + horizontalGap), y });
@@ -7391,99 +7375,32 @@ root.TTRSQRCode={
     return map;
   }
 
-  function desktopBuiltInLayoutMap(drill) {
-    const map = new Map();
-    if (!drill?.nodes?.length) return map;
-
-    const depth = new Map();
-    const start = getNode(drill, drill.startNodeId);
-    const queue = [];
-    if (start) { depth.set(start.id, 0); queue.push(start); }
-    while (queue.length) {
-      const node = queue.shift();
-      const d = depth.get(node.id) || 0;
-      for (const edge of outgoing(drill, node.id)) {
-        const target = getNode(drill, edge.target);
-        if (!target || depth.has(target.id)) continue;
-        depth.set(target.id, d + 1);
-        queue.push(target);
-      }
-    }
-    let orphanDepth = Math.max(0, ...depth.values()) + 1;
-    for (const node of drill.nodes) if (!depth.has(node.id)) depth.set(node.id, orphanDepth++);
-
-    const levels = new Map();
-    for (const node of drill.nodes) {
-      const d = depth.get(node.id) || 0;
-      if (!levels.has(d)) levels.set(d, []);
-      levels.get(d).push(node);
-    }
-
-    const x0 = 300;
-    const horizontalGap = 130;
-    const verticalGap = 52;
-    const centerY = SURFACE_HEIGHT / 2;
-    for (const d of [...levels.keys()].sort((a,b) => a-b)) {
-      const nodes = levels.get(d).slice().sort((a,b) => (a.y - b.y) || (a.x - b.x));
-      const totalHeight = nodes.reduce((sum,node) => sum + nodeHeight(drill,node), 0) + Math.max(0,nodes.length-1) * verticalGap;
-      let y = clamp(centerY - totalHeight / 2, MIN_NODE_Y, SURFACE_HEIGHT - totalHeight - MIN_NODE_Y, MIN_NODE_Y);
-      for (const node of nodes) {
-        map.set(node.id, { x: x0 + d * (NODE_WIDTH + horizontalGap), y });
-        y += nodeHeight(drill,node) + verticalGap;
-      }
-    }
-    return map;
-  }
-
   function visualNodePosition(drill, node) {
-    if (mobileGraphLayoutEnabled()) return mobileLayoutMap(drill).get(node.id) || { x: MOBILE_LAYOUT_CENTER_X - NODE_WIDTH / 2, y: node.y };
-    // Built-in presets are read-only, so a deterministic layered layout is safer
-    // than preserving old hand-authored coordinates that may no longer fit compact cards.
-    if (isActiveBuiltIn()) return desktopBuiltInLayoutMap(drill).get(node.id) || { x: node.x, y: node.y };
-    return { x: node.x, y: node.y };
+    return graphLayoutMap(drill).get(node.id) || { x: GRAPH_CENTER_X - NODE_WIDTH / 2, y: node.y };
   }
 
   function syntheticEndpointPositions(drill) {
     const positions = drill.nodes.map(node => ({ node, ...visualNodePosition(drill, node) }));
-    if (!positions.length) return mobileGraphLayoutEnabled()
-      ? { start: { x: MOBILE_LAYOUT_CENTER_X, y: 120 }, end: { x: MOBILE_LAYOUT_CENTER_X, y: 330 } }
-      : { start: { x: 90, y: 300 }, end: { x: 500, y: 300 } };
-    if (mobileGraphLayoutEnabled()) {
-      const minY = Math.min(...positions.map(p => p.y));
-      const maxY = Math.max(...positions.map(p => p.y + nodeHeight(drill, p.node)));
-      return { start: { x: MOBILE_LAYOUT_CENTER_X, y: Math.max(40, minY - 95) }, end: { x: MOBILE_LAYOUT_CENTER_X, y: maxY + 75 } };
-    }
-    const minX = Math.min(...positions.map(p => p.x));
-    const maxX = Math.max(...positions.map(p => p.x + NODE_WIDTH));
-    const startNode = getNode(drill, drill.startNodeId);
-    const sp = startNode ? visualNodePosition(drill, startNode) : positions[0];
-    return { start: { x: Math.max(30, minX - 120), y: sp.y + nodeHeight(drill, startNode || positions[0].node)/2 - 22 }, end: { x: maxX + 90, y: sp.y + 20 } };
+    if (!positions.length) return { start: { x: GRAPH_CENTER_X, y: 120 }, end: { x: GRAPH_CENTER_X, y: 330 } };
+    const minY = Math.min(...positions.map(p => p.y));
+    const maxY = Math.max(...positions.map(p => p.y + nodeHeight(drill, p.node)));
+    return { start: { x: GRAPH_CENTER_X, y: Math.max(40, minY - 95) }, end: { x: GRAPH_CENTER_X, y: maxY + 75 } };
   }
 
   function outputPosition(drill, node, edge = null, slot = null, add = false) {
     const h = nodeHeight(drill, node);
     const pos = visualNodePosition(drill, node);
-    if (mobileGraphLayoutEnabled()) {
-      if (node.type === "counter") {
-        const actualSlot = slot || edge?.sourceSlot || "A";
-        return { x: pos.x + (actualSlot === "A" ? NODE_WIDTH * .36 : NODE_WIDTH * .64), y: pos.y + h };
-      }
-      if (node.type === "random") {
-        const edges = outgoing(drill, node.id);
-        const index = add ? edges.length : Math.max(0, edges.findIndex(e => e.id === edge?.id));
-        const count = Math.max(1, edges.length + (add ? 1 : 0));
-        return { x: pos.x + NODE_WIDTH * ((index + 1) / (count + 1)), y: pos.y + h };
-      }
-      return { x: pos.x + NODE_WIDTH / 2, y: pos.y + h };
-    }
-    if (isBallNode(node) || node.type === "drill") return { x: pos.x + NODE_WIDTH, y: pos.y + h / 2 };
     if (node.type === "counter") {
       const actualSlot = slot || edge?.sourceSlot || "A";
-      return { x: pos.x + NODE_WIDTH, y: pos.y + (actualSlot === "A" ? 51 : 86) };
+      return { x: pos.x + (actualSlot === "A" ? NODE_WIDTH * .36 : NODE_WIDTH * .64), y: pos.y + h };
     }
-    const edges = outgoing(drill, node.id);
-    const index = add ? edges.length : Math.max(0, edges.findIndex(e => e.id === edge?.id));
-    return { x: pos.x + NODE_WIDTH, y: pos.y + 61 + index * 27 };
+    if (node.type === "random") {
+      const edges = outgoing(drill, node.id);
+      const index = add ? edges.length : Math.max(0, edges.findIndex(e => e.id === edge?.id));
+      const count = Math.max(1, edges.length + (add ? 1 : 0));
+      return { x: pos.x + NODE_WIDTH * ((index + 1) / (count + 1)), y: pos.y + h };
+    }
+    return { x: pos.x + NODE_WIDTH / 2, y: pos.y + h };
   }
 
   function renderSyntheticEndpoints(drill) {
@@ -7501,38 +7418,27 @@ root.TTRSQRCode={
     makeTerminal("end", "END", points.end);
 
     const drawSynthetic = (from, to) => {
-      const mobile = mobileGraphLayoutEnabled();
-      const d = mobile
-        ? `M ${from.x} ${from.y} C ${from.x} ${from.y + 38}, ${to.x} ${to.y - 38}, ${to.x} ${to.y}`
-        : `M ${from.x} ${from.y} C ${from.x + 45} ${from.y}, ${to.x - 45} ${to.y}, ${to.x} ${to.y}`;
+      const d = `M ${from.x} ${from.y} C ${from.x} ${from.y + 38}, ${to.x} ${to.y - 38}, ${to.x} ${to.y}`;
       els.edgeLayer.appendChild(svg("path", { d, class: "synthetic-edge", "marker-end": "url(#arrow)" }));
     };
 
     const startNode = getNode(drill, drill.startNodeId);
     if (startNode) {
       const pos = visualNodePosition(drill, startNode);
-      const target = mobileGraphLayoutEnabled()
-        ? { x: pos.x + NODE_WIDTH / 2, y: pos.y }
-        : { x: pos.x, y: pos.y + nodeHeight(drill, startNode) / 2 };
-      const from = mobileGraphLayoutEnabled()
-        ? { x: points.start.x, y: points.start.y + 22 }
-        : { x: points.start.x + 55, y: points.start.y };
+      const target = { x: pos.x + NODE_WIDTH / 2, y: pos.y };
+      const from = { x: points.start.x, y: points.start.y + 22 };
       drawSynthetic(from, target);
     } else {
-      const from = mobileGraphLayoutEnabled() ? { x: points.start.x, y: points.start.y + 22 } : { x: points.start.x + 55, y: points.start.y };
-      const to = mobileGraphLayoutEnabled() ? { x: points.end.x, y: points.end.y - 22 } : { x: points.end.x - 55, y: points.end.y };
+      const from = { x: points.start.x, y: points.start.y + 22 };
+      const to = { x: points.end.x, y: points.end.y - 22 };
       drawSynthetic(from, to);
     }
 
     const terminals = drill.nodes.filter(node => outgoing(drill, node.id).length === 0);
     terminals.forEach((node, index) => {
       const pos = visualNodePosition(drill, node);
-      const from = mobileGraphLayoutEnabled()
-        ? { x: pos.x + NODE_WIDTH / 2, y: pos.y + nodeHeight(drill, node) }
-        : { x: pos.x + NODE_WIDTH, y: pos.y + nodeHeight(drill, node) / 2 };
-      const to = mobileGraphLayoutEnabled()
-        ? { x: points.end.x + (index - (terminals.length - 1)/2) * 12, y: points.end.y - 22 }
-        : { x: points.end.x - 55, y: points.end.y + (index - (terminals.length - 1)/2) * 10 };
+      const from = { x: pos.x + NODE_WIDTH / 2, y: pos.y + nodeHeight(drill, node) };
+      const to = { x: points.end.x + (index - (terminals.length - 1)/2) * 12, y: points.end.y - 22 };
       drawSynthetic(from, to);
     });
   }
@@ -7661,11 +7567,9 @@ root.TTRSQRCode={
     port.className = `port output-port${add ? " add-port" : ""}${slot === "A" ? " slot-a" : ""}${slot === "B" ? " slot-b" : ""}`;
     const displayPos = visualNodePosition(drill, node);
     port.style.top = `${pos.y - displayPos.y}px`;
-    if (mobileGraphLayoutEnabled()) {
-      port.classList.add("vertical-port");
-      port.style.left = `${pos.x - displayPos.x - 8}px`;
-      port.style.right = "auto";
-    }
+    port.classList.add("vertical-port");
+    port.style.left = `${pos.x - displayPos.x - 8}px`;
+    port.style.right = "auto";
     port.dataset.nodeId = node.id;
     port.dataset.edgeId = edge?.id || "";
     port.dataset.slot = slot;
@@ -7693,27 +7597,21 @@ root.TTRSQRCode={
     defs.appendChild(marker);
     els.edgeLayer.appendChild(defs);
 
-    const previousRoutes = [];
     const routed = [];
 
     // Routing order is permanently tied to the edge array, never selection.
-    drill.edges.forEach((edge, index) => {
+    drill.edges.forEach(edge => {
       const source = getNode(drill, edge.source);
       const target = getNode(drill, edge.target);
       if (!source || !target) return;
       const from = outputPosition(drill, source, edge, edge.sourceSlot, false);
       const targetPos = visualNodePosition(drill, target);
-      const to = mobileGraphLayoutEnabled()
-        ? { x: targetPos.x + NODE_WIDTH / 2, y: targetPos.y }
-        : { x: targetPos.x, y: targetPos.y + nodeHeight(drill, target) / 2 };
-      const route = mobileGraphLayoutEnabled()
-        ? {
-            points: [from, to],
-            path: `M ${from.x} ${from.y} C ${from.x} ${from.y + 52}, ${to.x} ${to.y - 52}, ${to.x} ${to.y}`,
-            label: { x: (from.x + to.x) / 2 + 34, y: (from.y + to.y) / 2 },
-          }
-        : routeEdge(drill, edge, from, to, previousRoutes, index);
-      previousRoutes.push(route.points);
+      const to = { x: targetPos.x + NODE_WIDTH / 2, y: targetPos.y };
+      const route = {
+        points: [from, to],
+        path: `M ${from.x} ${from.y} C ${from.x} ${from.y + 52}, ${to.x} ${to.y - 52}, ${to.x} ${to.y}`,
+        label: { x: (from.x + to.x) / 2 + 34, y: (from.y + to.y) / 2 },
+      };
       routed.push({ edge, source, route });
     });
 
@@ -7820,140 +7718,6 @@ root.TTRSQRCode={
     return `A: ${fmt(minimum, 2)}s-${fmt(maximum, 2)}s`;
   }
 
-  function routeEdge(drill, edge, from, to, previousRoutes, index) {
-    const source = getNode(drill, edge.source);
-    const target = getNode(drill, edge.target);
-    const start = { x: from.x + 24, y: from.y };
-    const end = { x: to.x - 24, y: to.y };
-    const obstacles = drill.nodes
-      .filter(node => node.id !== source?.id && node.id !== target?.id)
-      .map(node => ({ x1: node.x - 18, y1: node.y - 18, x2: node.x + NODE_WIDTH + 18, y2: node.y + nodeHeight(drill, node) + 18 }));
-    const candidates = [];
-    const spread = [0, 42, -42, 84, -84, 126, -126];
-
-    if (end.x - start.x > 55) {
-      const middle = (start.x + end.x) / 2;
-      for (const offset of spread) {
-        const laneX = clamp(middle + offset + (index % 3 - 1) * 9, start.x + 18, end.x - 18, middle);
-        candidates.push([from, start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end, to]);
-      }
-    }
-
-    const top = Math.min(from.y, to.y) - 68;
-    const bottom = Math.max(from.y, to.y) + 68;
-    for (const offset of [0, 48, 96, 144]) {
-      const yTop = Math.max(12, top - offset - (index % 3) * 8);
-      const yBottom = Math.min(SURFACE_HEIGHT - 12, bottom + offset + (index % 3) * 8);
-      candidates.push([from, start, { x: start.x, y: yTop }, { x: end.x, y: yTop }, end, to]);
-      candidates.push([from, start, { x: start.x, y: yBottom }, { x: end.x, y: yBottom }, end, to]);
-    }
-
-    const rightLane = Math.min(SURFACE_WIDTH - 16, Math.max(from.x, to.x + NODE_WIDTH) + 70 + (index % 5) * 28);
-    candidates.push([from, { x: rightLane, y: from.y }, { x: rightLane, y: to.y }, to]);
-
-    let best = null;
-    let bestScore = Infinity;
-    for (const raw of candidates) {
-      const points = simplifyOrthogonal(raw);
-      const score = routeScore(points, obstacles, previousRoutes);
-      if (score < bestScore) { bestScore = score; best = points; }
-    }
-    best ||= [from, to];
-    return { points: best, path: roundedOrthogonalPath(best, 12), label: routeLabelPoint(best) };
-  }
-
-  function simplifyOrthogonal(points) {
-    const compact = [];
-    for (const point of points) {
-      const last = compact.at(-1);
-      if (!last || Math.abs(last.x - point.x) > .1 || Math.abs(last.y - point.y) > .1) compact.push({ ...point });
-    }
-    let changed = true;
-    while (changed && compact.length > 2) {
-      changed = false;
-      for (let i = 1; i < compact.length - 1; i += 1) {
-        const a = compact[i - 1], b = compact[i], c = compact[i + 1];
-        if ((Math.abs(a.x - b.x) < .1 && Math.abs(b.x - c.x) < .1) || (Math.abs(a.y - b.y) < .1 && Math.abs(b.y - c.y) < .1)) {
-          compact.splice(i, 1); changed = true; break;
-        }
-      }
-    }
-    return compact;
-  }
-
-  function routeScore(points, obstacles, previousRoutes) {
-    let score = (points.length - 2) * 15;
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const a = points[i], b = points[i + 1];
-      score += Math.hypot(b.x - a.x, b.y - a.y) * .02;
-      for (const box of obstacles) if (segmentHitsBox(a, b, box)) score += 10000;
-      for (const route of previousRoutes) {
-        for (let j = 0; j < route.length - 1; j += 1) score += segmentConflict(a, b, route[j], route[j + 1]);
-      }
-    }
-    return score;
-  }
-
-  function segmentHitsBox(a, b, box) {
-    if (Math.abs(a.y - b.y) < .1) {
-      const minX = Math.min(a.x, b.x), maxX = Math.max(a.x, b.x);
-      return a.y >= box.y1 && a.y <= box.y2 && maxX >= box.x1 && minX <= box.x2;
-    }
-    if (Math.abs(a.x - b.x) < .1) {
-      const minY = Math.min(a.y, b.y), maxY = Math.max(a.y, b.y);
-      return a.x >= box.x1 && a.x <= box.x2 && maxY >= box.y1 && minY <= box.y2;
-    }
-    return false;
-  }
-
-  function segmentConflict(a, b, c, d) {
-    const aHorizontal = Math.abs(a.y - b.y) < .1;
-    const cHorizontal = Math.abs(c.y - d.y) < .1;
-    if (aHorizontal && cHorizontal && Math.abs(a.y - c.y) < 8) {
-      const overlap = Math.min(Math.max(a.x,b.x), Math.max(c.x,d.x)) - Math.max(Math.min(a.x,b.x), Math.min(c.x,d.x));
-      return overlap > 0 ? 220 + overlap * .4 : 0;
-    }
-    if (!aHorizontal && !cHorizontal && Math.abs(a.x - c.x) < 8) {
-      const overlap = Math.min(Math.max(a.y,b.y), Math.max(c.y,d.y)) - Math.max(Math.min(a.y,b.y), Math.min(c.y,d.y));
-      return overlap > 0 ? 220 + overlap * .4 : 0;
-    }
-    const h1 = aHorizontal ? [a,b] : cHorizontal ? [c,d] : null;
-    const v1 = !aHorizontal ? [a,b] : !cHorizontal ? [c,d] : null;
-    if (h1 && v1) {
-      const hx1 = Math.min(h1[0].x,h1[1].x), hx2 = Math.max(h1[0].x,h1[1].x);
-      const vy1 = Math.min(v1[0].y,v1[1].y), vy2 = Math.max(v1[0].y,v1[1].y);
-      if (v1[0].x >= hx1 && v1[0].x <= hx2 && h1[0].y >= vy1 && h1[0].y <= vy2) return 45;
-    }
-    return 0;
-  }
-
-  function roundedOrthogonalPath(points, radius) {
-    if (points.length < 2) return "";
-    let path = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length - 1; i += 1) {
-      const prev = points[i - 1], current = points[i], next = points[i + 1];
-      const inLength = Math.hypot(current.x - prev.x, current.y - prev.y);
-      const outLength = Math.hypot(next.x - current.x, next.y - current.y);
-      const r = Math.min(radius, inLength / 2, outLength / 2);
-      const before = { x: current.x + (prev.x - current.x) / (inLength || 1) * r, y: current.y + (prev.y - current.y) / (inLength || 1) * r };
-      const after = { x: current.x + (next.x - current.x) / (outLength || 1) * r, y: current.y + (next.y - current.y) / (outLength || 1) * r };
-      path += ` L ${before.x} ${before.y} Q ${current.x} ${current.y} ${after.x} ${after.y}`;
-    }
-    const last = points.at(-1);
-    path += ` L ${last.x} ${last.y}`;
-    return path;
-  }
-
-  function routeLabelPoint(points) {
-    let best = { length: -1, a: points[0], b: points.at(-1) };
-    for (let i = 1; i < points.length - 2; i += 1) {
-      const a = points[i], b = points[i + 1];
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      if (length > best.length) best = { length, a, b };
-    }
-    return { x: (best.a.x + best.b.x) / 2, y: (best.a.y + best.b.y) / 2 - 10 };
-  }
-
   function applyGraphZoom(nextZoom, anchorClientX = null, anchorClientY = null) {
     const oldZoom = graphZoom;
     const zoom = clamp(nextZoom, MIN_GRAPH_ZOOM, MAX_GRAPH_ZOOM, oldZoom);
@@ -7982,7 +7746,7 @@ root.TTRSQRCode={
   }
 
   function onGraphWheel(event) {
-    if (nodeDrag || connectionDrag || canvasPan || poseDrag) return;
+    if (connectionDrag || canvasPan || poseDrag) return;
     event.preventDefault();
 
     let delta = event.deltaY;
@@ -8001,7 +7765,7 @@ root.TTRSQRCode={
 
   function onCanvasPointerDown(event) {
     if (event.button !== 0) return;
-    if (nodeDrag || connectionDrag || poseDrag) return;
+    if (connectionDrag || poseDrag) return;
     if (!isCanvasBackgroundTarget(event.target)) return;
 
     canvasPan = {
@@ -8054,54 +7818,9 @@ root.TTRSQRCode={
     const drill = activeDrill();
     const node = getNode(drill, article.dataset.nodeId);
     if (!node) return;
-    if (!activeDrillEditable() || mobileGraphLayoutEnabled()) {
-      selection = { kind: "node", id: node.id };
-      renderAll();
-      openInspectorScreen();
-      return;
-    }
-    event.preventDefault();
     selection = { kind: "node", id: node.id };
-    nodeDrag = {
-      nodeId: node.id,
-      article,
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startX: node.x,
-      startY: node.y,
-      moved: false,
-    };
-    article.setPointerCapture?.(event.pointerId);
-    document.addEventListener("pointermove", onNodePointerMove);
-    document.addEventListener("pointerup", onNodePointerUp, { once: true });
-    renderInspector();
-  }
-
-  function onNodePointerMove(event) {
-    if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
-    const drill = activeDrill();
-    const node = getNode(drill, nodeDrag.nodeId);
-    if (!node) return;
-    const screenDx = event.clientX - nodeDrag.startClientX;
-    const screenDy = event.clientY - nodeDrag.startClientY;
-    if (Math.abs(screenDx) > 2 || Math.abs(screenDy) > 2) nodeDrag.moved = true;
-    const dx = screenDx / graphZoom;
-    const dy = screenDy / graphZoom;
-    node.x = clamp(nodeDrag.startX + dx, 0, SURFACE_WIDTH - NODE_WIDTH, node.x);
-    node.y = clamp(nodeDrag.startY + dy, MIN_NODE_Y, SURFACE_HEIGHT - nodeHeight(drill, node), node.y);
-    nodeDrag.article.style.left = `${node.x}px`;
-    nodeDrag.article.style.top = `${node.y}px`;
-    renderEdges(drill);
-  }
-
-  function onNodePointerUp() {
-    document.removeEventListener("pointermove", onNodePointerMove);
-    if (nodeDrag?.moved) {
-      suppressClickUntil = performance.now() + 120;
-      saveLibrary();
-    }
-    nodeDrag = null;
+    renderAll();
+    openInspectorScreen();
   }
 
   function onNodeClick(event) {
@@ -13424,41 +13143,13 @@ root.TTRSQRCode={
       return;
     }
 
-    // On phones the graph is deliberately a readable vertical document rather than a
-    // miniature overview. Keep cards near native size and let the canvas scroll/pan.
+    // The graph is deliberately a readable vertical document rather than a miniature
+    // overview. Keep cards near native size and let the canvas scroll/pan.
     // The Fit button still gives users an explicit overview when they want one.
-    if (mobileGraphLayoutEnabled()) {
-      applyGraphZoom(.86);
-      const startX = Math.max(0, endpoints.start.x * graphZoom - els.graphViewport.clientWidth / 2 + 55 * graphZoom);
-      const startY = Math.max(0, (endpoints.start.y - 24) * graphZoom);
-      els.graphViewport.scrollTo({ left: startX, top: startY, behavior: "smooth" });
-      return;
-    }
-
-    const positions = drill.nodes.map(n => ({ node: n, ...visualNodePosition(drill, n) }));
-    const minX = Math.min(endpoints.start.x - 60, ...positions.map(p => p.x));
-    const maxX = Math.max(endpoints.end.x + 60, ...positions.map(p => p.x + NODE_WIDTH));
-    const minY = Math.min(endpoints.start.y - 30, ...positions.map(p => p.y));
-    const maxY = Math.max(endpoints.end.y + 30, ...positions.map(p => p.y + nodeHeight(drill, p.node)));
-
-    const padding = mobileGraphLayoutEnabled() ? 48 : 100;
-    const contentWidth = Math.max(1, maxX - minX + padding * 2);
-    const contentHeight = Math.max(1, maxY - minY + padding * 2);
-    const fitZoom = Math.min(
-      1,
-      els.graphViewport.clientWidth / contentWidth,
-      els.graphViewport.clientHeight / contentHeight
-    );
-    const targetZoom = clamp(fitZoom, MIN_GRAPH_ZOOM, 1, 1);
-    applyGraphZoom(targetZoom);
-
-    const centerX = (minX + maxX) / 2 * graphZoom;
-    const centerY = (minY + maxY) / 2 * graphZoom;
-    els.graphViewport.scrollTo({
-      left: Math.max(0, centerX - els.graphViewport.clientWidth / 2),
-      top: Math.max(0, centerY - els.graphViewport.clientHeight / 2),
-      behavior: "smooth",
-    });
+    applyGraphZoom(.86);
+    const startX = Math.max(0, endpoints.start.x * graphZoom - els.graphViewport.clientWidth / 2 + 55 * graphZoom);
+    const startY = Math.max(0, (endpoints.start.y - 24) * graphZoom);
+    els.graphViewport.scrollTo({ left: startX, top: startY, behavior: "smooth" });
   }
 
   function cloneDrillForUser(source, { folderId = null, nameBase = null } = {}) {
@@ -14211,8 +13902,6 @@ root.TTRSQRCode={
       robot.addEventListener("disconnect", handleUnexpectedRobotDisconnect);
     }
 
-    const primaryNavButtons = [els.desktopLibraryNavBtn, els.desktopRunNavBtn, els.desktopEditNavBtn, els.desktopRobotNavBtn].filter(Boolean);
-    primaryNavButtons.forEach(button => button.addEventListener("click", () => navigateApp(button.dataset.appNav, { push: true })));
     [els.topBackBtn, els.runBackBtn, els.editorBackBtn, els.robotBackBtn].filter(Boolean).forEach(button => button.addEventListener("click", goBackApp));
     els.runRobotBtn?.addEventListener("click", () => navigateApp("robot", { push: true }));
     els.runEditDrillBtn?.addEventListener("click", () => navigateApp("editor", { push: true }));
@@ -14472,7 +14161,150 @@ root.TTRSQRCode={
     window.addEventListener("beforeunload", emergencyPageExit, { capture: true });
   }
 
+  const VISUAL_FIXTURE_NAMES = Object.freeze([
+    "library", "run", "editor-graph", "add-node", "add-random", "add-repeat",
+    "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
+    "pose-calibration", "robot", "calibration",
+  ]);
+
+  function prepareVisualFixtureScroll(name) {
+    const target = name === "editor-graph"
+      ? els.graphViewport
+      : name === "shot-intuitive" || name === "shot-manual" || name === "serve-intuitive"
+        ? els.inspectorContent
+        : ["add-node", "add-random", "add-repeat", "add-subdrill"].includes(name)
+          ? els.addNodeDialog?.querySelector(".add-node-frame")
+        : name === "pose-calibration"
+          ? els.poseCalibrationDialog?.querySelector(".pose-calibration-frame")
+          : name === "calibration"
+            ? els.calibrationDialog?.querySelector(".calibration-frame")
+            : document.scrollingElement;
+    if (!target) return;
+    const requestedPage = Math.max(0, Number(new URLSearchParams(location.search).get("visualScrollPage")) || 0);
+    const pageHeight = Math.max(1, target.clientHeight);
+    const start = name === "editor-graph" ? target.scrollTop : 0;
+    const rootScreen = {
+      library: els.libraryScreen,
+      run: els.runScreen,
+      robot: els.robotScreen,
+    }[name];
+    let maximum = Math.max(0, target.scrollHeight - pageHeight);
+    if (rootScreen) {
+      const contentBottom = Math.max(
+        ...[...rootScreen.querySelectorAll("*")]
+          .filter(element => !["absolute", "fixed"].includes(getComputedStyle(element).position))
+          .map(element => element.getBoundingClientRect())
+          .filter(rect => rect.width > 0 && rect.height > 0)
+          .map(rect => rect.bottom + window.scrollY),
+      );
+      maximum = Math.max(0, Math.ceil(contentBottom - innerHeight));
+    } else if (name === "editor-graph") {
+      const end = syntheticEndpointPositions(activeDrill()).end;
+      maximum = Math.max(start, Math.ceil((end.y + 100) * graphZoom - pageHeight));
+    }
+    const pages = Math.max(1, 1 + Math.ceil(Math.max(0, maximum - start) / pageHeight));
+    const page = Math.min(requestedPage, pages - 1);
+    const scrollTop = Math.min(maximum, start + page * pageHeight);
+    if (rootScreen) {
+      window.scrollTo(0, 0);
+      rootScreen.style.transform = `translateY(${-scrollTop}px)`;
+    } else if (target === document.scrollingElement) window.scrollTo({ left: 0, top: scrollTop, behavior: "auto" });
+    else target.scrollTo({ left: target.scrollLeft, top: scrollTop, behavior: "auto" });
+    document.body.dataset.visualScrollPages = String(pages);
+    document.body.dataset.visualScrollPage = String(page);
+    document.body.dataset.visualScrollStart = String(start);
+    document.body.dataset.visualScrollMaximum = String(maximum);
+    document.body.dataset.visualScrollViewport = String(pageHeight);
+  }
+
+  function showVisualFixture(name) {
+    if (!VISUAL_FIXTURE_NAMES.includes(name)) throw new Error(`Unknown visual fixture: ${name}`);
+    document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
+    document.body.classList.remove("details-open", "ball-details");
+    selection = null;
+    inspectorOpen = false;
+
+    const selectBuiltIn = drillName => {
+      const drill = builtInCatalog.drills.find(candidate => candidate.name === drillName);
+      if (!drill) throw new Error(`Missing visual fixture drill: ${drillName}`);
+      library.activeDrillSource = "builtin";
+      library.activeDrillId = drill.id;
+      return drill;
+    };
+
+    if (name === "library") {
+      libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
+      navigateApp("library", { push: false });
+      renderAll();
+    } else if (name === "run") {
+      selectBuiltIn("Drill: Forehand / backhand alternating");
+      navigateApp("run", { push: false });
+      renderAll();
+    } else if (name === "editor-graph") {
+      selectBuiltIn("Match: Weighted rally");
+      navigateApp("editor", { push: false, allowBuiltInEditor: true });
+      renderAll();
+    } else if (name === "shot-intuitive" || name === "shot-manual") {
+      const drill = selectBuiltIn("Shot: Topspin to forehand");
+      navigateApp("editor", { push: false, allowBuiltInEditor: true });
+      selection = { kind: "node", id: drill.startNodeId };
+      openInspectorScreen();
+      shotEditorMode = name === "shot-manual" ? "manual" : "intuitive";
+      renderInspector();
+    } else if (name === "serve-intuitive") {
+      const drill = selectBuiltIn("Serve: Short backspin to backhand");
+      shotEditorMode = "intuitive";
+      navigateApp("editor", { push: false, allowBuiltInEditor: true });
+      selection = { kind: "node", id: drill.startNodeId };
+      openInspectorScreen();
+    } else if (name === "pose-calibration") {
+      selectBuiltIn("Drill: Forehand / backhand alternating");
+      navigateApp("run", { push: false });
+      renderAll();
+      openPoseCalibration();
+    } else if (["add-node", "add-random", "add-repeat", "add-subdrill"].includes(name)) {
+      const drill = defaultDrill("New drill");
+      library.drills.push(drill);
+      library.activeDrillSource = "user";
+      library.activeDrillId = drill.id;
+      navigateApp("editor", { push: false, allowBuiltInEditor: true });
+      renderAll();
+      openAddNodeMenu();
+      const configType = {
+        "add-random": "random",
+        "add-repeat": "counter",
+        "add-subdrill": "drill",
+      }[name];
+      if (configType) openAddNodeConfig(configType);
+    } else if (name === "robot") {
+      navigateApp("robot", { push: false });
+      renderAll();
+    } else if (name === "calibration") {
+      navigateApp("robot", { push: false });
+      openCalibrationWorkspace("guided");
+    }
+
+    document.body.dataset.visualFixture = name;
+    window.scrollTo(0, 0);
+    // Fixture state must be complete before Chromium's one-shot screenshot.
+    // Reading layout here makes scroll dimensions available without a timer.
+    void document.body.offsetHeight;
+    if (name === "editor-graph") {
+      fitGraph();
+      const endpoints = syntheticEndpointPositions(activeDrill());
+      els.graphViewport.scrollTo({
+        left: Math.max(0, endpoints.start.x * graphZoom - els.graphViewport.clientWidth / 2),
+        top: Math.max(0, (endpoints.start.y - 24) * graphZoom),
+        behavior: "auto",
+      });
+    }
+    prepareVisualFixtureScroll(name);
+    globalThis.__TTRS_VISUAL_FIXTURE_READY = name;
+  }
+
   globalThis.TableTennisRobotStudio = {
+    visualFixtureNames: [...VISUAL_FIXTURE_NAMES],
+    showVisualFixture,
     getLibrary: () => library,
     getActiveDrill: () => activeDrill(),
     getAiContext,
@@ -14480,6 +14312,8 @@ root.TTRSQRCode={
     validateDrill,
     saveLibrary,
     renderAll,
+    showVisualFixture,
+    visualFixtureNames: VISUAL_FIXTURE_NAMES,
     navigateApp,
     toast,
     askConfirm,
@@ -14605,7 +14439,10 @@ root.TTRSQRCode={
       renderCalibration();
       setTimeout(() => els.calibrationDialog.showModal(), 20);
     }
-    const runtimeProfileCount = Number(new URLSearchParams(location.search).get("profileRuntime"));
+    const searchParams = new URLSearchParams(location.search);
+    const visualFixture = searchParams.get("visualFixture");
+    if (visualFixture) showVisualFixture(visualFixture);
+    const runtimeProfileCount = Number(searchParams.get("profileRuntime"));
     if (Number.isFinite(runtimeProfileCount) && runtimeProfileCount > 0) {
       document.body.dataset.runtimeSolverProfile = JSON.stringify(globalThis.TableTennisRobotStudio.benchmarkRuntimeSolver(runtimeProfileCount));
     }
