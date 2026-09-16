@@ -29,6 +29,22 @@ const intervalBindings = functionBody(app, "bindIntervalControls");
 assert(intervalBindings.includes('input.addEventListener("input", () => sync(input))'));
 assert(intervalBindings.includes('input.addEventListener("change", () => sync(input, true))'));
 
+// Landing gestures paint directly, then hand expensive trajectory sampling to
+// a cancellable cooperative job. No full render may happen before its first UI
+// yield, and each local-envelope slice has a fixed main-thread time budget.
+const landingBinding = functionBody(app, "bindInteractiveLandingTable");
+assert(landingBinding.includes("cancelIntuitiveComputation(node)"));
+assert(landingBinding.includes("write(ranges)"));
+const intuitiveApply = functionBody(app, "applyIntuitiveShot");
+assert(intuitiveApply.includes("void applyIntuitiveShotProgressively"));
+assert(!intuitiveApply.includes("shotEnvelopeCloud("), "gesture completion must not synchronously build the shot cloud");
+const progressiveApply = functionBody(app, "applyIntuitiveShotProgressively");
+assert(progressiveApply.indexOf("await yieldToUi()") < progressiveApply.indexOf("progressiveShotEnvelopeCloud("));
+assert(progressiveApply.includes("if (!isCurrent()) return;"));
+const progressiveCloud = functionBody(app, "progressiveShotEnvelopeCloud");
+assert(progressiveCloud.includes("performance.now() - sliceStarted < 6"));
+assert(progressiveCloud.includes("await yieldToUi()"));
+
 // Run sliders must not rebuild the invisible trajectory-heavy inspector.
 const liveTuning = functionBody(app, "setLiveTuning");
 assert(liveTuning.includes('if (appView === "editor") renderInspector()'));
@@ -152,7 +168,7 @@ function profileGuiValidTuning() {
   const profile = profileGuiValidTuning();
   // Deployment protection: preflight already checks full bundle equality; these
   // checks make failures explain the missing UX guarantees directly.
-  for (const token of ["shouldStart: playbackStillRequested", 'if (appView === "editor") renderInspector()', "if (event.detail > 1) return;"]) {
+  for (const token of ["shouldStart: playbackStillRequested", 'if (appView === "editor") renderInspector()', "if (event.detail > 1) return;", "progressiveShotEnvelopeCloud", "performance.now() - sliceStarted < 6"]) {
     assert(bundle.includes(token), `Generated deployment bundle is missing UX protection: ${token}`);
   }
   console.log(`UX responsiveness self-test PASS · solver p95 ${profile.p95.toFixed(2)} ms · max ${profile.max.toFixed(2)} ms · ${profile.maxEvaluations} evaluations max`);

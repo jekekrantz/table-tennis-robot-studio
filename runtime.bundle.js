@@ -5232,6 +5232,8 @@ root.TTRSQRCode={
   let poseStaleAcknowledged = false;
   const shotVariationCache = new Map();
   const shotEnvelopeCache = new Map();
+  const variationFeasibleSamplesCache = new Map();
+  const intuitiveComputeRevisions = new Map();
   const intuitiveFeedbackByNodeId = new Map();
   const manualFeedbackByNodeId = new Map();
   const timingRangeCache = new Map();
@@ -8560,6 +8562,67 @@ root.TTRSQRCode={
     return supported.concat(supplemental);
   }
 
+  function progressiveEnvelopeParameters(node, selections) {
+    const values = list => [...new Set(list.map(value => rounded(value, 3)))].sort((a, b) => a - b);
+    const endpoints = range => values([range[0], (range[0] + range[1]) / 2, range[1]]);
+    const hardware = novaFeasibleBounds(library.calibration);
+    const elevationFallback = values([
+      ...(node.type === "serve" ? [-20, -18, -16, -14, -12, -8, -4, 0, 12, 28, 30] : [-20, -12, -4, 4, 10.3, 20, 28, 30]),
+      ...hardware.elevation,
+    ]).filter(value => value >= hardware.elevation[0] - 1e-9 && value <= hardware.elevation[1] + 1e-9);
+    const aimFallback = values([-22, -20, -12, -6, 0, 6, 12, 20, 22, ...hardware.aim])
+      .filter(value => value >= hardware.aim[0] - 1e-9 && value <= hardware.aim[1] + 1e-9);
+    const localValues = (key, fallback, offsets) => values([
+      ...(selections[key] ? endpoints(selections[key]) : fallback),
+      ...offsets.map(offset => node.params[key === "elevation" ? "elevationDeg" : "aimDeg"] + offset),
+    ]).filter(value => value >= hardware[key][0] - 1e-9 && value <= hardware[key][1] + 1e-9);
+    const speedModel = library.calibration.nova.speedModel;
+    const elevations = localValues("elevation", elevationFallback, [-3, -2, -1, 0, 1, 2, 3]);
+    const aims = localValues("aim", aimFallback, [-4, -2, -1, 0, 1, 2, 4]);
+    const parameters = [];
+    for (const speedMps of endpoints(selections.speed)) {
+      const speedSpinLimit = LaunchModel.maxSpinRpsAtExitSpeed(speedMps, library.calibration.nova, speedModel);
+      const spins = values([...endpoints(selections.spin), -speedSpinLimit, speedSpinLimit]);
+      for (const spinRps of spins) for (const elevationDeg of elevations) for (const aimDeg of aims) {
+        parameters.push({ speedMps, spinRps, elevationDeg, aimDeg });
+      }
+    }
+    return parameters;
+  }
+
+  async function progressiveShotEnvelopeCloud(node, selections, isCurrent, onProgress) {
+    // The shared coarse cloud is built when the editor opens. The local cloud
+    // changes with every gesture, so evaluate it in short slices instead of
+    // monopolising the main thread after pointerup.
+    const supported = shotEnvelopeCloud(node);
+    const parameters = progressiveEnvelopeParameters(node, selections);
+    const supplemental = [];
+    const options = trajectoryOptionsForNode(node);
+    let index = 0;
+    while (index < parameters.length) {
+      const sliceStarted = performance.now();
+      do {
+        const params = parameters[index++];
+        const prediction = novaFeasiblePrediction(params, null, options);
+        const landing = receiverLanding(prediction, node.type === "serve");
+        if (receiverPredictionValid(node, prediction) && landing && Number.isFinite(prediction.net?.clearanceM)) {
+          supplemental.push({
+            depth: (landing.x - prediction.table.length / 2) * 100,
+            lateral: landing.y * 100,
+            speed: params.speedMps, spin: params.spinRps,
+            elevation: params.elevationDeg, aim: params.aimDeg,
+            clearance: prediction.net.clearanceM * 100,
+            params,
+          });
+        }
+      } while (index < parameters.length && performance.now() - sliceStarted < 6);
+      if (!isCurrent()) return null;
+      onProgress?.(index, parameters.length, supplemental.length);
+      if (index < parameters.length) await yieldToUi();
+    }
+    return supported.concat(supplemental);
+  }
+
   function envelopeDomains(cloud, selections, table) {
     const hardware = novaFeasibleBounds(library.calibration);
     const hard = {
@@ -8600,6 +8663,11 @@ root.TTRSQRCode={
     return `
       <section class="intuitive-editor">
         ${intuitiveLandingSvg(node, prediction, selections, serve, variation)}
+        <div id="intuitiveComputeStatus" class="intuitive-compute-status" role="status" aria-live="polite" hidden>
+          <span class="intuitive-compute-spinner" aria-hidden="true"></span>
+          <span class="intuitive-compute-copy">Updating preview…</span>
+          <span class="intuitive-compute-track" aria-hidden="true"><span></span></span>
+        </div>
         ${intervalSideTrajectorySvg(node, variation)}
         <div class="intuitive-intervals">
           ${intuitiveRangeHtml("speed", selections.speed, domains.speed)}
@@ -8785,6 +8853,34 @@ root.TTRSQRCode={
     if (output) { output.hidden = false; output.innerHTML = intuitiveFeedbackByNodeId.get(node.id); }
   }
 
+  function setIntuitiveComputeStatus(message, progress = 0) {
+    const output = $("intuitiveComputeStatus");
+    if (!output) return;
+    output.hidden = false;
+    output.querySelector(".intuitive-compute-copy").textContent = message;
+    output.style.setProperty("--compute-progress", `${clamp(progress, 0, 1, 0) * 100}%`);
+    output.closest(".intuitive-editor")?.classList.add("computing");
+  }
+
+  function clearIntuitiveComputeStatus() {
+    const output = $("intuitiveComputeStatus");
+    if (output) output.hidden = true;
+    output?.closest(".intuitive-editor")?.classList.remove("computing");
+  }
+
+  function cancelIntuitiveComputation(node, message = "Release to update preview") {
+    intuitiveComputeRevisions.set(node.id, (intuitiveComputeRevisions.get(node.id) || 0) + 1);
+    setIntuitiveComputeStatus(message, 0);
+  }
+
+  function yieldToUi() {
+    return new Promise(resolve => {
+      const finish = () => setTimeout(resolve, 0);
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(finish);
+      else finish();
+    });
+  }
+
   function intervalRangeKey(container) {
     return container.dataset.intuitiveRange || container.dataset.manualRange;
   }
@@ -8836,13 +8932,36 @@ root.TTRSQRCode={
     let controls = Object.fromEntries([...els.inspectorContent.querySelectorAll("[data-intuitive-range]")]
       .map(container => [container.dataset.intuitiveRange, intuitiveRangeValues(container)]));
     controls = { ...(intuitivePlacementFromTable() || {}), ...controls };
+    const revision = (intuitiveComputeRevisions.get(node.id) || 0) + 1;
+    intuitiveComputeRevisions.set(node.id, revision);
+    setIntuitiveComputeStatus("Finding playable shots…", .02);
+    void applyIntuitiveShotProgressively(node, controls, revision).catch(error => {
+      if (intuitiveComputeRevisions.get(node.id) !== revision) return;
+      console.error("Could not update intuitive shot", error);
+      clearIntuitiveComputeStatus();
+      setIntuitiveFeedback(node, "The preview could not be updated. Try a smaller range.", "miss");
+    });
+  }
+
+  async function applyIntuitiveShotProgressively(node, controls, revision) {
+    const isCurrent = () => intuitiveComputeRevisions.get(node.id) === revision;
+    await yieldToUi();
+    if (!isCurrent()) return;
     const table = predictTrajectory(node.params, null, trajectoryOptionsForNode(node)).table;
-    const cloud = shotEnvelopeCloud(node, controls);
+    const cloud = await progressiveShotEnvelopeCloud(node, controls, isCurrent, (done, total, valid) => {
+      const progress = total ? done / total : 1;
+      setIntuitiveComputeStatus(`Checking shots ${Math.round(progress * 100)}% · ${valid} playable`, .05 + progress * .58);
+    });
+    if (!cloud || !isCurrent()) return;
     const feasiblePoints = cloud.filter(point => Object.keys(controls).every(key => intervalContains(key, point[key], controls[key])));
     if (!feasiblePoints.length) {
+      clearIntuitiveComputeStatus();
       setIntuitiveFeedback(node, "No valid shot exists inside all five intervals.", "miss");
       return;
     }
+    setIntuitiveComputeStatus(`Choosing from ${feasiblePoints.length} playable shots…`, .68);
+    await yieldToUi();
+    if (!isCurrent()) return;
     const target = {
       x: table.length / 2 + (controls.depth[0] + controls.depth[1]) / 200,
       y: (controls.lateral[0] + controls.lateral[1]) / 200,
@@ -8906,13 +9025,27 @@ root.TTRSQRCode={
       clearance: { minCm: controls.clearance[0], maxCm: controls.clearance[1] },
     }, params, candidatePrediction.net?.clearanceM);
     const candidate = { ...node, params, variation };
+    variationFeasibleSamplesCache.set(variationFeasibleSamplesKey(candidate, variation),
+      feasibleSamplesFromEnvelope(candidate, feasiblePoints));
+    setIntuitiveComputeStatus("Sampling the range…", .84);
+    await yieldToUi();
+    if (!isCurrent()) return;
     const profile = profileShotVariation(candidate, 12);
+    if (!isCurrent()) return;
     node.params = params;
     node.variation = variation;
     shotVariationCache.clear();
     if (profile.ok) intuitiveFeedbackByNodeId.delete(node.id);
     else intuitiveFeedbackByNodeId.set(node.id, `<strong class="trajectory-miss">No valid shot exists inside all five intervals.</strong>`);
-    commit();
+    setIntuitiveComputeStatus("Drawing trajectory details…", .96);
+    await yieldToUi();
+    if (!isCurrent()) return;
+    saveLibrary();
+    renderInspector();
+    await yieldToUi();
+    if (!isCurrent()) return;
+    renderGraph();
+    renderValidation();
   }
 
   function bindIntuitiveShotInspector(drill, node) {
@@ -9063,6 +9196,7 @@ root.TTRSQRCode={
     svg.addEventListener("pointerdown", event => {
       const target = event.target.closest?.("[data-landing-drag]");
       if (!target) return;
+      cancelIntuitiveComputation(node);
       const mode = target.dataset.landingDrag;
       drag = { mode, start: eventPoint(event), ranges: read(), pointerId: event.pointerId };
       svg.setPointerCapture?.(event.pointerId);
@@ -12068,8 +12202,26 @@ root.TTRSQRCode={
     };
   }
 
+  function variationFeasibleSamplesKey(node, variation) {
+    return JSON.stringify([node?.type, node?.params, variation, library.calibration]);
+  }
+
+  function feasibleSamplesFromEnvelope(node, points) {
+    const table = predictTrajectory(node.params, null, trajectoryOptionsForNode(node)).table;
+    const limit = 256;
+    const selected = points.length <= limit ? points : Array.from({ length: limit }, (_, index) =>
+      points[Math.round(index * (points.length - 1) / (limit - 1))]);
+    return selected.map(point => ({
+      params: { ...point.params },
+      outcome: [table.length / 2 + point.depth / 100, point.lateral / 100, point.clearance / 100],
+    }));
+  }
+
   function variationFeasibleSamples(node, variation) {
     if (!node || !variation?.enabled) return [];
+    const cacheKey = variationFeasibleSamplesKey(node, variation);
+    const cached = variationFeasibleSamplesCache.get(cacheKey);
+    if (cached) return cached;
     const prediction = predictTrajectory(node.params, null, trajectoryOptionsForNode(node));
     const normalized = ShotVariation.normalizeVariation(variation, node.params, prediction.net?.clearanceM);
     const selections = normalized.mode === "launch" ? {
@@ -12085,13 +12237,10 @@ root.TTRSQRCode={
       intervalContains(key, point[key], range)));
     // Bound cache size and preparation work while preserving the full region's
     // endpoints through deterministic, even sampling.
-    const limit = 256;
-    const selected = matching.length <= limit ? matching : Array.from({ length: limit }, (_, index) =>
-      matching[Math.round(index * (matching.length - 1) / (limit - 1))]);
-    return selected.map(point => ({
-      params: { ...point.params },
-      outcome: [prediction.table.length / 2 + point.depth / 100, point.lateral / 100, point.clearance / 100],
-    }));
+    const result = feasibleSamplesFromEnvelope(node, matching);
+    if (variationFeasibleSamplesCache.size >= 64) variationFeasibleSamplesCache.clear();
+    variationFeasibleSamplesCache.set(cacheKey, result);
+    return result;
   }
 
   function variationCacheEntry(shot, baseParams, runtime = false) {

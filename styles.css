@@ -152,6 +152,14 @@ button { color: inherit; }
 .dual-range input[type="range"]::-moz-range-track { background:transparent; border:0; }
 .intuitive-feedback { margin:0; padding:8px 10px; border:1px solid color-mix(in srgb,var(--danger),transparent 48%); border-radius:8px; background:color-mix(in srgb,var(--danger),transparent 92%); line-height:1.35; font-size:.72rem; }
 .intuitive-feedback[hidden] { display:none; }
+.intuitive-compute-status { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:4px 8px; min-height:22px; color:var(--muted); font-size:.7rem; }
+.intuitive-compute-status[hidden] { display:none; }
+.intuitive-compute-spinner { width:12px; height:12px; border:2px solid color-mix(in srgb,var(--accent),transparent 72%); border-top-color:var(--accent); border-radius:50%; animation:intuitive-compute-spin .7s linear infinite; }
+.intuitive-compute-track { grid-column:1 / -1; height:2px; overflow:hidden; border-radius:999px; background:color-mix(in srgb,var(--text),transparent 90%); }
+.intuitive-compute-track > span { display:block; width:var(--compute-progress,0%); height:100%; border-radius:inherit; background:var(--accent); transition:width 100ms linear; }
+.intuitive-editor.computing .landing-bounce-distribution,
+.intuitive-editor.computing .interval-side-figure { opacity:.28; transition:opacity 120ms ease; }
+@keyframes intuitive-compute-spin { to { transform:rotate(360deg); } }
 .play-button {
   min-width: 100px;
   height: 42px;
