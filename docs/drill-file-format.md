@@ -20,7 +20,7 @@ Portable drills use human-readable JSON and are shared by file import/export, UR
     "description": "Comfortable forehand/backhand alternating feed.",
     "tags": ["warm-up"],
     "robotPoseReference": "base_back",
-    "robotPose": {"x": 0, "y": 0, "yawDeg": 0},
+    "robotPose": {"x": 0, "y": 0, "z": 0, "yawDeg": 0, "pitchDeg": 0, "rollDeg": 0, "placement": "table"},
     "startNodeId": "shot-1",
     "settings": {"repetitions": 0, "delayBetweenSets": 0, "firstShotTiming": {"mode": "adaptive", "speedPct": 100}},
     "nodes": [

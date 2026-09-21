@@ -44,7 +44,7 @@ Back arrows use large touch targets and pop navigation history; close buttons di
 - Event-driven one-slot streaming for continuous per-ball updates without ordinary reset boundaries.
 - Physical shot inputs in m/s, rps and degrees, converted to Nova parameters.
 - Physically constrained per-ball variation in landing position, net clearance, speed and spin; Serve samples must also retain a legal second bounce.
-- Persisted manual SE(2) robot-position calibration with uncertainty-aware verification targets based on table lines and net geometry.
+- Persisted robot-installation calibration for on-table, floor, and other supports, with editable x/y/z, yaw/pitch/roll, paired top/side views, optional robust phone tilt measurement, and uncertainty-aware verification targets.
 - One bounded runtime solve combines robot-position compensation with live speed, spin and clearance adjustments; the source drill remains unchanged and the effective result can be saved as a new drill.
 - Trajectory preview using a published aerodynamic free-flight model with ITTF ball parameters.
 - Editable robot/table calibration, including a one-ball physical calibration test.

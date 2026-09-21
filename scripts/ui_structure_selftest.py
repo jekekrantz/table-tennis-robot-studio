@@ -13,6 +13,14 @@ core = (root / "studio-features-core.js").read_text(encoding="utf-8")
 ble = (root / "pongbot-ble.js").read_text(encoding="utf-8")
 ids = set(re.findall(r'\bid="([^"]+)"', html))
 
+robot_svg_options = sorted((root / "artifacts" / "robot-silhouettes").glob("nova-side-*.svg"))
+if len(robot_svg_options) != 5:
+    raise SystemExit(f"Expected five Nova side-profile SVG candidates, found {len(robot_svg_options)}")
+for robot_svg in robot_svg_options:
+    source = robot_svg.read_text(encoding="utf-8")
+    if "<svg" not in source or "viewBox=" not in source or "role=\"img\"" not in source:
+        raise SystemExit(f"Invalid accessible robot SVG candidate: {robot_svg.name}")
+
 # Core guided calibration and navigation controls.
 for expected in [
     "calibrationGuidedPanel", "guidedPlacementTable", "guidedPlacementGround",
@@ -21,7 +29,8 @@ for expected in [
     "guidedFeedBtn", "guidedRepeatCountInput", "guidedNozzleXInput",
     "guidedMeasurementOffsetInput", "guidedExportMeasurementsBtn",
     "resetLiveTuningBtn", "saveEffectiveDrillBtn", "updateRobotPoseBtn",
-    "poseCalibrationDialog", "poseCalibrationTableSvg", "poseCalibrationGuide",
+    "poseCalibrationDialog", "poseCalibrationTableSvg", "poseCalibrationSideSvg", "poseCalibrationGuide",
+    "placementChoiceDialog", "poseTopViewBtn", "poseSideViewBtn",
     "poseCalibrationConfidence", "savePoseCalibrationBtn", "cancelPoseCalibrationBtn",
     "builtInLibraryTab", "myDrillsLibraryTab", "libraryBreadcrumb", "librarySearchInput",
     "newFolderBtn", "copyBuiltInBtn", "moveDrillBtn", "folderDialog", "moveDrillDialog",
@@ -102,10 +111,16 @@ for token in (
         raise SystemExit(f"Missing base-back calibration convention: {token}")
 for token in (
     'geometryReference: ROBOT_GEOMETRY_REFERENCE',
-    'pose: { x: 0, y: 0, yawDeg: 0 }',
-    'robotPose: { x: 0, y: 0, yawDeg: 0 }',
-    'x: clamp(els.drillRobotXInput.value, -1.5, 4.2, 0)',
+    'pose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" }',
+    'robotPose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" }',
+    'x: clamp(els.drillRobotXInput.value, -3.5, 4.2, 0)',
     'RobotGeometry.releasePoint',
+    'RobotGeometry.launchFrame',
+    'RobotGeometry.constants.NOVA_LENGTH_M',
+    'RobotGeometry.constants.NOVA_WIDTH_M',
+    'RobotGeometry.constants.NOVA_HEIGHT_M',
+    'data-pose-installation="floorHeightCm"',
+    'data-pose-installation="xCm"',
 ):
     if token not in app:
         raise SystemExit(f"Missing fixed-pivot/base-back model integration: {token}")
@@ -410,7 +425,7 @@ for token in ('SEAM_COLOR', 'stitch_pages', 'NAVIGATION_EDGES', 'NAVIGATION_GROU
               'navigation_map', '--map-only', 'navigation-map-', 'data-visual-scroll-pages'):
     if token not in visual_script:
         raise SystemExit(f"Missing stitched navigation fixture support: {token}")
-for token in ('description: ""', 'tags: []', 'robotPose: { x: 0, y: 0, yawDeg: 0 }'):
+for token in ('description: ""', 'tags: []', 'robotPose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" }'):
     if token not in app:
         raise SystemExit(f"Missing drill metadata model: {token}")
 if 'set the step, then add it' not in app.lower():

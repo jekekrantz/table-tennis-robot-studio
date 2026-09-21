@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" role="img" aria-label="Pongbot Nova side profile option 1, simple silhouette">
+  <g transform="translate(92 190) scale(1.72)" stroke="#e4edf2" stroke-width="2.4" stroke-linejoin="round">
+    <path fill="#131a20" d="M6 0Q1-1 1-8l-3-19q0-7 9-8h63q9 1 9 8L77-8q0 8-9 8Z"/>
+    <path fill="#32414a" d="m-50-88 80 1q9 1 10 9l3 44h-61q-9-1-15-8l-17-12Z"/>
+    <path fill="#182128" d="M37-37q2-20 17-35 9-9 21-5 12 3 19 17v16q-4 9-16 12l-20 1Z"/>
+    <path fill="#11171c" d="M94-81q3-7 12-8l10 2q6 2 7 10l-1 34q-1 9-9 12h-10q-7-2-10-10-4-9-2-18-2-11 3-22Z"/>
+    <circle cx="67" cy="-67" r="11" fill="#db6145"/><ellipse cx="48" cy="-35" rx="13" ry="5" fill="#ed7135"/>
+  </g>
+</svg>

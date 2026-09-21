@@ -5,7 +5,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const DEFAULT_UNCERTAINTY = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, landingCm: 5, measurementCm: 2 });
+  const DEFAULT_UNCERTAINTY = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, pitchDeg: 3, rollDeg: 3, landingCm: 5, measurementCm: 2 });
   const DEFAULT_STALE_DAYS = 14;
   const DISTANCE_NOISE_PER_M = .015;
 
@@ -19,10 +19,15 @@
   }
 
   function sanitizePose(pose = {}) {
+    const placement = ["table", "floor", "other"].includes(pose.placement) ? pose.placement : "table";
     return {
-      x: clamp(finite(pose.x, 0), -1.5, 4.2),
+      x: clamp(finite(pose.x, 0), -3.5, 4.2),
       y: clamp(finite(pose.y, 0), -2, 2),
+      z: clamp(finite(pose.z, placement === "floor" ? -.76 : 0), -1.5, 1.2),
       yawDeg: clamp(finite(pose.yawDeg, 0), -180, 180),
+      pitchDeg: clamp(finite(pose.pitchDeg, 0), -30, 45),
+      rollDeg: clamp(finite(pose.rollDeg, 0), -20, 20),
+      placement,
     };
   }
 
@@ -31,6 +36,8 @@
       xCm: clamp(Math.abs(finite(input.xCm, DEFAULT_UNCERTAINTY.xCm)), .2, 100),
       yCm: clamp(Math.abs(finite(input.yCm, DEFAULT_UNCERTAINTY.yCm)), .2, 100),
       yawDeg: clamp(Math.abs(finite(input.yawDeg, DEFAULT_UNCERTAINTY.yawDeg)), .1, 45),
+      pitchDeg: clamp(Math.abs(finite(input.pitchDeg, DEFAULT_UNCERTAINTY.pitchDeg)), .1, 20),
+      rollDeg: clamp(Math.abs(finite(input.rollDeg, DEFAULT_UNCERTAINTY.rollDeg)), .1, 20),
       landingCm: clamp(Math.abs(finite(input.landingCm, DEFAULT_UNCERTAINTY.landingCm)), .5, 50),
       measurementCm: clamp(Math.abs(finite(input.measurementCm, DEFAULT_UNCERTAINTY.measurementCm)), .2, 30),
     };
@@ -83,36 +90,36 @@
     const dy = finite(target.y, 0) - finite(pose.y, 0);
     // Small-angle SE(2) landing sensitivity. Yaw is represented in radians.
     return [
-      [1, 0, -dy],
-      [0, 1, dx],
+      [1, 0, -dy, 0, 0],
+      [0, 1, dx, 0, 0],
     ];
   }
 
   function covarianceFromUncertainty(input = {}) {
     const u = sanitizeUncertainty(input);
-    return [
-      [Math.pow(u.xCm / 100, 2), 0, 0],
-      [0, Math.pow(u.yCm / 100, 2), 0],
-      [0, 0, Math.pow(u.yawDeg * Math.PI / 180, 2)],
-    ];
+    const diagonal = [u.xCm/100, u.yCm/100, u.yawDeg*Math.PI/180, u.pitchDeg*Math.PI/180, u.rollDeg*Math.PI/180].map(value => value*value);
+    return diagonal.map((value,row) => diagonal.map((_,column) => row === column ? value : 0));
   }
 
   function sanitizeCovariance(input, uncertainty = {}) {
     const fallback = covarianceFromUncertainty(uncertainty);
-    if (!Array.isArray(input) || input.length !== 3 || input.some(row => !Array.isArray(row) || row.length !== 3)) return fallback;
-    const result = Array.from({ length: 3 }, (_, row) => Array.from({ length: 3 }, (_, column) => finite(input[row][column], fallback[row][column])));
-    for (let row = 0; row < 3; row += 1) {
-      result[row][row] = clamp(Math.abs(result[row][row]), row === 2 ? 1e-8 : 4e-6, row === 2 ? 1 : 4);
+    if (!Array.isArray(input)) return fallback;
+    const legacy3 = input.length === 3 && input.every(row => Array.isArray(row) && row.length === 3);
+    const valid5 = input.length === 5 && input.every(row => Array.isArray(row) && row.length === 5);
+    if (!legacy3 && !valid5) return fallback;
+    const result = fallback.map((fallbackRow,row) => fallbackRow.map((fallbackValue,column) =>
+      row < input.length && column < input.length ? finite(input[row][column], fallbackValue) : fallbackValue));
+    for (let row = 0; row < 5; row += 1) {
+      result[row][row] = clamp(Math.abs(result[row][row]), row >= 2 ? 1e-8 : 4e-6, row >= 2 ? 1 : 4);
     }
-    for (let row = 0; row < 3; row += 1) {
-      for (let column = row + 1; column < 3; column += 1) {
+    for (let row = 0; row < 5; row += 1) {
+      for (let column = row + 1; column < 5; column += 1) {
         const symmetric = (result[row][column] + result[column][row]) / 2;
         const limit = Math.sqrt(result[row][row] * result[column][column]) * .999;
         result[row][column] = result[column][row] = clamp(symmetric, -limit, limit);
       }
     }
-    const leadingMinor2 = result[0][0] * result[1][1] - result[0][1] * result[1][0];
-    return leadingMinor2 > 1e-16 && determinant3(result) > 1e-16 ? result : fallback;
+    return determinant(result) > 1e-24 ? result : fallback;
   }
 
   function uncertaintyFromCovariance(covarianceInput, base = {}) {
@@ -123,13 +130,27 @@
       xCm: Math.sqrt(covariance[0][0]) * 100,
       yCm: Math.sqrt(covariance[1][1]) * 100,
       yawDeg: Math.sqrt(covariance[2][2]) * 180 / Math.PI,
+      pitchDeg: Math.sqrt(covariance[3][3]) * 180 / Math.PI,
+      rollDeg: Math.sqrt(covariance[4][4]) * 180 / Math.PI,
     };
   }
 
-  function determinant3(matrix) {
-    return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
-      - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
-      + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+  function determinant(matrix) {
+    const work = matrix.map(row => [...row]);
+    let result = 1;
+    for (let column = 0; column < work.length; column += 1) {
+      let pivot = column;
+      for (let row = column + 1; row < work.length; row += 1) if (Math.abs(work[row][column]) > Math.abs(work[pivot][column])) pivot = row;
+      if (Math.abs(work[pivot][column]) < 1e-18) return 0;
+      if (pivot !== column) { [work[pivot],work[column]] = [work[column],work[pivot]]; result *= -1; }
+      const value = work[column][column];
+      result *= value;
+      for (let row = column + 1; row < work.length; row += 1) {
+        const factor = work[row][column] / value;
+        for (let inner = column + 1; inner < work.length; inner += 1) work[row][inner] -= factor * work[column][inner];
+      }
+    }
+    return result;
   }
 
   function dot(left, right) {
@@ -299,8 +320,9 @@
       const projected = multiplyMatrixVector(covariance, row);
       const innovationVariance = Math.max(1e-12, dot(row, projected) + sigmaM * sigmaM);
       const gain = projected.map(value => value / innovationVariance);
-      const next = Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) => covariance[i][j] - gain[i] * projected[j]));
-      covariance = Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) => (next[i][j] + next[j][i]) / 2));
+      const size = covariance.length;
+      const next = Array.from({ length: size }, (_, i) => Array.from({ length: size }, (_, j) => covariance[i][j] - gain[i] * projected[j]));
+      covariance = Array.from({ length: size }, (_, i) => Array.from({ length: size }, (_, j) => (next[i][j] + next[j][i]) / 2));
     }
     return sanitizeCovariance(covariance, uncertaintyFromCovariance(covariance));
   }
@@ -310,9 +332,9 @@
   }
 
   function informationGainForTarget(target, pose, covariance, uncertainty) {
-    const before = Math.max(1e-16, determinant3(covariance));
+    const before = Math.max(1e-30, determinant(covariance));
     const afterCovariance = covarianceAfterTarget(covariance, target, pose, uncertainty);
-    const after = Math.max(1e-16, determinant3(afterCovariance));
+    const after = Math.max(1e-30, determinant(afterCovariance));
     return Math.max(0, .5 * Math.log(before / after));
   }
 
@@ -457,7 +479,9 @@
     const uncertainty = sanitizeUncertainty(uncertaintyInput);
     let covariance = sanitizeCovariance(covarianceInput, uncertainty);
     const target = { x: finite(observation.targetX, 0), y: finite(observation.targetY, 0) };
-    const allRows = sensitivityRows(target, pose);
+    const suppliedRows = Array.isArray(observation.sensitivityRows) && observation.sensitivityRows.length === 2
+      && observation.sensitivityRows.every(row => Array.isArray(row) && row.length === 5 && row.every(value => Number.isFinite(Number(value))));
+    const allRows = suppliedRows ? observation.sensitivityRows.map(row => row.map(Number)) : sensitivityRows(target, pose);
     const shotSigmaCm = clamp(Math.abs(finite(observation.shotSigmaCm, uncertainty.landingCm)), .5, 60);
     const components = [];
     if (observation.longitudinalErrorCm != null && Number.isFinite(Number(observation.longitudinalErrorCm))) components.push({
@@ -469,7 +493,7 @@
       sigmaM: Math.hypot(shotSigmaCm, clamp(Math.abs(finite(observation.humanSigmaLateralCm, uncertainty.measurementCm)), .2, 60)) / 100,
     });
     if (!components.length) return { accepted: false, reason: "no-measurement", correctedPose: pose, covariance, uncertainty: uncertaintyFromCovariance(covariance, uncertainty) };
-    const delta = [0, 0, 0];
+    const delta = [0, 0, 0, 0, 0];
     let maxZ = 0;
     let downweighted = false;
     for (const component of components) {
@@ -483,20 +507,24 @@
         downweighted = true;
       }
       const gain = projected.map(value => value / innovationVariance);
-      for (let index = 0; index < 3; index += 1) delta[index] += gain[index] * innovation;
-      const next = Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) => covariance[i][j] - gain[i] * projected[j]));
-      covariance = Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) => (next[i][j] + next[j][i]) / 2));
+      for (let index = 0; index < delta.length; index += 1) delta[index] += gain[index] * innovation;
+      const size = covariance.length;
+      const next = Array.from({ length: size }, (_, i) => Array.from({ length: size }, (_, j) => covariance[i][j] - gain[i] * projected[j]));
+      covariance = Array.from({ length: size }, (_, i) => Array.from({ length: size }, (_, j) => (next[i][j] + next[j][i]) / 2));
     }
     const correctedPose = sanitizePose({
+      ...pose,
       x: pose.x + delta[0],
       y: pose.y + delta[1],
       yawDeg: pose.yawDeg + delta[2] * 180 / Math.PI,
+      pitchDeg: pose.pitchDeg + delta[3] * 180 / Math.PI,
+      rollDeg: pose.rollDeg + delta[4] * 180 / Math.PI,
     });
     return {
       accepted: true,
       downweighted,
       normalizedInnovation: maxZ,
-      delta: { xCm: delta[0] * 100, yCm: delta[1] * 100, yawDeg: delta[2] * 180 / Math.PI },
+      delta: { xCm: delta[0] * 100, yCm: delta[1] * 100, yawDeg: delta[2] * 180 / Math.PI, pitchDeg: delta[3] * 180 / Math.PI, rollDeg: delta[4] * 180 / Math.PI },
       correctedPose,
       covariance,
       uncertainty: uncertaintyFromCovariance(covariance, uncertainty),

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" role="img" aria-label="Pongbot Nova side profile option 5, high-contrast layered drawing">
+  <g transform="translate(92 190) scale(1.72)" stroke="#fff" stroke-width="2.4" stroke-linejoin="round">
+    <path fill="#080c10" d="M6 0Q1-1 1-8l-3-19q0-7 9-8h63q9 1 9 8L77-8q0 8-9 8Z"/>
+    <path fill="#38515c" d="m-50-88 80 1q9 1 10 9l3 44h-61q-9-1-15-8l-17-12Z"/>
+    <ellipse cx="48" cy="-35" rx="13" ry="5" fill="#ff7938"/>
+    <path fill="#12191f" d="M37-37q2-20 17-35 9-9 21-5 12 3 19 17v16q-4 9-16 12l-20 1Z"/>
+    <path fill="#05080b" d="M94-81q3-7 12-8l10 2q6 2 7 10l-1 34q-1 9-9 12h-10q-7-2-10-10-4-9-2-18-2-11 3-22Z"/>
+    <circle cx="67" cy="-67" r="11" fill="#ed6949"/><circle cx="67" cy="-67" r="4" fill="#fff" stroke="none"/>
+    <path d="M13-22h52L64-7q0 3-5 3H20q-5 0-5-4Zm15-52h-77m6 5 74 1 2 26h-52q-8-1-13-6l-11-8ZM59-58l10 20m-6-19 10 19m-5-18 9 16" fill="none" stroke="#8299a6" stroke-width="1.4"/>
+    <path d="M96-39q15 10 10 28-4 14-13 4-6-7-2-18" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+</svg>

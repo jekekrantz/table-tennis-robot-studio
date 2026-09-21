@@ -45,7 +45,7 @@ for (let index = 0; index < 5; index += 1) {
   const target = Pose.proposeCalibrationTargets(table, sequentialPose, sequentialUncertainty, {
     covariance: sequentialCovariance, recentTargets, currentWatchGroup,
   })[0];
-  const poseError = [truePose.x - sequentialPose.x, truePose.y - sequentialPose.y, (truePose.yawDeg - sequentialPose.yawDeg) * Math.PI / 180];
+  const poseError = [truePose.x - sequentialPose.x, truePose.y - sequentialPose.y, (truePose.yawDeg - sequentialPose.yawDeg) * Math.PI / 180, 0, 0];
   const [xRow, yRow] = Pose.sensitivityRows(target, sequentialPose);
   const project = row => row.reduce((sum, value, component) => sum + value * poseError[component], 0);
   const update = Pose.estimatePoseObservation(sequentialPose, sequentialCovariance, {
@@ -77,6 +77,15 @@ const anisotropic = Pose.estimatePoseObservation(base, covariance, {
 }, uncertainty);
 assert(anisotropic.uncertainty.xCm < 3, "a precise endline-direction report should constrain forward/back pose");
 assert(anisotropic.uncertainty.yCm > 4.8, "poor lateral reference must not pretend to constrain lateral pose");
+
+const tiltUpdate = Pose.estimatePoseObservation({ ...base, pitchDeg:0, rollDeg:0 }, covariance, {
+  targetX: 2, targetY: 0,
+  longitudinalErrorCm: 8, lateralErrorCm: -4,
+  sensitivityRows: [[0,0,0,1.4,.1],[0,0,0,.05,1.1]],
+  shotSigmaCm:1, humanSigmaLongitudinalCm:1, humanSigmaLateralCm:1,
+}, uncertainty);
+assert(tiltUpdate.correctedPose.pitchDeg > 0, "trajectory sensitivity should allow landing feedback to refine pitch");
+assert(tiltUpdate.correctedPose.rollDeg < 0, "trajectory sensitivity should allow landing feedback to refine roll");
 
 const nearLeftEdge = Pose.feedbackMeasurementNoise(table, { x: 2.67, y: table.width / 2 - .005 }, { gridCm: 20, pointerSigmaCm: 2 });
 assert(nearLeftEdge.lateralSigmaCm < nearLeftEdge.longitudinalSigmaCm, "sideline proximity should improve only the lateral measurement");

@@ -14,6 +14,14 @@ Captured 2026-09-04. These are product observations and future work, not complet
 
 ## Completed
 
+### Support flexible robot installations — completed 2026-09-17
+
+- Ask whether the robot is supported by the table, floor, or another platform before pose calibration.
+- Model base-back x/y/z plus yaw, pitch, and roll through the measured articulated launcher geometry, including release point, launch direction, and spin axis.
+- Pair the interactive top view with a common-scale side view of the floor, realistic table undercarriage, net, support height, and a responsive Nova-inspired robot outline. Top edits x/y/yaw; Side edits x/z/pitch; compact sliders retain precise pitch/roll input. Outside placements have 3 m of visible workspace behind the near edge.
+- Optionally initialize pitch and roll from phone motion sensors. Accept samples only while gyroscope rotation is low, reject acceleration outliers with a robust median/MAD filter, report uncertainty, and retain manual controls when sensors are unavailable.
+- Treat phone/manual installation values as priors. Calibration-shot landing feedback uses numerical trajectory sensitivities to refine x, y, yaw, pitch, and roll before independent verification.
+
 ### Standardize mobile visual development — completed 2026-09-10
 
 - Use one phone-oriented product layout at every window width rather than

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" role="img" aria-label="Pongbot Nova side profile option 3, product-style drawing">
+  <defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#414d56"/><stop offset="1" stop-color="#12191f"/></linearGradient><linearGradient id="bin" x1="0" x2="1"><stop stop-color="#7898a5" stop-opacity=".45"/><stop offset="1" stop-color="#d2edf2" stop-opacity=".28"/></linearGradient></defs>
+  <g transform="translate(92 190) scale(1.72)" stroke="#dce7ed" stroke-width="1.8" stroke-linejoin="round">
+    <path fill="url(#body)" d="M6 0Q1-1 1-8l-3-19q0-7 9-8h63q9 1 9 8L77-8q0 8-9 8Z"/>
+    <path d="M13-22h52L64-7q0 3-5 3H20q-5 0-5-4Z" fill="#090e12" fill-opacity=".3" stroke="#536574" stroke-width="1.1"/>
+    <path fill="url(#bin)" d="m-50-88 80 1q9 1 10 9l3 44h-61q-9-1-15-8l-17-12Z"/><path fill="#a3c4cc" fill-opacity=".25" d="m-50-88 80 1q9 1 10 9l-1 4-88-2Z"/>
+    <path d="m-43-69 74 1 2 26h-52q-8-1-13-6l-11-8Z" fill="#10181e" fill-opacity=".18" stroke="#7f9aa5" stroke-width="1.2"/>
+    <ellipse cx="48" cy="-35" rx="13" ry="5" fill="#ef6d2f" stroke="#ffbf9b"/>
+    <path fill="url(#body)" d="M37-37q2-20 17-35 9-9 21-5 12 3 19 17v16q-4 9-16 12l-20 1Z"/>
+    <path fill="url(#body)" d="M87-69q8-6 15 1l1 24q-5 5-11 2Z"/>
+    <path fill="url(#body)" d="M94-81q3-7 12-8l10 2q6 2 7 10l-1 34q-1 9-9 12h-10q-7-2-10-10-4-9-2-18-2-11 3-22Z"/>
+    <circle cx="67" cy="-67" r="11" fill="#dc6548" stroke="#ffd9cd"/><circle cx="67" cy="-67" r="4" fill="#f7eee8" stroke="none"/>
+    <g fill="none" stroke="#71818c" stroke-width="1.2"><path d="M40-42q24 7 51-1M101-60q10 4 20 1"/><path d="M-39-75l1 18m6-18 1 26m6-26 1 31m48-30 2 32m5-31 2 33M59-58l10 20m-6-19 10 19m-5-18 9 16"/></g>
+    <path d="M96-39q15 10 10 28-4 14-13 4-6-7-2-18" fill="none" stroke="#182027" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

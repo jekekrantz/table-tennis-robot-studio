@@ -8,7 +8,7 @@ python3 scripts/build_runtime_bundle.py --check
 echo "[2/13] JavaScript syntax"
 for file in \
   app.js pongbot-protocol.js pongbot-ble.js selftest.js emergency-shutdown-selftest.js \
-  robot-geometry.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
+  robot-geometry.js robot-geometry-selftest.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
   drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js adaptive-timing.js adaptive-timing-selftest.js \
   built-in-library-selftest.js \
@@ -24,6 +24,7 @@ echo "[4/13] Page-exit emergency STOP/disconnect self-test"
 node emergency-shutdown-selftest.js
 
 echo "[5/13] Fixed geometry + guided calibration solver self-tests"
+node robot-geometry-selftest.js
 node geometry-calibration-selftest.js
 node guided-calibration-selftest.js
 

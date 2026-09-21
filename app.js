@@ -149,8 +149,13 @@
     cancelPoseCalibrationBtn: $("cancelPoseCalibrationBtn"),
     savePoseCalibrationBtn: $("savePoseCalibrationBtn"),
     poseCalibrationTableSvg: $("poseCalibrationTableSvg"),
+    poseCalibrationSideSvg: $("poseCalibrationSideSvg"),
+    poseTopViewBtn: $("poseTopViewBtn"),
+    poseSideViewBtn: $("poseSideViewBtn"),
     poseCalibrationGuide: $("poseCalibrationGuide"),
     poseCalibrationConfidence: $("poseCalibrationConfidence"),
+    placementChoiceDialog: $("placementChoiceDialog"),
+    closePlacementChoiceBtn: $("closePlacementChoiceBtn"),
     rotationTypeInput: $("rotationTypeInput"),
     gravityInput: $("gravityInput"),
     ballMassInput: $("ballMassInput"),
@@ -334,6 +339,8 @@
   let robotIdleStopIssued = false;
   let poseCalibrationState = null;
   let poseCalibrationDrag = null;
+  let poseCalibrationView = "top";
+  let tiltCapture = null;
   let poseMeasurementGesture = null;
   let poseStaleAcknowledged = false;
   const shotVariationCache = new Map();
@@ -543,8 +550,8 @@
   function defaultCalibration() {
     return {
       geometryReference: ROBOT_GEOMETRY_REFERENCE,
-      pose: { x: 0, y: 0, yawDeg: 0 },
-      poseSession: PoseCalibration?.sanitizeSession({}, { x: 0, y: 0, yawDeg: 0 }) || null,
+      pose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" },
+      poseSession: PoseCalibration?.sanitizeSession({}, { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" }) || null,
       placementMode: "table",
       tableHeight: 0.76,
       table: regulationTable(),
@@ -582,7 +589,7 @@
       tags: [],
       // Expected physical placement for this drill. x/y refer to the back of the base.
       robotPoseReference: "base_back",
-      robotPose: { x: 0, y: 0, yawDeg: 0 },
+      robotPose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" },
       startNodeId: null,
       settings: { repetitions: 3, delayBetweenSets: 0, firstShotTiming: { mode: "adaptive", speedPct: 100 } },
       nodes: [],
@@ -1672,9 +1679,15 @@
       saved: Boolean(shot?.saved),
     })) : guidedBase.shots;
     const sanitizedPose = {
-      x: clamp(pose.x, -1.5, 4.2, base.pose.x),
+      x: clamp(pose.x, -3.5, 4.2, base.pose.x),
       y: clamp(pose.y, -2, 2, base.pose.y),
+      z: clamp(pose.z, -1.5, 1.2, base.pose.z),
       yawDeg: clamp(pose.yawDeg, -180, 180, base.pose.yawDeg),
+      pitchDeg: clamp(pose.pitchDeg, -30, 45, base.pose.pitchDeg),
+      rollDeg: clamp(pose.rollDeg, -20, 20, base.pose.rollDeg),
+      placement: ["table", "floor", "other"].includes(pose.placement)
+        ? pose.placement
+        : "table",
     };
     return {
       geometryReference: ROBOT_GEOMETRY_REFERENCE,
@@ -1820,9 +1833,13 @@
     const rawPose = raw?.robotPose || {};
     drill.robotPoseReference = "base_back";
     drill.robotPose = {
-      x: clamp(rawPose.x, -1.5, 4.2, 0),
+      x: clamp(rawPose.x, -3.5, 4.2, 0),
       y: clamp(rawPose.y, -2, 2, 0),
+      z: clamp(rawPose.z, -1.5, 1.2, 0),
       yawDeg: clamp(rawPose.yawDeg, -180, 180, 0),
+      pitchDeg: clamp(rawPose.pitchDeg, -30, 45, 0),
+      rollDeg: clamp(rawPose.rollDeg, -20, 20, 0),
+      placement: ["table", "floor", "other"].includes(rawPose.placement) ? rawPose.placement : "table",
     };
 
     const settings = raw?.settings || {};
@@ -2059,22 +2076,22 @@
   }
 
   function drillPose(drill = activeDrill()) {
-    const p = drill?.robotPose || library?.calibration?.pose || { x: 0, y: 0, yawDeg: 0 };
-    return { x: finite(p.x, 0), y: finite(p.y, 0), yawDeg: finite(p.yawDeg, 0) };
+    const p = drill?.robotPose || library?.calibration?.pose || {};
+    return PoseCalibration.sanitizePose(p);
   }
   function currentRobotPose() {
-    const p = library?.calibration?.pose || { x: 0, y: 0, yawDeg: 0 };
-    return { x: finite(p.x, 0), y: finite(p.y, 0), yawDeg: finite(p.yawDeg, 0) };
+    return PoseCalibration.sanitizePose(library?.calibration?.pose || {});
   }
   function poseDifference(reference, current = currentRobotPose()) {
     return {
-      distanceM: Math.hypot(current.x - reference.x, current.y - reference.y),
+      distanceM: Math.hypot(current.x - reference.x, current.y - reference.y, current.z - finite(reference.z, 0)),
       yawDeg: Math.abs(current.yawDeg - reference.yawDeg),
+      tiltDeg: Math.hypot(current.pitchDeg - finite(reference.pitchDeg, 0), current.rollDeg - finite(reference.rollDeg, 0)),
     };
   }
   function poseNeedsCompensation(reference, current = currentRobotPose()) {
     const difference = poseDifference(reference, current);
-    return difference.distanceM > .001 || difference.yawDeg > .05;
+    return difference.distanceM > .001 || difference.yawDeg > .05 || difference.tiltDeg > .05;
   }
   function robotSetupMiniSvg(currentPose = currentRobotPose()) {
     const table = library?.calibration?.table || regulationTable();
@@ -5057,28 +5074,29 @@
     const netX = table.length / 2;
     const ballRadius = c.physics.ballDiameterM / 2;
     if (!RobotGeometry) throw new Error("Robot geometry module did not load.");
-    const yaw = radians(c.pose.yawDeg + params.aimDeg);
-    const elevation = radians(params.elevationDeg);
-    const groundPlacement = c.placementMode === "ground";
-    const supportZ = groundPlacement ? -c.tableHeight : 0;
-    let position = RobotGeometry.releasePoint({
+    const groundPlacement = c.pose?.placement === "floor" || c.pose?.placement === "other" || c.placementMode === "ground";
+    const installation = {
       baseX: c.pose.x,
       baseY: c.pose.y,
       baseYawDeg: c.pose.yawDeg,
+      basePitchDeg: finite(c.pose.pitchDeg, 0),
+      baseRollDeg: finite(c.pose.rollDeg, 0),
       aimDeg: params.aimDeg,
       elevationDeg: params.elevationDeg,
-      supportZ,
-    });
+      supportZ: finite(c.pose.z, c.placementMode === "ground" ? -c.tableHeight : 0),
+    };
+    let position = RobotGeometry.releasePoint(installation);
+    const launchFrame = RobotGeometry.launchFrame(installation);
     let velocity = {
-      x: params.speedMps * Math.cos(elevation) * Math.cos(yaw),
-      y: params.speedMps * Math.cos(elevation) * Math.sin(yaw),
-      z: params.speedMps * Math.sin(elevation),
+      x: params.speedMps * launchFrame.forward.x,
+      y: params.speedMps * launchFrame.forward.y,
+      z: params.speedMps * launchFrame.forward.z,
     };
     const omegaMagnitude = params.spinRps * Math.PI * 2;
     const omega = {
-      x: -Math.sin(yaw) * omegaMagnitude,
-      y: Math.cos(yaw) * omegaMagnitude,
-      z: 0,
+      x: launchFrame.spinAxis.x * omegaMagnitude,
+      y: launchFrame.spinAxis.y * omegaMagnitude,
+      z: launchFrame.spinAxis.z * omegaMagnitude,
     };
     const initialAero = aerodynamicState(velocity, omega, c);
     const points = [{ ...position, t: 0 }];
@@ -5642,9 +5660,28 @@
     return session;
   }
 
-  const MANUAL_POSE_PRIOR = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, landingCm: 5, measurementCm: 2 });
+  const MANUAL_POSE_PRIOR = Object.freeze({ xCm: 5, yCm: 5, yawDeg: 3, pitchDeg: 3, rollDeg: 3, landingCm: 5, measurementCm: 2 });
   const MAX_POSE_CALIBRATION_SHOTS = 7;
-  const POSE_TABLE_VIEW = Object.freeze({ left: 43, top: 40, width: 334, height: 600 });
+  function poseSharedGeometry(pose = currentRobotPose()) {
+    const table = library.calibration.table;
+    const minX = Math.min(-.45, pose.x - .55);
+    const maxX = Math.max(table.length + .15, pose.x + .55);
+    const minY = Math.min(-table.width/2 - .18, pose.y - .35);
+    const maxY = Math.max(table.width/2 + .18, pose.y + .35);
+    const minZ = Math.min(-library.calibration.tableHeight - .03, pose.z - .15);
+    const maxZ = .68;
+    const spanX = maxX-minX, spanY = maxY-minY, spanZ = maxZ-minZ;
+    const scale = Math.min(600/spanX, 334/spanY, 640/spanX, 228/spanZ);
+    const topWidth = spanX*scale, topHeight = spanY*scale;
+    const sideWidth = spanX*scale, sideHeight = spanZ*scale;
+    const sharedRight = 684;
+    const sharedLeft = sharedRight-topWidth;
+    return {
+      minX, maxX, minY, maxY, minZ, maxZ, scale,
+      top: { left:sharedLeft, top:(420-topHeight)/2, width:topWidth, height:topHeight },
+      side: { left:sharedLeft, right:sharedRight, top:16+(228-sideHeight)/2, bottom:16+(228+sideHeight)/2 },
+    };
+  }
 
   function predictedIncidenceDeg(prediction) {
     const points = prediction?.points || [];
@@ -5691,19 +5728,21 @@
   }
 
   function poseTablePoint(pose) {
-    const table = library.calibration.table;
+    const bounds = poseSharedGeometry(poseCalibrationState?.pose || pose);
+    const view = bounds.top;
     return {
-      x: POSE_TABLE_VIEW.left + POSE_TABLE_VIEW.width / 2 - pose.y / table.width * POSE_TABLE_VIEW.width,
-      y: POSE_TABLE_VIEW.top + POSE_TABLE_VIEW.height - pose.x / table.length * POSE_TABLE_VIEW.height,
+      x: view.left + (pose.x - bounds.minX) * bounds.scale,
+      y: view.top + (bounds.maxY - pose.y) * bounds.scale,
     };
   }
 
-  function poseFromTablePoint(point, yawDeg = 0) {
-    const table = library.calibration.table;
+  function poseFromTablePoint(point, sourcePose = poseCalibrationState?.pose || {}) {
+    const bounds = poseSharedGeometry(sourcePose);
+    const view = bounds.top;
     return PoseCalibration.sanitizePose({
-      x: clamp((POSE_TABLE_VIEW.top + POSE_TABLE_VIEW.height - point.y) / POSE_TABLE_VIEW.height * table.length, 0, table.length, 0),
-      y: clamp((POSE_TABLE_VIEW.left + POSE_TABLE_VIEW.width / 2 - point.x) / POSE_TABLE_VIEW.width * table.width, -table.width / 2, table.width / 2, 0),
-      yawDeg,
+      ...sourcePose,
+      x: bounds.minX + (point.x - view.left) / bounds.scale,
+      y: bounds.maxY - (point.y - view.top) / bounds.scale,
     });
   }
 
@@ -5732,29 +5771,50 @@
       confidenceLimited: false,
       manuallyMoved: false,
       measurementViewport: null,
+      tiltPriorSigma: { pitchDeg: uncertainty.pitchDeg, rollDeg: uncertainty.rollDeg },
+      heightRangeMode: "ground",
     };
+  }
+
+  function posePriorUncertainty(state = poseCalibrationState) {
+    return PoseCalibration.sanitizeUncertainty({ ...MANUAL_POSE_PRIOR, ...(state?.tiltPriorSigma || {}) });
   }
 
   function renderPoseCalibrationTable() {
     const state = poseCalibrationState;
     if (!state) return;
     const table = library.calibration.table;
-    const view = POSE_TABLE_VIEW;
+    const shared = poseSharedGeometry(state.pose);
+    const view = shared.top;
+    const nearLeft = poseTablePoint({ x: 0, y: table.width / 2 });
+    const farRight = poseTablePoint({ x: table.length, y: -table.width / 2 });
+    const centreNear = poseTablePoint({ x: 0, y: 0 });
+    const centreFar = poseTablePoint({ x: table.length, y: 0 });
+    const netLeft = poseTablePoint({ x: table.length/2, y: table.width/2 + .15 });
+    const netRight = poseTablePoint({ x: table.length/2, y: -table.width/2 - .15 });
     const robot = poseTablePoint(state.pose);
+    const topBounds = shared;
+    const robotTopScaleX = shared.scale;
+    const robotTopScaleY = shared.scale;
+    const novaLengthM = RobotGeometry.constants.NOVA_LENGTH_M;
+    const novaWidthM = RobotGeometry.constants.NOVA_WIDTH_M;
+    const novaRearOverhangM = .073;
+    const novaFrontM = novaLengthM - novaRearOverhangM;
+    const novaHalfWidthM = novaWidthM / 2;
     const yaw = radians(state.pose.yawDeg);
-    const handle = { x: robot.x - Math.sin(yaw) * 76, y: robot.y - Math.cos(yaw) * 76 };
-    const sigmaX = state.uncertainty.yCm / 100 / table.width * view.width;
-    const sigmaY = state.uncertainty.xCm / 100 / table.length * view.height;
+    const handle = { x: robot.x + Math.cos(yaw) * 76, y: robot.y - Math.sin(yaw) * 76 };
+    const sigmaX = state.uncertainty.xCm / 100 * shared.scale;
+    const sigmaY = state.uncertainty.yCm / 100 * shared.scale;
     const currentTarget = state.currentTarget;
     const gridCm = currentTarget?.gridCm || PoseCalibration.gridResolutionCm(state.uncertainty);
     const planGrid = state.mode === "position" ? "" : `<g class="pose-plan-grid">${[
       ...Array.from({ length: Math.floor(table.length * 100 / gridCm) + 1 }, (_, index) => {
-        const y = poseTablePoint({ x: index * gridCm / 100, y: 0 }).y;
-        return `<line x1="${view.left}" x2="${view.left + view.width}" y1="${y}" y2="${y}"/>`;
+        const x = poseTablePoint({ x: index * gridCm / 100, y: 0 }).x;
+        return `<line x1="${x}" x2="${x}" y1="${view.top}" y2="${view.top + view.height}"/>`;
       }),
       ...Array.from({ length: Math.floor(table.width * 100 / gridCm) + 1 }, (_, index) => {
-        const x = poseTablePoint({ x: 0, y: table.width / 2 - index * gridCm / 100 }).x;
-        return `<line x1="${x}" x2="${x}" y1="${view.top}" y2="${view.top + view.height}"/>`;
+        const y = poseTablePoint({ x: 0, y: table.width / 2 - index * gridCm / 100 }).y;
+        return `<line x1="${view.left}" x2="${view.left + view.width}" y1="${y}" y2="${y}"/>`;
       }),
     ].join("")}</g>`;
     const visibleTargets = state.mode === "position" ? [] : state.targets.slice(0, 1);
@@ -5771,20 +5831,98 @@
       return `<g class="pose-actual-landing"><path d="M ${point.x-7} ${point.y-7} L ${point.x+7} ${point.y+7} M ${point.x+7} ${point.y-7} L ${point.x-7} ${point.y+7}"/></g>`;
     }).join("");
     els.poseCalibrationTableSvg.innerHTML = `
-      <rect class="pose-table-surface" x="${view.left}" y="${view.top}" width="${view.width}" height="${view.height}" rx="8" data-pose-table-hit="1"/>
+      <rect class="pose-placement-ground" x="${view.left}" y="${view.top}" width="${view.width}" height="${view.height}" rx="8" data-pose-table-hit="1"/>
+      <text class="pose-view-label" x="16" y="25">TOP VIEW</text>
+      <rect class="pose-table-surface" x="${nearLeft.x}" y="${nearLeft.y}" width="${farRight.x-nearLeft.x}" height="${farRight.y-nearLeft.y}" rx="8" data-pose-table-hit="1"/>
       ${planGrid}
-      <line class="pose-table-centre" x1="${view.left + view.width/2}" x2="${view.left + view.width/2}" y1="${view.top}" y2="${view.top + view.height}"/>
-      <line class="pose-table-net" x1="${view.left}" x2="${view.left + view.width}" y1="${view.top + view.height/2}" y2="${view.top + view.height/2}"/>
-      <text class="pose-table-label" x="${view.left + view.width/2}" y="${view.top + 22}">far end</text>
-      <text class="pose-table-label pose-table-label-near" x="${view.left + 12}" y="${view.top + view.height - 12}">near edge</text>
+      <line class="pose-table-centre" x1="${centreNear.x}" x2="${centreFar.x}" y1="${centreNear.y}" y2="${centreFar.y}"/>
+      <line class="pose-table-net" x1="${netLeft.x}" x2="${netRight.x}" y1="${netLeft.y}" y2="${netRight.y}"/>
       ${targets}${landings}
       <ellipse class="pose-uncertainty" cx="${robot.x}" cy="${robot.y}" rx="${Math.max(5,sigmaX)}" ry="${Math.max(5,sigmaY)}" transform="rotate(${-state.pose.yawDeg} ${robot.x} ${robot.y})"/>
       <line class="pose-direction-line" x1="${robot.x}" y1="${robot.y}" x2="${handle.x}" y2="${handle.y}"/>
-      <g class="pose-robot" transform="translate(${robot.x} ${robot.y}) rotate(${-state.pose.yawDeg})" data-pose-drag="position">
-        <rect x="-22" y="-47" width="44" height="47" rx="10"/><circle cx="0" cy="-31" r="7"/><path d="M -12 -8 L 12 -8"/>
+      <g class="pose-robot" transform="translate(${robot.x} ${robot.y})" data-pose-drag="position">
+        <rect class="pose-robot-hit" x="-24" y="-52" width="48" height="62" rx="12"/>
+        <g transform="scale(${robotTopScaleX} ${robotTopScaleY}) rotate(${90-state.pose.yawDeg})">
+          <path class="pose-robot-base" d="M -.068 0 Q -.078 -.004 -.078 -.012 L -.07 -.27 Q -.068 -.29 -.052 -.30 L .052 -.30 Q .068 -.29 .07 -.27 L .078 -.012 Q .078 -.004 .068 0 Z"/>
+          <path class="pose-robot-hopper" d="M ${-novaHalfWidthM} .065 L -.084 -.145 Q -.08 -.16 -.064 -.165 L .064 -.165 Q .08 -.16 .084 -.145 L ${novaHalfWidthM} .065 L .06 ${novaRearOverhangM} L -.06 ${novaRearOverhangM} Z"/>
+          <ellipse class="pose-robot-ring" cx="0" cy="-.242" rx=".036" ry=".018"/>
+          <path class="pose-robot-body" d="M -.055 -.225 Q -.05 -.30 -.025 -.34 Q 0 -.375 .025 -.34 Q .05 -.30 .055 -.225 Z"/>
+          <path class="pose-robot-head" d="M -.07 -.34 Q -.07 -.375 -.052 ${-novaFrontM} L .052 ${-novaFrontM} Q .07 -.375 .07 -.34 L .062 -.305 Q .055 -.29 .04 -.29 L -.04 -.29 Q -.055 -.29 -.062 -.305 Z"/>
+          <path class="pose-robot-seam" d="M -.07 -.14 L .07 -.14 M -.045 -.32 Q 0 -.34 .045 -.32"/>
+        </g>
       </g>
       <g class="pose-rotation-handle" data-pose-drag="rotation"><circle cx="${handle.x}" cy="${handle.y}" r="17"/><path d="M ${handle.x-7} ${handle.y} A 8 8 0 1 1 ${handle.x+6} ${handle.y-5}"/></g>
       `;
+  }
+
+  function robotSideProfileMarkup() {
+    const novaRearOverhangM = .073;
+    const novaFrontM = RobotGeometry.constants.NOVA_LENGTH_M - novaRearOverhangM;
+    const novaTopM = -RobotGeometry.constants.NOVA_HEIGHT_M;
+    return `<g class="robot-profile robot-profile-coarse">
+      <path class="robot-profile-base" d="M .025 0 Q .008 -.004 .008 -.03 L 0 -.09 Q 0 -.108 .025 -.11 L .31 -.11 Q .33 -.108 .328 -.086 L .31 -.026 Q .308 0 .282 0 Z"/>
+      <path class="robot-profile-base-panel robot-detail-medium" d="M .055 -.072 L .285 -.072 L .278 -.022 Q .277 -.012 .258 -.012 L .082 -.012 Q .064 -.012 .062 -.026 Z"/>
+      <path class="robot-profile-hopper" d="M ${-novaRearOverhangM} ${novaTopM} L .115 -.321 Q .145 -.319 .148 -.294 L .158 -.108 L .012 -.108 Q -.015 -.11 -.032 -.133 L ${-novaRearOverhangM} -.18 Z"/>
+      <path class="robot-profile-hopper-lip robot-detail-medium" d="M ${-novaRearOverhangM} ${novaTopM} L .115 -.321 Q .145 -.319 .148 -.294 L .146 -.278 L -.071 -.284 Z"/>
+      <path class="robot-profile-hopper-panel robot-detail-medium" d="M -.055 -.255 L .125 -.252 L .135 -.14 L .01 -.14 Q -.014 -.142 -.029 -.159 L -.055 -.19 Z"/>
+      <path class="robot-profile-hopper-ribs robot-detail-full" d="M -.045 -.28 L -.043 -.195 M -.025 -.28 L -.023 -.16 M -.005 -.28 L -.003 -.145 M .112 -.276 L .12 -.14 M .132 -.272 L .138 -.132"/>
+      <ellipse class="robot-profile-ring" cx=".242" cy="-.112" rx=".04" ry=".014"/>
+      <path class="robot-profile-body" d="M .14 -.12 Q .145 -.205 .195 -.268 Q .225 -.303 .265 -.29 Q .305 -.28 .328 -.225 L .328 -.16 Q .315 -.125 .276 -.112 L .205 -.105 Z"/>
+      <path class="robot-profile-neck" d="M .302 -.258 Q .33 -.282 .35 -.252 L .354 -.165 Q .338 -.145 .318 -.158 Z"/>
+      <path class="robot-profile-head" d="M .326 -.305 Q .337 -.325 .36 -.325 L .378 -.318 Q .391 -.31 ${novaFrontM} -.284 L .389 -.16 Q .386 -.13 .368 -.12 L .348 -.12 Q .327 -.127 .318 -.155 Q .306 -.19 .314 -.22 Q .307 -.265 .326 -.305 Z"/>
+      <circle class="robot-profile-badge" cx=".242" cy="-.25" r=".034"/>
+      <circle class="robot-profile-badge-dot" cx=".242" cy="-.25" r=".012"/>
+      <path class="robot-profile-ribs robot-detail-medium" d="M .218 -.218 L .25 -.14 M .23 -.215 L .262 -.14 M .245 -.21 L .275 -.148"/>
+      <path class="robot-profile-seam robot-detail-medium" d="M .03 -.052 L .305 -.052 M .15 -.155 Q .235 -.125 .314 -.16 M .344 -.22 Q .368 -.205 .389 -.215"/>
+      <path class="robot-profile-cable robot-detail-full" d="M .334 -.148 Q .385 -.11 .368 -.042 Q .355 .012 .325 -.025 Q .305 -.052 .32 -.095"/>
+      <path class="robot-profile-accent robot-detail-full" d="M .242 -.112 L .276 -.112"/>
+    </g>`;
+  }
+
+  function renderPoseCalibrationSide() {
+    const state = poseCalibrationState;
+    if (!state) return;
+    const table = library.calibration.table;
+    const shared = poseSharedGeometry(state.pose);
+    const { minX, maxX, minZ, maxZ, scale } = shared;
+    const view = shared.side;
+    const sx = x => view.left + (x - minX) * scale;
+    const sy = z => view.bottom - (z - minZ) * scale;
+    const robotX = sx(state.pose.x), robotY = sy(state.pose.z);
+    const pitch = finite(state.pose.pitchDeg, 0);
+    const handleLength = 88;
+    const pitchRad = radians(pitch);
+    const handle = { x: robotX + Math.cos(pitchRad) * handleLength, y: robotY - Math.sin(pitchRad) * handleLength };
+    const tableLeft = sx(0), tableRight = sx(table.length), tableY = sy(0), floorY = sy(-library.calibration.tableHeight);
+    const leftLegTop = sx(.46), rightLegTop = sx(table.length-.46), leftFoot = sx(.34), rightFoot = sx(table.length-.34);
+    els.poseCalibrationSideSvg.innerHTML = `
+      <rect class="pose-side-background" x="0" y="0" width="700" height="260"/>
+      <text class="pose-view-label" x="16" y="22">SIDE VIEW</text>
+      <line class="pose-floor-line" x1="0" x2="700" y1="${floorY}" y2="${floorY}"/>
+      <g class="pose-table-profile">
+        <rect class="pose-tabletop" x="${tableLeft}" y="${tableY}" width="${tableRight-tableLeft}" height="${Math.max(5,sy(-.045)-tableY)}" rx="2"/>
+        <rect class="pose-table-apron" x="${tableLeft+5}" y="${sy(-.045)}" width="${tableRight-tableLeft-10}" height="${Math.max(5,sy(-.105)-sy(-.045))}" rx="2"/>
+        <path class="pose-table-leg" d="M ${leftLegTop} ${sy(-.09)} L ${leftFoot} ${floorY-9} M ${rightLegTop} ${sy(-.09)} L ${rightFoot} ${floorY-9}"/>
+        <path class="pose-table-brace" d="M ${leftLegTop} ${sy(-.13)} L ${sx(table.length/2-.28)} ${sy(-.54)} M ${rightLegTop} ${sy(-.13)} L ${sx(table.length/2+.28)} ${sy(-.54)} M ${leftFoot} ${sy(-.54)} H ${rightFoot}"/>
+        <circle class="pose-table-caster" cx="${leftFoot}" cy="${floorY-5}" r="7"/><circle class="pose-table-caster" cx="${rightFoot}" cy="${floorY-5}" r="7"/>
+      </g>
+      <line class="pose-side-net" x1="${sx(table.length/2)}" x2="${sx(table.length/2)}" y1="${sy(0)}" y2="${sy(table.netHeight)}"/>
+      <line class="pose-height-guide" x1="${robotX}" x2="${robotX}" y1="${robotY}" y2="${sy(-library.calibration.tableHeight)}"/>
+      <g class="pose-side-robot" data-pose-side-drag="position" transform="translate(${robotX} ${robotY})"><rect class="pose-robot-hit" x="-24" y="-58" width="96" height="68" rx="12"/><g transform="scale(${scale}) rotate(${-pitch})">${robotSideProfileMarkup()}</g></g>
+      <line class="pose-pitch-line" x1="${robotX}" y1="${robotY}" x2="${handle.x}" y2="${handle.y}"/>
+      <g class="pose-pitch-handle" data-pose-side-drag="pitch"><circle cx="${handle.x}" cy="${handle.y}" r="17"/></g>`;
+    state.sideTransform = { sx, sy, minX, maxX, minZ, maxZ, view };
+  }
+
+  function setPoseCalibrationView(view) {
+    poseCalibrationView = view === "side" ? "side" : "top";
+    const combined = poseCalibrationState?.mode === "position";
+    els.poseCalibrationDialog.classList.toggle("pose-top-view", poseCalibrationView === "top");
+    els.poseCalibrationDialog.classList.toggle("pose-combined-view", combined);
+    els.poseCalibrationTableSvg.toggleAttribute("hidden", !combined && poseCalibrationView !== "top");
+    els.poseCalibrationSideSvg.toggleAttribute("hidden", !combined && poseCalibrationView !== "side");
+    els.poseTopViewBtn.setAttribute("aria-selected", String(poseCalibrationView === "top"));
+    els.poseSideViewBtn.setAttribute("aria-selected", String(poseCalibrationView === "side"));
   }
 
   function poseMeasurementViewport(state, target, baseView, plotAspect) {
@@ -5974,8 +6112,32 @@
   }
 
   function poseEstimateReadyForVerification(state) {
-    return state.acceptedCount >= 1
+    const tiltReady = state.pose.placement === "table" || (state.uncertainty.pitchDeg <= 1.5 && state.uncertainty.rollDeg <= 1.5);
+    return state.acceptedCount >= 1 && tiltReady
       && PoseCalibration.calibrationStatus(library.calibration.table, state.pose, state.covariance, state.uncertainty).converged;
+  }
+
+  function installationSensitivityRows(target, pose) {
+    const params = target?.shotSolution?.params;
+    if (!params) return null;
+    const dimensions = [
+      { key:"x", step:.005, unit:.005 },
+      { key:"y", step:.005, unit:.005 },
+      { key:"yawDeg", step:.25, unit:radians(.25) },
+      { key:"pitchDeg", step:.25, unit:radians(.25) },
+      { key:"rollDeg", step:.25, unit:radians(.25) },
+    ];
+    const rows = [[],[]];
+    for (const dimension of dimensions) {
+      const plusPose = { ...pose, [dimension.key]: finite(pose[dimension.key],0) + dimension.step };
+      const minusPose = { ...pose, [dimension.key]: finite(pose[dimension.key],0) - dimension.step };
+      const plus = predictTrajectory(params, calibrationAtPose(plusPose));
+      const minus = predictTrajectory(params, calibrationAtPose(minusPose));
+      if (!plus?.landing || !minus?.landing) return null;
+      rows[0].push((plus.landing.x-minus.landing.x)/(2*dimension.unit));
+      rows[1].push((plus.landing.y-minus.landing.y)/(2*dimension.unit));
+    }
+    return rows;
   }
 
   function renderPoseCalibrationGuide() {
@@ -5983,9 +6145,29 @@
     if (!state) return;
     const target = state.currentTarget;
     const status = PoseCalibration.calibrationStatus(library.calibration.table, state.pose, state.covariance, state.uncertainty);
-    const position = `<div class="pose-readout"><span>${Math.round(state.pose.x*100)} cm from near edge</span><span>${Math.abs(state.pose.y) < .005 ? "centred" : `${Math.round(Math.abs(state.pose.y)*100)} cm ${state.pose.y > 0 ? "left" : "right"}`}</span><span>${signed(state.pose.yawDeg,1)}°</span></div>`;
+    const placementName = state.pose.placement === "floor" ? "Floor" : state.pose.placement === "other" ? "Other" : "Table";
+    const baseHeightCm = (state.pose.z + library.calibration.tableHeight) * 100;
+    const leftEdgeCm = (library.calibration.table.width / 2 - state.pose.y) * 100;
+    const tableWidthCm = library.calibration.table.width * 100;
+    const middleOffsetCm = leftEdgeCm - tableWidthCm/2;
+    const rightEdgeOffsetCm = leftEdgeCm - tableWidthCm;
+    const tableHeightCm = library.calibration.tableHeight * 100;
+    const floorRangeMinCm = state.heightRangeMode === "table" ? Math.round(tableHeightCm - 30) : 0;
+    const floorRangeMaxCm = Math.round(tableHeightCm + 30);
+    const pitchSliderDeg = state.pose.pitchDeg > 0 ? state.pose.pitchDeg / 1.5 : state.pose.pitchDeg;
+    const forwardPosition = state.pose.x < -.005 ? `${fmt(Math.abs(state.pose.x)*100,0)} cm behind back edge` : `${fmt(state.pose.x*100,0)} cm from back edge`;
+    const position = `<div class="pose-result-summary"><strong>${placementName}</strong><span>${forwardPosition}</span><span>${fmt(baseHeightCm,0)} cm above floor</span><span>${signed(state.pose.pitchDeg,1)}° pitch · ${signed(state.pose.rollDeg,1)}° roll</span></div>`;
     if (state.mode === "position") {
-      els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Step 1</p><h3>Match the physical robot</h3><p>Drag the robot body to move it and the round handle to aim it. Calibration placements are chosen after this pose is set, then recalculated after every answer.</p>${position}<button class="button primary wide" type="button" data-pose-action="start">Start calibration</button>`;
+      const tiltStatus = state.tiltMessage ? `<p class="pose-tilt-status">${escapeHtml(state.tiltMessage)}</p>` : "";
+      els.poseCalibrationGuide.innerHTML = `<div class="pose-essential-controls">
+          <label><span class="pose-symmetric-caption single"><span>yaw <output>${signed(state.pose.yawDeg,0)}°</output></span></span><input type="range" min="-180" max="180" step="1" value="${state.pose.yawDeg}" data-pose-installation="yawDeg"></label>
+          <label><span class="pose-symmetric-caption single"><span>pitch <output>${signed(state.pose.pitchDeg,1)}°</output></span></span><input type="range" min="-30" max="30" step="0.5" value="${pitchSliderDeg}" data-pose-installation="pitchSliderDeg"></label>
+          <label><span class="pose-symmetric-caption single"><span>roll <output>${signed(state.pose.rollDeg,1)}°</output></span></span><input type="range" min="-20" max="20" step="0.5" value="${state.pose.rollDeg}" data-pose-installation="rollDeg"></label>
+          <label><span class="pose-symmetric-caption triple"><span>left <output>${signed(leftEdgeCm,1)} cm</output></span><span>middle <output>${signed(middleOffsetCm,1)} cm</output></span><span>right <output>${signed(rightEdgeOffsetCm,1)} cm</output></span></span><input type="range" min="0" max="${tableWidthCm}" step="0.5" value="${leftEdgeCm}" data-pose-installation="leftEdgeCm"></label>
+          <label><span class="pose-symmetric-caption single"><span>back edge <output>${signed(state.pose.x*100,0)} cm</output></span></span><input type="range" min="-300" max="300" step="1" value="${state.pose.x*100}" data-pose-installation="xCm"></label>
+          <label><span class="pose-symmetric-caption double"><span>floor <output>${signed(baseHeightCm,0)} cm</output></span><span>table <output>${signed(state.pose.z*100,0)} cm</output></span></span><input type="range" min="${floorRangeMinCm}" max="${floorRangeMaxCm}" step="1" value="${baseHeightCm}" data-pose-installation="floorHeightCm"></label>
+        </div>
+        <div class="pose-setup-actions"><button class="button secondary pose-sensor-action" type="button" data-pose-action="measure-tilt" ${tiltCapture ? "disabled" : ""}>${tiltCapture ? "Hold still…" : "Estimate roll+pitch using phone sensors"}</button><button class="button primary" type="button" data-pose-action="start">Start calibration shots</button></div>${tiltStatus}`;
     } else if (state.mode === "ready") {
       const phase = target?.isVerification ? "Final verification" : `Calibration shot ${state.shotsFired + 1}`;
       const remaining = target?.isVerification ? "Independent check—not used to tighten the estimate." : `Pose adds about ${fmt(status.worstPoseLandingCm,1)} cm at worst; stop goal is the modeled ${fmt(status.acceptableLandingCm,1)} cm ball noise.`;
@@ -6000,30 +6182,56 @@
       els.poseCalibrationGuide.innerHTML = `<p class="pose-step">Complete</p><h3>Pose refined</h3><p>${result} Save it for playback.</p>${position}`;
     }
     const u = state.uncertainty;
-    els.poseCalibrationConfidence.innerHTML = `<span>Calibration accuracy</span><strong>Pose contribution ≤ ${fmt(status.worstPoseLandingCm,1)} cm · modeled ball noise ${fmt(status.acceptableLandingCm,1)} cm</strong><small>Pose: ±${fmt(u.xCm,1)} cm / ±${fmt(u.yCm,1)} cm / ±${fmt(u.yawDeg,1)}°. The process stops when further pose precision would be hidden by normal landing dispersion.</small>`;
+    els.poseCalibrationConfidence.innerHTML = `<span>Calibration accuracy</span><strong>Pose contribution ≤ ${fmt(status.worstPoseLandingCm,1)} cm · modeled ball noise ${fmt(status.acceptableLandingCm,1)} cm</strong><small>Position: ±${fmt(u.xCm,1)} cm / ±${fmt(u.yCm,1)} cm · yaw ±${fmt(u.yawDeg,1)}° · pitch ±${fmt(u.pitchDeg,1)}° · roll ±${fmt(u.rollDeg,1)}°. The process stops when further pose precision would be hidden by normal landing dispersion.</small>`;
     const verificationActive = ["ready", "firing", "feedback"].includes(state.mode);
-    els.poseCalibrationConfidence.hidden = verificationActive;
-    els.savePoseCalibrationBtn.parentElement.hidden = verificationActive;
+    els.poseCalibrationConfidence.hidden = verificationActive || state.mode === "position";
+    els.savePoseCalibrationBtn.parentElement.hidden = verificationActive || state.mode === "position";
     els.savePoseCalibrationBtn.textContent = state.verificationPassed ? "Save calibrated pose" : "Save position";
     els.savePoseCalibrationBtn.disabled = state.mode === "firing" || state.mode === "feedback";
   }
 
   function renderPoseCalibration() {
     els.poseCalibrationTitle.textContent = poseCalibrationState?.mode === "position"
-      ? "Position the robot"
+      ? "Robot placement"
       : poseCalibrationState?.mode === "feedback" ? "Mark the first bounce" : "Calibrate robot pose";
     els.poseCalibrationDialog.classList.toggle("pose-feedback-mode", poseCalibrationState?.mode === "feedback");
+    els.poseCalibrationDialog.classList.toggle("pose-position-mode", poseCalibrationState?.mode === "position");
     renderPoseCalibrationTable();
+    renderPoseCalibrationSide();
     renderPoseCalibrationGuide();
+    setPoseCalibrationView(poseCalibrationView);
   }
 
-  function openPoseCalibration() {
+  function beginPoseCalibrationForPlacement(placement) {
     initializePoseCalibration();
+    poseCalibrationState.pose.placement = ["table", "floor", "other"].includes(placement) ? placement : "table";
+    poseCalibrationState.heightRangeMode = placement === "table" ? "table" : "ground";
+    if (placement === "table") poseCalibrationState.pose = {
+      ...poseCalibrationState.pose,
+      x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table",
+    };
+    if (placement === "floor") {
+      poseCalibrationState.pose.z = -library.calibration.tableHeight;
+      if (poseCalibrationState.pose.x >= -.05) poseCalibrationState.pose.x = -.55;
+    }
+    if (placement === "other" && Math.abs(poseCalibrationState.pose.z) < .001) {
+      poseCalibrationState.pose.z = -.31;
+      if (poseCalibrationState.pose.x >= -.05) poseCalibrationState.pose.x = -.55;
+    }
+    poseCalibrationState.tiltPriorSigma = placement === "table" ? { pitchDeg:.5, rollDeg:.5 } : { pitchDeg:3, rollDeg:3 };
+    poseCalibrationState.uncertainty = posePriorUncertainty(poseCalibrationState);
+    poseCalibrationState.covariance = PoseCalibration.covarianceFromUncertainty(poseCalibrationState.uncertainty);
+    poseCalibrationView = placement === "table" ? "top" : "side";
     renderPoseCalibration();
     els.poseCalibrationDialog.showModal();
   }
 
+  function openPoseCalibration() {
+    els.placementChoiceDialog.showModal();
+  }
+
   function closePoseCalibration() {
+    stopTiltCapture();
     poseCalibrationDrag = null;
     poseMeasurementGesture = null;
     poseCalibrationState = null;
@@ -6033,7 +6241,7 @@
   function resetPoseVerificationAfterManualMove() {
     const state = poseCalibrationState;
     if (!state) return;
-    state.uncertainty = PoseCalibration.sanitizeUncertainty(MANUAL_POSE_PRIOR);
+    state.uncertainty = posePriorUncertainty(state);
     state.covariance = PoseCalibration.covarianceFromUncertainty(state.uncertainty);
     const plan = PoseCalibration.planCalibrationSequence(library.calibration.table, state.pose, state.uncertainty, { covariance: state.covariance, maxShots: 4 });
     state.targets = plan.sequence;
@@ -6056,9 +6264,9 @@
   function poseSvgEventPoint(event) {
     const svg = els.poseCalibrationTableSvg;
     const rect = svg.getBoundingClientRect();
-    const scale = Math.min(rect.width / 420, rect.height / 700);
-    const offsetX = (rect.width - 420 * scale) / 2;
-    const offsetY = (rect.height - 700 * scale) / 2;
+    const scale = Math.min(rect.width / 700, rect.height / 420);
+    const offsetX = (rect.width - 700 * scale) / 2;
+    const offsetY = (rect.height - 420 * scale) / 2;
     return { x: (event.clientX - rect.left - offsetX) / scale, y: (event.clientY - rect.top - offsetY) / scale };
   }
 
@@ -6075,10 +6283,10 @@
     if (!poseCalibrationDrag || poseCalibrationDrag.pointerId !== event.pointerId || !poseCalibrationState) return;
     const point = poseSvgEventPoint(event);
     if (poseCalibrationDrag.kind === "position") {
-      poseCalibrationState.pose = poseFromTablePoint(point, poseCalibrationState.pose.yawDeg);
+      poseCalibrationState.pose = poseFromTablePoint(point, poseCalibrationState.pose);
     } else {
       const robot = poseTablePoint(poseCalibrationState.pose);
-      poseCalibrationState.pose.yawDeg = clamp(degrees(Math.atan2(-(point.x - robot.x), -(point.y - robot.y))), -180, 180, 0);
+      poseCalibrationState.pose.yawDeg = clamp(degrees(Math.atan2(-(point.y - robot.y), point.x - robot.x)), -180, 180, 0);
     }
     resetPoseVerificationAfterManualMove();
     renderPoseCalibration();
@@ -6090,9 +6298,146 @@
     els.poseCalibrationTableSvg.releasePointerCapture?.(event.pointerId);
   }
 
+  function poseSideSvgEventPoint(event) {
+    const svg = els.poseCalibrationSideSvg;
+    const rect = svg.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) / rect.width * 700, y: (event.clientY - rect.top) / rect.height * 260 };
+  }
+
+  function beginPoseSideDrag(event) {
+    if (!poseCalibrationState || poseCalibrationState.mode !== "position") return;
+    const control = event.target.closest("[data-pose-side-drag]");
+    if (!control) return;
+    poseCalibrationDrag = { kind: `side-${control.dataset.poseSideDrag}`, pointerId: event.pointerId };
+    els.poseCalibrationSideSvg.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function updatePoseSideDrag(event) {
+    if (!poseCalibrationDrag?.kind?.startsWith("side-") || poseCalibrationDrag.pointerId !== event.pointerId || !poseCalibrationState) return;
+    const point = poseSideSvgEventPoint(event);
+    const transform = poseCalibrationState.sideTransform;
+    if (!transform) return;
+    if (poseCalibrationDrag.kind === "side-position") {
+      poseCalibrationState.pose.x = clamp(transform.minX + (point.x-transform.view.left)/(transform.view.right-transform.view.left)*(transform.maxX-transform.minX), -3.5, 4.2, poseCalibrationState.pose.x);
+      poseCalibrationState.pose.z = clamp(transform.maxZ - (point.y-transform.view.top)/(transform.view.bottom-transform.view.top)*(transform.maxZ-transform.minZ), -1.5, 1.2, poseCalibrationState.pose.z);
+      const floorHeight = poseCalibrationState.pose.z + library.calibration.tableHeight;
+      if ((poseCalibrationState.pose.placement === "floor" && Math.abs(floorHeight) > .01)
+        || (poseCalibrationState.pose.placement === "table" && Math.abs(poseCalibrationState.pose.z) > .01)) poseCalibrationState.pose.placement = "other";
+    } else {
+      const robotX = transform.sx(poseCalibrationState.pose.x), robotY = transform.sy(poseCalibrationState.pose.z);
+      poseCalibrationState.pose.pitchDeg = clamp(degrees(Math.atan2(-(point.y-robotY), point.x-robotX)), -30, 45, poseCalibrationState.pose.pitchDeg);
+      poseCalibrationState.tiltPriorSigma = { pitchDeg: 3, rollDeg: 3 };
+    }
+    resetPoseVerificationAfterManualMove();
+    renderPoseCalibration();
+  }
+
+  function endPoseSideDrag(event) {
+    if (poseCalibrationDrag?.pointerId !== event.pointerId) return;
+    poseCalibrationDrag = null;
+    els.poseCalibrationSideSvg.releasePointerCapture?.(event.pointerId);
+  }
+
+  function setPoseInstallationValue(key, value) {
+    if (!poseCalibrationState || poseCalibrationState.mode !== "position") return;
+    if (key === "xCm") poseCalibrationState.pose.x = clamp(value / 100, -3, 3.1, poseCalibrationState.pose.x);
+    if (key === "yCm") poseCalibrationState.pose.y = clamp(value / 100, -2, 2, poseCalibrationState.pose.y);
+    if (key === "leftEdgeCm") poseCalibrationState.pose.y = clamp(library.calibration.table.width / 2 - value / 100, -library.calibration.table.width/2, library.calibration.table.width/2, poseCalibrationState.pose.y);
+    if (key === "floorHeightCm") {
+      poseCalibrationState.pose.z = clamp(value / 100 - library.calibration.tableHeight, -1.5, 1.2, poseCalibrationState.pose.z);
+      if ((poseCalibrationState.pose.placement === "floor" && Math.abs(value) > 1)
+        || (poseCalibrationState.pose.placement === "table" && Math.abs(value - library.calibration.tableHeight*100) > 1)) poseCalibrationState.pose.placement = "other";
+    }
+    if (key === "pitchDeg") poseCalibrationState.pose.pitchDeg = clamp(value, -30, 45, poseCalibrationState.pose.pitchDeg);
+    if (key === "pitchSliderDeg") poseCalibrationState.pose.pitchDeg = clamp(value > 0 ? value * 1.5 : value, -30, 45, poseCalibrationState.pose.pitchDeg);
+    if (key === "rollDeg") poseCalibrationState.pose.rollDeg = clamp(value, -20, 20, poseCalibrationState.pose.rollDeg);
+    if (key === "yawDeg") poseCalibrationState.pose.yawDeg = clamp(value, -180, 180, poseCalibrationState.pose.yawDeg);
+    if (key === "pitchDeg" || key === "pitchSliderDeg" || key === "rollDeg") poseCalibrationState.tiltPriorSigma = { pitchDeg: 3, rollDeg: 3 };
+    resetPoseVerificationAfterManualMove();
+    renderPoseCalibration();
+  }
+
+  function median(values) {
+    const sorted = values.filter(Number.isFinite).sort((a,b) => a-b);
+    if (!sorted.length) return NaN;
+    const middle = Math.floor(sorted.length/2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle-1] + sorted[middle]) / 2;
+  }
+
+  function stopTiltCapture() {
+    if (!tiltCapture) return;
+    window.removeEventListener("devicemotion", tiltCapture.handler);
+    clearTimeout(tiltCapture.timer);
+    tiltCapture = null;
+  }
+
+  function normalizedMotionAxes(acceleration) {
+    let x = finite(acceleration?.x, NaN), y = finite(acceleration?.y, NaN), z = finite(acceleration?.z, NaN);
+    const angle = Number(screen.orientation?.angle || window.orientation || 0);
+    if (angle === 90) [x,y] = [-y,x];
+    else if (angle === 180 || angle === -180) [x,y] = [-x,-y];
+    else if (angle === 270 || angle === -90) [x,y] = [y,-x];
+    return { x, y, z };
+  }
+
+  async function capturePhoneTilt() {
+    if (!poseCalibrationState || tiltCapture) return;
+    try {
+      if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+        const permission = await DeviceMotionEvent.requestPermission();
+        if (permission !== "granted") throw new Error("Motion access was not granted. Use the sliders instead.");
+      }
+      if (typeof DeviceMotionEvent === "undefined") throw new Error("Motion sensors are not available in this browser. Use the sliders instead.");
+      const samples = [];
+      const handler = event => {
+        const a = normalizedMotionAxes(event.accelerationIncludingGravity);
+        if (![a.x,a.y,a.z].every(Number.isFinite)) return;
+        const magnitude = Math.hypot(a.x,a.y,a.z);
+        const rotation = event.rotationRate;
+        const rotationMagnitude = rotation && [rotation.alpha,rotation.beta,rotation.gamma].some(value => Number.isFinite(Number(value)))
+          ? Math.hypot(finite(rotation.alpha,0), finite(rotation.beta,0), finite(rotation.gamma,0)) : 0;
+        if (magnitude < 7.5 || magnitude > 12 || rotationMagnitude > 3.5) return;
+        samples.push({ ...a, magnitude, rotationMagnitude });
+      };
+      tiltCapture = { handler, timer: null };
+      poseCalibrationState.tiltMessage = "Place the phone screen-up on the robot, with its top edge pointing forward, and keep it still.";
+      window.addEventListener("devicemotion", handler);
+      renderPoseCalibration();
+      tiltCapture.timer = setTimeout(() => {
+        window.removeEventListener("devicemotion", handler);
+        tiltCapture = null;
+        const centre = { x: median(samples.map(s=>s.x)), y: median(samples.map(s=>s.y)), z: median(samples.map(s=>s.z)) };
+        const residuals = samples.map(sample => Math.hypot(sample.x-centre.x, sample.y-centre.y, sample.z-centre.z));
+        const residualMedian = median(residuals);
+        const mad = median(residuals.map(value => Math.abs(value-residualMedian)));
+        const limit = residualMedian + Math.max(.08, 3.5 * mad);
+        const retained = samples.filter((_,index) => residuals[index] <= limit);
+        if (retained.length < 12) {
+          poseCalibrationState.tiltMessage = "Not enough still sensor data. Keep the phone steady and try again, or use the sliders.";
+        } else {
+          let x = median(retained.map(s=>s.x)), y = median(retained.map(s=>s.y)), z = median(retained.map(s=>s.z));
+          if (z < 0) { x = -x; y = -y; z = -z; }
+          poseCalibrationState.pose.pitchDeg = clamp(degrees(Math.atan2(-y, Math.hypot(x,z))), -30, 45, 0);
+          poseCalibrationState.pose.rollDeg = clamp(degrees(Math.atan2(x, z)), -20, 20, 0);
+          const spread = median(retained.map(sample => Math.hypot(sample.x-x,sample.y-y,sample.z-z)));
+          const angleSigmaDeg = clamp(degrees(Math.atan2(Math.max(.01,spread), 9.80665)), .25, 3, 1);
+          poseCalibrationState.tiltPriorSigma = { pitchDeg: angleSigmaDeg, rollDeg: angleSigmaDeg };
+          poseCalibrationState.tiltMessage = `Phone estimate applied as a prior: pitch ${signed(poseCalibrationState.pose.pitchDeg,1)}°, roll ${signed(poseCalibrationState.pose.rollDeg,1)}° (${retained.length} still samples; spread ${fmt(spread,2)} m/s²).`;
+          resetPoseVerificationAfterManualMove();
+        }
+        renderPoseCalibration();
+      }, 2500);
+    } catch (error) {
+      stopTiltCapture();
+      poseCalibrationState.tiltMessage = error?.message || "Could not read the phone sensors. Use the sliders instead.";
+      renderPoseCalibration();
+    }
+  }
+
   function startPoseVerification() {
     if (!poseCalibrationState) return;
-    poseCalibrationState.uncertainty = PoseCalibration.sanitizeUncertainty(MANUAL_POSE_PRIOR);
+    poseCalibrationState.uncertainty = posePriorUncertainty(poseCalibrationState);
     poseCalibrationState.covariance = PoseCalibration.covarianceFromUncertainty(poseCalibrationState.uncertainty);
     poseCalibrationState.recentTargets = [];
     poseCalibrationState.shotsFired = 0;
@@ -6138,6 +6483,7 @@
       state.verificationPassed = true;
       observation.accepted = true;
     } else {
+      observation.sensitivityRows = installationSensitivityRows(target, state.pose);
       estimate = PoseCalibration.estimatePoseObservation(state.pose, state.covariance, observation, state.uncertainty);
       observation.accepted = estimate.accepted;
       observation.downweighted = estimate.downweighted;
@@ -6527,7 +6873,7 @@
     const c = library.calibration;
 
     if (poseDrag.mode === "position") {
-      c.pose.x = clamp(wx, -1.5, c.table.length + 1.5, c.pose.x);
+      c.pose.x = clamp(wx, -3.5, c.table.length + 1.5, c.pose.x);
       c.pose.y = clamp(wy, -c.table.width, c.table.width, c.pose.y);
     } else {
       c.pose.yawDeg = clamp(degrees(Math.atan2(wy - c.pose.y, wx - c.pose.x)), -180, 180, c.pose.yawDeg);
@@ -9377,7 +9723,8 @@
       drill.description = String(els.drillDescriptionInput.value || "").trim().slice(0, 600);
       drill.tags = [...new Set(String(els.drillTagsInput.value || "").split(",").map(tag => tag.trim()).filter(Boolean))].slice(0, 20);
       drill.robotPose = {
-        x: clamp(els.drillRobotXInput.value, -1.5, 4.2, 0),
+        ...drillPose(drill),
+        x: clamp(els.drillRobotXInput.value, -3.5, 4.2, 0),
         y: clamp(els.drillRobotYInput.value, -2, 2, 0),
         yawDeg: clamp(els.drillRobotYawInput.value, -180, 180, 0),
       };
@@ -9391,6 +9738,13 @@
     els.resetLiveTuningBtn.addEventListener("click", resetLiveTuning);
     els.saveEffectiveDrillBtn.addEventListener("click", saveEffectiveDrillAsNew);
     els.updateRobotPoseBtn.addEventListener("click", openPoseCalibration);
+    els.closePlacementChoiceBtn.addEventListener("click", () => els.placementChoiceDialog.close());
+    els.placementChoiceDialog.addEventListener("click", event => {
+      const placement = event.target.closest("[data-placement-choice]")?.dataset.placementChoice;
+      if (!placement) return;
+      els.placementChoiceDialog.close();
+      beginPoseCalibrationForPlacement(placement);
+    });
     els.closePoseCalibrationBtn.addEventListener("click", () => {
       if (calibrationTestRunning) void stopPlayback().then(closePoseCalibration); else closePoseCalibration();
     });
@@ -9402,10 +9756,21 @@
     els.poseCalibrationTableSvg.addEventListener("pointermove", updatePoseCalibrationDrag);
     els.poseCalibrationTableSvg.addEventListener("pointerup", endPoseCalibrationDrag);
     els.poseCalibrationTableSvg.addEventListener("pointercancel", endPoseCalibrationDrag);
+    els.poseCalibrationSideSvg.addEventListener("pointerdown", beginPoseSideDrag);
+    els.poseCalibrationSideSvg.addEventListener("pointermove", updatePoseSideDrag);
+    els.poseCalibrationSideSvg.addEventListener("pointerup", endPoseSideDrag);
+    els.poseCalibrationSideSvg.addEventListener("pointercancel", endPoseSideDrag);
+    els.poseTopViewBtn.addEventListener("click", () => setPoseCalibrationView("top"));
+    els.poseSideViewBtn.addEventListener("click", () => setPoseCalibrationView("side"));
     els.poseCalibrationGuide.addEventListener("click", event => {
       const action = event.target.closest("[data-pose-action]")?.dataset.poseAction;
       if (action === "start") startPoseVerification();
       if (action === "fire") void fireCurrentPoseVerification();
+      if (action === "measure-tilt") void capturePhoneTilt();
+    });
+    els.poseCalibrationGuide.addEventListener("input", event => {
+      const key = event.target.dataset.poseInstallation;
+      if (key) setPoseInstallationValue(key, finite(event.target.value, 0));
     });
     els.poseCalibrationGuide.addEventListener("pointerdown", event => {
       const map = event.target.closest(".pose-observation-map");
@@ -9680,7 +10045,7 @@
       selectBuiltIn("Drill: Forehand / backhand alternating");
       navigateApp("run", { push: false });
       renderAll();
-      openPoseCalibration();
+      beginPoseCalibrationForPlacement("table");
     } else if (["add-node", "add-random", "add-repeat", "add-subdrill"].includes(name)) {
       const drill = defaultDrill("New drill");
       library.drills.push(drill);
