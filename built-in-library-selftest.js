@@ -23,9 +23,9 @@ vm.runInContext(`${source.slice(start, end)}\nglobalThis.auditCatalog = {
 };`, context);
 
 const { sample, shotPresets, servePresets } = context.auditCatalog;
-assert.strictEqual(sample.drills.length, 45, 'the complete built-in catalog must contain 45 drills');
+assert.strictEqual(sample.drills.length, 57, 'the complete built-in catalog must contain 57 drills');
 const drillsById = new Map(sample.drills.map(drill => [drill.id, drill]));
-assert.strictEqual(drillsById.size, 45, 'built-in drill ids must be unique');
+assert.strictEqual(drillsById.size, 57, 'built-in drill ids must be unique');
 
 const shotSignatures = new Set(Object.values(shotPresets).map(preset => JSON.stringify(preset.params)));
 const serveSignatures = new Set(Object.values(servePresets).map(preset => JSON.stringify(preset.params)));
@@ -90,4 +90,23 @@ for (const name of ['Push: Backhand consistency', 'Push: Forehand / backhand alt
   assert(feeds.every(node => node.params.spinRps < 0), `${name}: every feed must carry backspin`);
 }
 
-console.log(`Built-in library self-test PASS (45 drills, ${reachableBallNodes} reachable ball nodes: ${reachableShots} shots + ${reachableServes} serves)`);
+const trainingDrills = sample.drills.filter(drill => drill.training);
+assert.strictEqual(trainingDrills.length, 12, 'expected four purpose-built stages for each of three skill paths');
+for (const pathId of ['forehand-loop', 'forehand-opening', 'backhand-flip']) {
+  const stages = trainingDrills.filter(drill => drill.training.pathId === pathId).sort((a, b) => a.training.stageNumber - b.training.stageNumber);
+  assert.strictEqual(stages.map(drill => drill.training.stageNumber).join(','), '1,2,3,4', `${pathId}: stages must run from 1 through 4`);
+  for (const drill of stages) {
+    for (const field of ['title', 'goal', 'focus', 'target']) {
+      assert(String(drill.training[field] || '').trim(), `${drill.name}: missing training ${field}`);
+    }
+  }
+}
+for (const drill of trainingDrills.filter(candidate => candidate.training.pathId === 'forehand-opening')) {
+  assert(drill.nodes.some(node => node.type === 'shot' && node.params.spinRps < 0), `${drill.name}: forehand opening stage needs a backspin feed`);
+}
+for (const drill of trainingDrills.filter(candidate => candidate.training.pathId === 'backhand-flip')) {
+  const firstBall = drill.nodes.find(node => node.type === 'shot');
+  assert(firstBall && firstBall.params.spinRps <= 0, `${drill.name}: backhand flip stage must start from a short non-topspin feed`);
+}
+
+console.log(`Built-in library self-test PASS (57 drills, ${reachableBallNodes} reachable ball nodes: ${reachableShots} shots + ${reachableServes} serves; 12 guided skill stages)`);

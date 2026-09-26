@@ -1,6 +1,8 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;root.TTRSFeaturesCore=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){'use strict';
   const DRILL_FORMAT='table-tennis-robot-studio/drill';
   const DRILL_VERSION=1;
+  const SKILL_FORMAT='table-tennis-robot-studio/skill';
+  const SKILL_VERSION=2;
   const MAX_SHARE_CHARS=12000;
   const MAX_FILE_BYTES=512*1024;
   const MAX_NODES=240;
@@ -81,6 +83,52 @@
     if(!valid.length)throw new Error('No valid Table Tennis Robot Studio drill was found in the AI response.');
     return valid[valid.length-1];
   }
+  function rangePair(value,min,max){return Array.isArray(value)&&value.length===2&&value.every(Number.isFinite)&&value[0]>=min&&value[1]<=max&&value[0]<=value[1];}
+  function validateSkillProposal(data){
+    const errors=[];
+    if(!data||typeof data!=='object'||Array.isArray(data))errors.push('The skill must be an object.');
+    if(data?.format!==SKILL_FORMAT)errors.push(`Expected format ${SKILL_FORMAT}.`);
+    if(Number(data?.formatVersion)!==SKILL_VERSION)errors.push(`Unsupported skill format version ${data?.formatVersion??'missing'}.`);
+    if(!String(data?.name||'').trim())errors.push('The skill needs a name.');
+    const stages=Array.isArray(data?.stages)?data.stages:[];
+    if(stages.length<1||stages.length>12)errors.push('A skill must contain 1 to 12 learning stages.');
+    let drillCount=0;
+    stages.forEach((stage,index)=>{
+      for(const key of ['title','goal','focus','target'])if(!String(stage?.[key]||'').trim())errors.push(`Step ${index+1} needs ${key}.`);
+      const drills=Array.isArray(stage?.drills)?stage.drills:[];drillCount+=drills.length;
+      if(drills.length<1||drills.length>6)errors.push(`Stage ${index+1} must contain 1 to 6 drills.`);
+      drills.forEach((drill,drillIndex)=>{
+        if(!String(drill?.name||'').trim())errors.push(`Stage ${index+1}, drill ${drillIndex+1} needs a name.`);
+        const balls=Array.isArray(drill?.balls)?drill.balls:[];
+        if(balls.length<1||balls.length>24)errors.push(`Stage ${index+1}, drill ${drillIndex+1} must contain 1 to 24 balls.`);
+        balls.forEach((ball,ballIndex)=>{
+          if(!['shot','serve'].includes(ball?.type))errors.push(`Stage ${index+1}, drill ${drillIndex+1}, ball ${ballIndex+1} has an unsupported type.`);
+          const o=ball?.outcome||{};
+          for(const [key,min,max] of [['depthCm',0,137],['lateralCm',-76,76],['speedMps',1,20],['spinRps',-120,120],['netClearanceCm',.2,80]])if(!rangePair(o[key],min,max))errors.push(`Stage ${index+1}, drill ${drillIndex+1}, ball ${ballIndex+1} ${key} must be a [minimum, maximum] range inside ${min}…${max}.`);
+        });
+      });
+    });
+    if(drillCount>36)errors.push('A skill may contain at most 36 drills.');
+    return {valid:errors.length===0,errors:[...new Set(errors)].slice(0,20)};
+  }
+  function parseExternalSkillResult(text){
+    const valid=[];for(const candidate of extractJsonCandidates(text)){try{const obj=JSON.parse(candidate);const check=validateSkillProposal(obj);if(check.valid)valid.push(obj);}catch(_){}}
+    if(!valid.length)throw new Error('No valid Table Tennis Robot Studio skill was found in the AI response.');
+    return clone(valid.at(-1));
+  }
+  function skillHistoryText(history){const safe=(Array.isArray(history)?history:[]).slice(-12).map((turn,index)=>({turn:index+1,userRequest:String(turn?.userRequest||'').slice(0,2000),assistantOutput:turn?.assistantOutput||null,feasibility:turn?.feasibility||null}));return safe.length?`CREATION/EDIT HISTORY (oldest to newest):\n${JSON.stringify(safe,null,2)}\n\n`:'';}
+  function buildExternalSkillRequest({userRequest='',currentSkill=null,history=[]}={}){
+    return `You design progressive table-tennis training for a player using a Pongbot Nova. The app, not you, converts desired outcomes into physical launch parameters.\n\nPLAYER REQUEST:\n${userRequest||'(no request supplied)'}\n\n${skillHistoryText(history)}${currentSkill?`CURRENT SAVED SKILL (preserve anything the player did not ask to change):\n${JSON.stringify(currentSkill,null,2)}\n\n`:''}INTUITIVE DRILL API AND COORDINATES:\n- Output desired ball outcomes, never wheel values, launch elevation, launch aim, or guessed robot parameters.\n- The robot stands centered at the back edge of its table half and faces the receiver.\n- depthCm is measured on the RECEIVER half: 0 at the net and 137 at the receiver end line.\n- lateralCm is measured from the center line: positive is toward the ROBOT'S LEFT (the forehand side of a right-handed receiver); negative is toward the robot's right.\n- speedMps is launch speed. spinRps is positive for topspin, negative for backspin, and near zero for no-spin.\n- netClearanceCm is the ball's height above the top of the net while crossing it.\n- Every outcome field is an inclusive [minimum, maximum] interval, matching the app's Intuitive shot editor. Use meaningful ranges rather than identical endpoints unless precision is essential.\n- type "shot" lands at depthCm/lateralCm on the receiver's first bounce. type "serve" uses the receiver-side second physical bounce as its placement target.\n- A drill's balls play sequentially. repetitions is the number of sequence repetitions. adaptiveSpeedPct 50…200 controls timing; 100 is a normal training rhythm.\n\nTABLE-TENNIS INTERPRETATION:\n- Assume a right-handed player unless stated otherwise. State important assumptions in the description.\n- A step-around forehand means moving around the backhand corner to use the forehand. An opening normally means the first topspin attack against backspin.\n- Down the line from a right-hander's backhand corner targets the receiver's forehand side, so use positive lateralCm. Crosscourt from there targets negative lateralCm.\n- Use progressive overload: isolate contact first, then footwork/timing, placement, recovery, and realistic uncertainty when useful. Do not force a fixed number of stages or drills. Use only as many as serve the learning goal.\n- Robot feeds must train the stated skill: choose incoming spin, depth, placement, pace, sequence, and recovery ball deliberately.\n\nReturn exactly one JSON object with no prose using this schematic contract:\n{"format":"${SKILL_FORMAT}","formatVersion":${SKILL_VERSION},"name":"...","description":"include assumptions","accent":"#55c98c","stages":[{"title":"...","goal":"...","focus":"specific player instructions","target":"measurable completion test","drills":[{"name":"...","description":"why this feed trains the stage","repetitions":3,"adaptiveSpeedPct":90,"balls":[{"id":"unique-ball-id","type":"shot","label":"Backspin to backhand corner","outcome":{"depthCm":[85,105],"lateralCm":[-55,-40],"speedMps":[4.5,5.5],"spinRps":[-24,-16],"netClearanceCm":[8,14]}}]}]}]}.\n\nLimits: 1…12 stages; 1…6 drills per stage; at most 36 drills total; 1…24 balls per drill. The app will reject or return feasibility feedback for outcome combinations its calibrated trajectory model cannot produce.`;
+  }
+  function buildExternalSkillRevisionRequest({userRequest='',proposal=null,report=null,currentSkill=null,history=[]}={}){
+    return `${buildCorrectedExternalSkillRequest({userRequest,currentSkill,history})}\n\nTHE APP TESTED YOUR LAST PROPOSAL WITH ITS CALIBRATED TRAJECTORY AND NOVA HARDWARE MODEL. Revise the complete skill to resolve the failures while preserving its coaching intent. Do not merely copy launch parameters; adjust the intuitive outcome intervals.\n\nLAST PROPOSAL:\n${JSON.stringify(proposal,null,2)}\n\nFEASIBILITY REPORT:\n${JSON.stringify(report,null,2)}\n`;
+  }
+  function buildCorrectedExternalSkillRequest(input){
+    return buildExternalSkillRequest(input).replace(
+      "- Down the line from a right-hander's backhand corner targets the receiver's forehand side, so use positive lateralCm. Crosscourt from there targets negative lateralCm.",
+      "- Outcome ranges describe the ROBOT'S INCOMING FEED. A requested direction for the player's return (for example, open down the line) belongs in focus/target coaching text; do not move the incoming feed to that return target."
+    );
+  }
   function buildExternalAiRequest({currentDrill=null,userRequest='',appContext=null,requestKind='drill' }={}){
     const safeContext=appContext&&typeof appContext==='object'?{screen:String(appContext.screen||''),activeDrill:appContext.activeDrill?String(appContext.activeDrill):null,drillSource:appContext.drillSource?String(appContext.drillSource):null,selection:appContext.selection?String(appContext.selection):null,localContext:Array.isArray(appContext.localContext)?appContext.localContext.slice(0,8).map(item=>String(item).slice(0,160)):[],robotStatus:appContext.robotStatus?String(appContext.robotStatus):null,activity:appContext.activity?String(appContext.activity):null}:null;
     const contextText=`${safeContext?JSON.stringify(safeContext,null,2):'(no visible screen context supplied)'}\n\nAPP CAPABILITIES:\n${APP_CAPABILITIES}`;
@@ -95,5 +143,5 @@
       .replace('"weight":1,"delaySeconds":1}', '"weight":1,"delaySeconds":0,"timingMode":"adaptive","autoSpeedPct":100}')
       .replace('edge delays 0..3600 s;', 'connection timingMode adaptive or manual; adaptive autoSpeedPct 50..200; manual delaySeconds 0..3600 s;');
   }
-  return Object.freeze({DRILL_FORMAT,DRILL_VERSION,MAX_SHARE_CHARS,MAX_FILE_BYTES,makePortableDrill,validatePortableDrill,serializePortableDrill,deserializePortableDrill,makeShareUrl,parseShareHash,safeFilename,parseExternalAiResult,buildExternalAiRequest:buildValidatedExternalAiRequest});
+  return Object.freeze({DRILL_FORMAT,DRILL_VERSION,SKILL_FORMAT,SKILL_VERSION,MAX_SHARE_CHARS,MAX_FILE_BYTES,makePortableDrill,validatePortableDrill,validateSkillProposal,serializePortableDrill,deserializePortableDrill,makeShareUrl,parseShareHash,safeFilename,parseExternalAiResult,parseExternalSkillResult,buildExternalSkillRequest:buildCorrectedExternalSkillRequest,buildExternalSkillRevisionRequest,buildExternalAiRequest:buildValidatedExternalAiRequest});
 });

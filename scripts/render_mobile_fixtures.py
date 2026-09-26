@@ -23,7 +23,10 @@ DEFAULT_OUTPUT = ROOT / "artifacts" / "visual-fixtures"
 FIXTURES = (
     "library", "run", "run-ball", "editor-graph", "add-node", "add-random", "add-repeat",
     "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
-    "pose-calibration", "robot", "calibration",
+    "pose-calibration", "robot", "calibration", "skill-add", "skill-add-proposal", "skill-custom", "skill-custom-overview", "skill-quality-report",
+    "skill-forehand-loop", "skill-forehand-loop-1", "skill-forehand-loop-2",
+    "skill-forehand-loop-3", "skill-forehand-loop-4",
+    "skill-forehand-loop-practice-1",
 )
 SEAM_PX = 5
 SEAM_COLOR = (235, 61, 73)
@@ -371,9 +374,10 @@ def main() -> None:
                 suffix = f" ({stitched_views} views, red seams)" if stitched_views > 1 else ""
                 print(f"{display_path(output)}{suffix}")
 
-        if len(rendered) > 1:
+        navigable = {name: path for name, path in rendered.items() if name in NAVIGATION_COLUMNS}
+        if len(navigable) > 1:
             navigation = output_dir / f"navigation-map-{args.width}x{args.height}.png"
-            navigation_map(rendered, navigation, args.width, args.height)
+            navigation_map(navigable, navigation, args.width, args.height)
             print(display_path(navigation))
             contact_sheet = output_dir / f"contact-sheet-{args.width}x{args.height}.png"
             shutil.copyfile(navigation, contact_sheet)

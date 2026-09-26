@@ -6,6 +6,7 @@
 
   const STORAGE_KEY = "table-tennis-robot-studio";
   const LIVE_TUNING_STORAGE_KEY = "table-tennis-robot-studio-live-tuning";
+  const TRAINING_PROGRESS_STORAGE_KEY = "table-tennis-robot-studio-training-progress-v1";
   const SCHEMA_VERSION = 1;
   // Trajectory launch coordinates come from the fixed measured pivot chain.
   const ROBOT_GEOMETRY_REFERENCE = "base-back-pivots-v1";
@@ -52,8 +53,14 @@
     deleteDrillBtn: $("deleteDrillBtn"),
     libraryStatus: $("libraryStatus"),
     drillList: $("drillList"),
+    trainingLibraryTab: $("trainingLibraryTab"),
     builtInLibraryTab: $("builtInLibraryTab"),
     myDrillsLibraryTab: $("myDrillsLibraryTab"),
+    trainingPanel: $("trainingPanel"),
+    libraryBrowserPanel: $("libraryBrowserPanel"),
+    libraryEyebrow: $("libraryEyebrow"),
+    libraryTitle: $("libraryTitle"),
+    librarySubtitle: $("librarySubtitle"),
     libraryBreadcrumb: $("libraryBreadcrumb"),
     librarySearchInput: $("librarySearchInput"),
     newFolderBtn: $("newFolderBtn"),
@@ -244,6 +251,7 @@
     runEditDrillBtn: $("runEditDrillBtn"),
     runRobotSetup: $("runRobotSetup"),
     runPoseStatus: $("runPoseStatus"),
+    runTrainingCard: $("runTrainingCard"),
     updateRobotPoseBtn: $("updateRobotPoseBtn"),
     saveEffectiveDrillBtn: $("saveEffectiveDrillBtn"),
     editorRunBtn: $("editorRunBtn"),
@@ -289,7 +297,8 @@
   let startupNotice = "";
   let builtInCatalog = null;
   let library = null;
-  let libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
+  let libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: null };
+  let trainingProgress = loadTrainingProgress();
   let folderDialogMode = null;
   let selection = null;
   let connectionDrag = null;
@@ -385,6 +394,7 @@
       activePlayerModelId: playerModel.id,
       folders: [],
       drills: [],
+      skills: [],
     };
   }
 
@@ -392,6 +402,7 @@
     if (!library || typeof library !== "object") library = makeUserLibrary();
     if (!Array.isArray(library.drills)) library.drills = [];
     if (!Array.isArray(library.folders)) library.folders = [];
+    if (!Array.isArray(library.skills)) library.skills = [];
     library.schemaVersion = SCHEMA_VERSION;
     if (!library.calibration) library.calibration = defaultCalibration();
     library.robotSettings = sanitizeRobotSettings(library.robotSettings);
@@ -730,7 +741,7 @@
     return { id: makeId("counter"), type: "counter", label, x: 300, y: 260, startCount: 2, clearOnNodeIds: [] };
   }
 
-  const DEFAULT_LIBRARY_VERSION = 9;
+  const DEFAULT_LIBRARY_VERSION = 10;
 
   const DEFAULT_VARIATION_PROFILES = Object.freeze({
     neutral: Object.freeze({ depthCm: 10, lateralCm: 12, clearanceDeltaCm: 2, speedDeltaMps: .5, spinDeltaRps: 2 }),
@@ -1286,6 +1297,12 @@
     return drill;
   }
 
+  function trainingStage(drill, pathId, stageNumber, title, goal, focus, target) {
+    drill.training = { pathId, stageNumber, title, goal, focus, target };
+    drill.description = goal;
+    return drill;
+  }
+
   function makeSampleLibrary() {
     // Common coaching patterns: alternating FH/BH, 2-2, Falkenberg/two-one,
     // systematic side-to-side footwork, semi-random placement, and three-spot
@@ -1366,6 +1383,117 @@
       { key: "shortBackspinBackhand", label: "Variable short · backhand" },
       { key: "shortBackspinForehand", label: "Variable short · forehand" },
     ], { repetitions: 30, intervalSeconds: .95, randomLabel: "Variable short underspin" });
+
+    const forehandLoop1 = trainingStage(
+      singleShotDrill("Learn FH loop 1: Find the contact", "topspinForehand", { repetitions: 36, intervalSeconds: .92 }),
+      "forehand-loop", 1, "Find the contact",
+      "Groove a relaxed forehand loop against one predictable topspin ball.",
+      "Let the ball come into your strike zone; brush forward and up without forcing the pace.",
+      "Land 8 of 10 loops with balanced recovery."
+    );
+    const forehandLoop2 = trainingStage(
+      sequenceDrill("Learn FH loop 2: Move then loop", ["middleForehandTopspin", "topspinForehand"], {
+        repetitions: 18, intervalSeconds: .88, labels: ["Forehand from middle", "Wide forehand"]
+      }),
+      "forehand-loop", 2, "Move then loop",
+      "Keep the same stroke while moving between middle and wide forehand.",
+      "Move your feet before the backswing and recover after every ball.",
+      "Complete 5 clean two-ball sequences without reaching."
+    );
+    const forehandLoop3 = trainingStage(
+      randomDrill("Learn FH loop 3: Read the placement", [
+        { key: "middleForehandTopspin", label: "Forehand from middle", weight: 2 },
+        { key: "topspinForehand", label: "Wide forehand", weight: 2 },
+        { key: "deepTopspinForehand", label: "Deep wide forehand", weight: 1 },
+      ], { repetitions: 36, intervalSeconds: .86, randomLabel: "Read middle, wide or deep" }),
+      "forehand-loop", 3, "Read the placement",
+      "Adjust the forehand loop to uncertain placement and depth.",
+      "Read the bounce first, then choose your distance from the ball.",
+      "Land 7 of 10 loops without losing your ready position."
+    );
+    const forehandLoop4 = trainingStage(
+      sequenceDrill("Learn FH loop 4: Build the rally", ["middleForehandTopspin", "topspinForehand", "deepTopspinForehand"], {
+        repetitions: 12, intervalSeconds: .82, labels: ["Control from middle", "Move wide", "Pressure deep"], varied: true
+      }),
+      "forehand-loop", 4, "Build the rally",
+      "Link controlled and stronger forehand loops in a three-ball pattern.",
+      "Stay relaxed on ball one; add quality only after you are in position.",
+      "Complete 4 full patterns with all three balls on the table."
+    );
+
+    const forehandOpening1 = trainingStage(
+      singleShotDrill("Learn FH opening 1: Lift backspin", "backspinForehand", { repetitions: 32, intervalSeconds: 1.05 }),
+      "forehand-opening", 1, "Lift backspin",
+      "Learn the upward contact needed to open against a predictable backspin ball.",
+      "Start below the ball, brush thinly, and give yourself net clearance.",
+      "Land 7 of 10 openings beyond the middle of the table."
+    );
+    const forehandOpening2 = trainingStage(
+      sequenceDrill("Learn FH opening 2: Handle heavier push", ["deepBackspinForehand"], {
+        repetitions: 32, intervalSeconds: 1.02, labels: ["Deep heavy push"], varied: true
+      }),
+      "forehand-opening", 2, "Handle a heavier push",
+      "Open against deeper, heavier backspin with controlled variation.",
+      "Use more legs and upward acceleration instead of swinging harder forward.",
+      "Land 7 of 10 openings with safe net clearance."
+    );
+    const forehandOpening3 = trainingStage(
+      randomDrill("Learn FH opening 3: Find the ball", [
+        { key: "deepBackspinCenter", label: "Push to middle", weight: 2 },
+        { key: "deepBackspinForehand", label: "Push to forehand", weight: 3 },
+        { key: "backspinForehand", label: "Shorter forehand push", weight: 2 },
+      ], { repetitions: 32, intervalSeconds: 1, randomLabel: "Read push depth and placement" }),
+      "forehand-opening", 3, "Find the ball",
+      "Move into position and open against changing push depth and placement.",
+      "Choose the contact point before committing to the swing.",
+      "Land 6 of 10 openings while staying balanced."
+    );
+    const forehandOpening4 = trainingStage(
+      sequenceDrill("Learn FH opening 4: Opening plus next ball", ["deepBackspinForehand", "topspinForehand", "deepTopspinForehand"], {
+        repetitions: 12, intervalSeconds: .9, labels: ["Open against push", "Recover for block", "Continue with pressure"], varied: true
+      }),
+      "forehand-opening", 4, "Opening plus next ball",
+      "Recover after the opening and continue the topspin rally.",
+      "Finish the opening in balance; expect the next ball immediately.",
+      "Complete 4 full three-ball patterns."
+    );
+
+    const backhandFlip1 = trainingStage(
+      singleShotDrill("Learn BH flip 1: Meet the short ball", "shortBackspinBackhand", { repetitions: 30, intervalSeconds: 1.08 }),
+      "backhand-flip", 1, "Meet the short ball",
+      "Build a compact backhand flip against one predictable short backspin feed.",
+      "Step in early, keep the wrist relaxed, and contact the ball near the top of the bounce.",
+      "Land 6 of 10 flips and recover behind the table."
+    );
+    const backhandFlip2 = trainingStage(
+      sequenceDrill("Learn BH flip 2: Adjust to variation", ["shortBackspinBackhand"], {
+        repetitions: 30, intervalSeconds: 1.04, labels: ["Variable short backspin"], varied: true
+      }),
+      "backhand-flip", 2, "Adjust to variation",
+      "Keep the flip compact while short-ball depth, spin, and placement vary slightly.",
+      "Move the racket to the ball; do not lengthen the swing when the feed changes.",
+      "Land 6 of 10 flips without getting stuck over the table."
+    );
+    const backhandFlip3 = trainingStage(
+      randomDrill("Learn BH flip 3: Read spin and position", [
+        { key: "shortBackspinBackhand", label: "Short backspin to backhand", weight: 3 },
+        { key: "shortNoSpin", label: "Short no-spin to middle", weight: 2 },
+      ], { repetitions: 30, intervalSeconds: 1.02, randomLabel: "Read backspin or no-spin" }),
+      "backhand-flip", 3, "Read spin and position",
+      "Choose the racket angle and acceleration for short backspin or no-spin.",
+      "Read the bounce: lift backspin, drive more through no-spin.",
+      "Make the correct adjustment on 7 of 10 balls."
+    );
+    const backhandFlip4 = trainingStage(
+      openingToRandomRecoveryDrill("Learn BH flip 4: Flip and recover", "shortBackspinBackhand", [
+        { key: "deepTopspinBackhand", label: "Recover to backhand", weight: 2 },
+        { key: "deepTopspinForehand", label: "Recover to forehand", weight: 2 },
+      ], { repetitions: 14, intervalSeconds: .9, randomLabel: "Recover to either corner" }),
+      "backhand-flip", 4, "Flip and recover",
+      "Recover from the table after the flip and play the next topspin ball.",
+      "Push out after contact, regain your ready position, then read the corner.",
+      "Complete 5 flip-plus-recovery patterns."
+    );
 
     const forehandFlickRecovery = openingToRandomRecoveryDrill(
       "Match: Short forehand underspin → wide recovery",
@@ -1459,6 +1587,18 @@
         fastDeepRandom,
         variableTopspin,
         variableShortReceive,
+        forehandLoop1,
+        forehandLoop2,
+        forehandLoop3,
+        forehandLoop4,
+        forehandOpening1,
+        forehandOpening2,
+        forehandOpening3,
+        forehandOpening4,
+        backhandFlip1,
+        backhandFlip2,
+        backhandFlip3,
+        backhandFlip4,
         forehandFlickRecovery,
         backhandFlickForehandRecovery,
         shortReceiveRandom,
@@ -1490,6 +1630,7 @@
 
 
   const BUILT_IN_FOLDER_DEFS = Object.freeze([
+    { id: "builtin-skill-practice", name: "Skill practice", parentId: "builtin-root" },
     { id: "builtin-shots", name: "Shots", parentId: "builtin-root" },
     { id: "builtin-serve-receive", name: "Serve / receive", parentId: "builtin-root" },
     { id: "builtin-footwork", name: "Footwork", parentId: "builtin-root" },
@@ -1554,7 +1695,7 @@
     const stableIds = new Map(sample.drills.map(drill => [drill.id, stableBuiltInId(drill.name)]));
     const drills = sample.drills.map(drill => {
       drill.id = stableIds.get(drill.id);
-      drill.libraryFolderId = BUILT_IN_FOLDER_BY_NAME[drill.name]
+      drill.libraryFolderId = drill.training ? "builtin-skill-practice" : BUILT_IN_FOLDER_BY_NAME[drill.name]
         || (/^Serve(?: receive)?:/.test(drill.name) ? "builtin-serve-receive" : "builtin-random");
       drill.builtIn = true;
       drill.settings.delayBetweenSets = 0;
@@ -1588,6 +1729,253 @@
       drills,
       defaultDrillId: alternating?.id ?? drills[0]?.id ?? null,
     };
+  }
+
+  const TRAINING_PATHS = Object.freeze([
+    Object.freeze({
+      id: "forehand-loop",
+      name: "Forehand loop",
+      description: "Build a reliable loop against topspin, then add movement and placement reading.",
+      accent: "#62a8ff",
+    }),
+    Object.freeze({
+      id: "forehand-opening",
+      name: "Forehand opening",
+      description: "Learn to lift backspin and recover for the next attacking ball.",
+      accent: "#ff9466",
+    }),
+    Object.freeze({
+      id: "backhand-flip",
+      name: "Backhand flip",
+      description: "Develop a compact short-ball attack and recover into the rally.",
+      accent: "#b58cff",
+    }),
+  ]);
+
+  function sanitizeCustomSkill(raw) {
+    const id = String(raw?.id || makeId("skill"));
+    const aiHistory = (Array.isArray(raw?.aiHistory) ? raw.aiHistory : []).slice(-12).map(turn => ({
+      userRequest: String(turn?.userRequest || "").slice(0, 2000),
+      assistantOutput: turn?.assistantOutput && typeof turn.assistantOutput === "object" ? JSON.parse(JSON.stringify(turn.assistantOutput)) : null,
+      feasibility: turn?.feasibility && typeof turn.feasibility === "object" ? JSON.parse(JSON.stringify(turn.feasibility)) : null,
+      createdAt: String(turn?.createdAt || new Date().toISOString()),
+    }));
+    return {
+      id,
+      name: String(raw?.name || "My skill").trim().slice(0, 90) || "My skill",
+      description: String(raw?.description || "").trim().slice(0, 600),
+      accent: /^#[0-9a-f]{6}$/i.test(String(raw?.accent || "")) ? String(raw.accent) : "#55c98c",
+      userOwned: true,
+      createdAt: String(raw?.createdAt || new Date().toISOString()),
+      updatedAt: String(raw?.updatedAt || new Date().toISOString()),
+      aiHistory,
+    };
+  }
+
+  function availableTrainingPaths() {
+    return [...TRAINING_PATHS, ...(library?.skills || []).map(sanitizeCustomSkill)];
+  }
+
+  function saveCustomSkillProposal(proposal, existingId = null) {
+    if (!proposal || typeof proposal !== "object") throw new Error("The AI skill proposal is missing.");
+    const stages = Array.isArray(proposal.stages) ? proposal.stages : [];
+    if (!stages.length || stages.length > 36) throw new Error("A skill must contain 1 to 36 practice drills.");
+    const prior = existingId ? library.skills.find(skill => skill.id === existingId) : null;
+    if (existingId && !prior) throw new Error("That custom skill no longer exists.");
+    const skillId = prior?.id || makeId("skill");
+    const cleanSkill = sanitizeCustomSkill({
+      ...proposal,
+      id: skillId,
+      createdAt: prior?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const allIds = new Set([...(builtInCatalog?.drills || []).map(item => item.id), ...library.drills.filter(item => item.customSkillId !== skillId).map(item => item.id)]);
+    const cleanDrills = stages.map((stage, index) => {
+      const raw = stage?.drill;
+      const check = validateDrill(raw);
+      if (!check.valid) throw new Error(`Step ${index + 1}: ${check.errors[0]}`);
+      const clean = sanitizeDrill(raw, allIds);
+      clean.id = makeId("skill-drill");
+      clean.folderId = null;
+      clean.customSkillId = skillId;
+      clean.training = {
+        pathId: skillId,
+        stageNumber: index + 1,
+        title: String(stage.title || `Step ${index + 1}`).trim().slice(0, 120),
+        goal: String(stage.goal || "").trim().slice(0, 500),
+        focus: String(stage.focus || "").trim().slice(0, 800),
+        target: String(stage.target || "").trim().slice(0, 500),
+        phaseNumber: Math.max(1, Math.min(12, Math.round(finite(stage.phaseNumber, index + 1)))),
+        phaseTitle: String(stage.phaseTitle || stage.title || `Stage ${index + 1}`).trim().slice(0, 120),
+        drillNumber: Math.max(1, Math.min(6, Math.round(finite(stage.drillNumber, 1)))),
+        drillsInPhase: Math.max(1, Math.min(6, Math.round(finite(stage.drillsInPhase, 1)))),
+      };
+      allIds.add(clean.id);
+      return clean;
+    });
+    library.drills = library.drills.filter(drill => drill.customSkillId !== skillId).concat(cleanDrills);
+    library.skills = library.skills.filter(skill => skill.id !== skillId).concat(cleanSkill);
+    libraryView.trainingPathId = skillId;
+    libraryView.trainingStageNumber = null;
+    saveLibrary();
+    renderAll();
+    return cleanSkill;
+  }
+
+  function materializeIntuitiveSkillProposal(source) {
+    const table = library.calibration.table;
+    const planningCalibration = {
+      ...library.calibration,
+      pose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" },
+      placementMode: "table",
+    };
+    const bounds = novaFeasibleBounds(planningCalibration);
+    const range = (value, fallback) => Array.isArray(value) && value.length === 2 ? value.map(Number) : fallback;
+    const inside = (value, interval, tolerance = 1e-6) => value >= interval[0] - tolerance && value <= interval[1] + tolerance;
+    const reports = [];
+    const resolvedStages = [];
+    let practiceNumber = 0;
+    for (let phaseIndex = 0; phaseIndex < source.stages.length; phaseIndex += 1) {
+      const phase = source.stages[phaseIndex];
+      for (let drillIndex = 0; drillIndex < phase.drills.length; drillIndex += 1) {
+        const spec = phase.drills[drillIndex];
+        practiceNumber += 1;
+        const nodes = [];
+        for (let ballIndex = 0; ballIndex < spec.balls.length; ballIndex += 1) {
+          const ball = spec.balls[ballIndex];
+          const outcome = {
+            depthCm: range(ball.outcome?.depthCm, [65, 105]), lateralCm: range(ball.outcome?.lateralCm, [-10, 10]),
+            speedMps: range(ball.outcome?.speedMps, [5, 7]), spinRps: range(ball.outcome?.spinRps, [0, 15]),
+            netClearanceCm: range(ball.outcome?.netClearanceCm, [7, 15]),
+          };
+          const centers = Object.fromEntries(Object.entries(outcome).map(([key, values]) => [key, (values[0] + values[1]) / 2]));
+          const target = { x: table.length / 2 + centers.depthCm / 100, y: centers.lateralCm / 100 };
+          const aimGuess = Math.atan2(target.y, Math.max(.2, target.x - .39)) * 180 / Math.PI;
+          const options = { serve: ball.type === "serve", includePostBounce: ball.type === "serve" };
+          const predictRaw = params => novaFeasiblePrediction(params, planningCalibration, options);
+          const predictGoal = params => {
+            const prediction = predictRaw(params);
+            if (ball.type !== "serve") return prediction;
+            return prediction?.secondBounce ? { ...prediction, landing: prediction.secondBounce } : { ...prediction, landing: null };
+          };
+          const seed = {
+            speedMps: clamp(centers.speedMps, bounds.speed[0], bounds.speed[1], 6),
+            spinRps: clamp(centers.spinRps, bounds.spin[0], bounds.spin[1], 0),
+            elevationDeg: ball.type === "serve" ? -16 : (centers.spinRps < -4 ? 13 : 9),
+            aimDeg: clamp(aimGuess, bounds.aim[0], bounds.aim[1], 0),
+          };
+          const solution = DrillAdjustments.solveShotGoals(seed, {
+            targetLanding: target, targetClearanceM: centers.netClearanceCm / 100,
+            desiredSpeedMps: centers.speedMps, desiredSpinRps: centers.spinRps,
+          }, predictGoal, {
+            minSpeedMps: Math.max(bounds.speed[0], outcome.speedMps[0]), maxSpeedMps: Math.min(bounds.speed[1], outcome.speedMps[1]),
+            minSpinRps: Math.max(bounds.spin[0], outcome.spinRps[0]), maxSpinRps: Math.min(bounds.spin[1], outcome.spinRps[1]),
+            minElevationDeg: bounds.elevation[0], maxElevationDeg: bounds.elevation[1], minAimDeg: bounds.aim[0], maxAimDeg: bounds.aim[1],
+            landingScaleM: .025, clearanceScaleM: .008, speedScaleMps: .8, spinScaleRps: 10, maxIterations: 12, maxEvaluations: 50,
+          });
+          const candidates = [];
+          if (solution?.params) candidates.push(solution.params);
+          const samples = values => [...new Set([values[0], (values[0] + values[1]) / 2, values[1]].map(value => rounded(value, 2)))];
+          if (!candidates.length || !receiverPredictionValid({ type: ball.type }, predictRaw(candidates[0]))) {
+            for (const speedMps of samples(outcome.speedMps)) for (const spinRps of samples(outcome.spinRps)) {
+              for (const elevationDeg of (ball.type === "serve" ? [-20,-18,-16,-14,-10,-6,-2,4] : [-12,-4,4,10,16,22,28])) {
+                for (const aimDeg of [aimGuess-8,aimGuess-4,aimGuess,aimGuess+4,aimGuess+8]) candidates.push({speedMps,spinRps,elevationDeg,aimDeg});
+              }
+            }
+          }
+          let best = null;
+          for (const params of candidates) {
+            const prediction = predictRaw(params); const landing = receiverLanding(prediction, ball.type === "serve");
+            if (!landing || !Number.isFinite(prediction?.net?.clearanceM)) continue;
+            const actual = { depthCm:(landing.x-table.length/2)*100, lateralCm:landing.y*100, speedMps:params.speedMps, spinRps:params.spinRps, netClearanceCm:prediction.net.clearanceM*100 };
+            const score = Object.entries(actual).reduce((sum,[key,value]) => sum + ((value-centers[key]) / Math.max(1,outcome[key][1]-outcome[key][0])) ** 2, 0);
+            const feasible = receiverPredictionValid({ type: ball.type }, prediction) && Object.entries(actual).every(([key,value]) => inside(value,outcome[key], key === "netClearanceCm" ? .15 : .05));
+            if (!best || (feasible && !best.feasible) || feasible === best.feasible && score < best.score) best = { params, prediction, actual, score, feasible };
+          }
+          const report = { stage:phaseIndex+1, drill:drillIndex+1, ball:ballIndex+1, id:String(ball.id||`ball-${ballIndex+1}`), label:String(ball.label||`Ball ${ballIndex+1}`), requested:outcome, feasible:Boolean(best?.feasible), nearestModeledOutcome:best?.actual||null };
+          if (!best?.feasible) report.reason = best ? "No modeled Nova shot satisfies all five intuitive ranges simultaneously." : "The model found no receiver-side landing for this outcome.";
+          reports.push(report);
+          if (!best?.feasible) continue;
+          const params = { speedMps:rounded(best.params.speedMps,2), spinRps:rounded(best.params.spinRps,1), elevationDeg:rounded(best.params.elevationDeg,1), aimDeg:rounded(best.params.aimDeg,1) };
+          nodes.push({ id:String(ball.id||makeId(ball.type)), type:ball.type, label:String(ball.label||`Ball ${ballIndex+1}`), x:180+(ballIndex%4)*270, y:220+Math.floor(ballIndex/4)*210, params, variation:ShotVariation.normalizeVariation({enabled:true,placement:{depthMinCm:outcome.depthCm[0],depthMaxCm:outcome.depthCm[1],lateralMinCm:outcome.lateralCm[0],lateralMaxCm:outcome.lateralCm[1]},speed:{minMps:outcome.speedMps[0],maxMps:outcome.speedMps[1]},spin:{minRps:outcome.spinRps[0],maxRps:outcome.spinRps[1]},clearance:{minCm:outcome.netClearanceCm[0],maxCm:outcome.netClearanceCm[1]}},params,best.prediction.net.clearanceM) });
+        }
+        if (nodes.length === spec.balls.length) {
+          const edges = nodes.slice(0,-1).map((node,index)=>({id:makeId("edge"),source:node.id,sourceSlot:"next",target:nodes[index+1].id,weight:1,delaySeconds:0,timingMode:"adaptive",autoSpeedPct:clamp(spec.adaptiveSpeedPct,50,200,100)}));
+          resolvedStages.push({ title:spec.name||phase.title, goal:phase.goal, focus:phase.focus, target:phase.target, phaseTitle:phase.title, phaseNumber:phaseIndex+1, drillNumber:drillIndex+1, drillsInPhase:phase.drills.length, drill:{name:String(spec.name||phase.title),description:String(spec.description||phase.goal||""),tags:["ai-created","skill"],robotPoseReference:"base_back",robotPose:{x:0,y:0,z:0,yawDeg:0,pitchDeg:0,rollDeg:0,placement:"table"},startNodeId:nodes[0].id,settings:{repetitions:Math.max(1,Math.min(99,Math.round(finite(spec.repetitions,3)))),delayBetweenSets:0,firstShotTiming:{mode:"adaptive",speedPct:clamp(spec.adaptiveSpeedPct,50,200,100)}},nodes,edges} });
+        }
+      }
+    }
+    const failed = reports.filter(item => !item.feasible);
+    return { valid:failed.length===0 && resolvedStages.length>0, proposal:{...source,stages:resolvedStages}, report:{valid:failed.length===0,summary:`${reports.length-failed.length}/${reports.length} proposed balls are feasible.`,shots:reports} };
+  }
+
+  function deleteCustomSkill(skillId) {
+    const skill = library.skills.find(item => item.id === skillId);
+    if (!skill) return;
+    const removedIds = new Set(library.drills.filter(drill => drill.customSkillId === skillId).map(drill => drill.id));
+    library.skills = library.skills.filter(item => item.id !== skillId);
+    library.drills = library.drills.filter(drill => drill.customSkillId !== skillId);
+    trainingProgress = { ...trainingProgress, completed: trainingProgress.completed.filter(key => !key.startsWith(`${skillId}:`)), lastPathId: trainingProgress.lastPathId === skillId ? null : trainingProgress.lastPathId };
+    saveTrainingProgress();
+    if (removedIds.has(library.activeDrillId)) {
+      library.activeDrillSource = "builtin";
+      library.activeDrillId = builtInCatalog.defaultDrillId;
+    }
+    libraryView.trainingPathId = null;
+    libraryView.trainingStageNumber = null;
+    saveLibrary(); renderAll(); toast("Skill deleted");
+  }
+
+  function trainingStages(pathId) {
+    return allDrills()
+      .filter(drill => drill.training?.pathId === pathId)
+      .sort((a, b) => a.training.stageNumber - b.training.stageNumber);
+  }
+
+  function trainingStageKey(drill) {
+    return drill?.training ? `${drill.training.pathId}:${drill.training.stageNumber}` : null;
+  }
+
+  function trainingUnitLabel(drill) {
+    const training = drill?.training;
+    if (!training) return "Practice";
+    if (drill.customSkillId) return training.drillsInPhase > 1
+      ? `Stage ${training.phaseNumber} · Drill ${training.drillNumber} of ${training.drillsInPhase}`
+      : `Stage ${training.phaseNumber}`;
+    return `Step ${training.stageNumber}`;
+  }
+
+  function loadTrainingProgress() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(TRAINING_PROGRESS_STORAGE_KEY) || "{}");
+      const completed = Array.isArray(parsed?.completed) ? parsed.completed.filter(value => typeof value === "string") : [];
+      return { completed: [...new Set(completed)], lastPathId: typeof parsed?.lastPathId === "string" ? parsed.lastPathId : null };
+    } catch (error) {
+      console.warn(`Could not load ${TRAINING_PROGRESS_STORAGE_KEY}`, error);
+      return { completed: [], lastPathId: null };
+    }
+  }
+
+  function saveTrainingProgress() {
+    try {
+      localStorage.setItem(TRAINING_PROGRESS_STORAGE_KEY, JSON.stringify(trainingProgress));
+    } catch (error) {
+      console.warn(`Could not save ${TRAINING_PROGRESS_STORAGE_KEY}`, error);
+    }
+  }
+
+  function stageIsComplete(drill) {
+    return trainingProgress.completed.includes(trainingStageKey(drill));
+  }
+
+  function setTrainingStageComplete(drill, complete) {
+    const key = trainingStageKey(drill);
+    if (!key) return;
+    const completed = new Set(trainingProgress.completed);
+    if (complete) completed.add(key);
+    else completed.delete(key);
+    trainingProgress = { ...trainingProgress, completed: [...completed], lastPathId: drill.training.pathId };
+    saveTrainingProgress();
   }
 
   function allDrills() {
@@ -1827,6 +2215,21 @@
       }));
 
     drill.description = String(raw?.description || "").trim().slice(0, 600);
+    if (raw?.training && typeof raw.training === "object") {
+      drill.training = {
+        pathId: String(raw.training.pathId || "").slice(0, 120),
+        stageNumber: Math.max(1, Math.min(36, Math.round(finite(raw.training.stageNumber, 1)))),
+        title: String(raw.training.title || "Practice step").trim().slice(0, 120),
+        goal: String(raw.training.goal || "").trim().slice(0, 500),
+        focus: String(raw.training.focus || "").trim().slice(0, 800),
+        target: String(raw.training.target || "").trim().slice(0, 500),
+        phaseNumber: Math.max(1, Math.min(12, Math.round(finite(raw.training.phaseNumber, raw.training.stageNumber || 1)))),
+        phaseTitle: String(raw.training.phaseTitle || raw.training.title || "Learning stage").trim().slice(0, 120),
+        drillNumber: Math.max(1, Math.min(6, Math.round(finite(raw.training.drillNumber, 1)))),
+        drillsInPhase: Math.max(1, Math.min(6, Math.round(finite(raw.training.drillsInPhase, 1)))),
+      };
+    }
+    if (raw?.customSkillId) drill.customSkillId = String(raw.customSkillId).slice(0, 120);
     drill.tags = Array.isArray(raw?.tags)
       ? [...new Set(raw.tags.map(tag => String(tag).trim()).filter(Boolean))].slice(0, 20)
       : String(raw?.tags || "").split(",").map(tag => tag.trim()).filter(Boolean).slice(0, 20);
@@ -1887,6 +2290,7 @@
       drill.folderId = validFolderIds.has(String(d?.folderId)) ? String(d.folderId) : null;
       return drill;
     });
+    const skills = (Array.isArray(raw.skills) ? raw.skills : []).map(sanitizeCustomSkill);
     const desiredSource = raw.activeDrillSource === "user" ? "user" : "builtin";
     const desiredId = String(raw.activeDrillId || "");
     const userExists = drills.some(drill => drill.id === desiredId);
@@ -1903,6 +2307,7 @@
       activePlayerModelId: String(raw.activePlayerModelId || AdaptiveTiming.DEFAULT_PLAYER_MODEL.id),
       folders,
       drills,
+      skills,
     };
   }
 
@@ -1912,7 +2317,7 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
       if (els.libraryStatus) {
         const builtInCount = builtInCatalog?.drills.length || 0;
-        const userCount = library.drills.length;
+        const userCount = library.drills.filter(drill => !drill.customSkillId).length;
         els.libraryStatus.textContent = `${builtInCount} built-in · ${userCount} My drill${userCount === 1 ? "" : "s"}`;
       }
     } catch (error) {
@@ -2131,8 +2536,32 @@
     const drill = activeDrill();
     if (els.runDrillTitle) els.runDrillTitle.textContent = drill ? (isActiveBuiltIn() ? builtInDisplayName(drill.name) : drill.name) : "Choose a drill";
     if (els.runDrillDescription) els.runDrillDescription.textContent = activeDrillDescription(drill);
+    renderRunTrainingCard(drill);
     renderRobotSetupSummary();
     renderRunPreview();
+  }
+
+  function renderRunTrainingCard(drill = activeDrill()) {
+    const stage = drill?.training;
+    els.runTrainingCard.hidden = !stage;
+    els.runTrainingCard.replaceChildren();
+    if (!stage) return;
+    const path = TRAINING_PATHS.find(candidate => candidate.id === stage.pathId);
+    const stages = trainingStages(stage.pathId);
+    const complete = stageIsComplete(drill);
+    const next = stages.find(candidate => candidate.training.stageNumber === stage.stageNumber + 1);
+    els.runTrainingCard.innerHTML = `<div class="run-training-heading"><span>${escapeHtml(path?.name || "Training")} · Step ${stage.stageNumber} of ${stages.length}</span><strong>${escapeHtml(stage.title)}</strong></div><div class="run-training-guidance"><div><span>Focus</span><p>${escapeHtml(stage.focus)}</p></div><div><span>Complete when</span><p>${escapeHtml(stage.target)}</p></div></div><p class="run-training-status">${complete ? "Step completed. Practise again or continue when ready." : "After practising, record whether this step is ready to progress."}</p><div class="run-training-actions"><button type="button" class="button ghost" data-training-result="repeat">Not yet</button><button type="button" class="button primary" data-training-result="complete">${complete ? "Completed ✓" : "Complete step"}</button>${complete && next ? `<button type="button" class="button primary wide" data-training-next="1">Next step ›</button>` : ""}</div>`;
+    els.runTrainingCard.querySelector('[data-training-result="repeat"]')?.addEventListener("click", () => {
+      setTrainingStageComplete(drill, false);
+      renderRunTrainingCard(drill);
+      toast("Kept this step as the next one to practise.");
+    });
+    els.runTrainingCard.querySelector('[data-training-result="complete"]')?.addEventListener("click", () => {
+      setTrainingStageComplete(drill, true);
+      renderRunTrainingCard(drill);
+      toast(next ? "Step completed. The next step is ready." : `${path?.name || "Training path"} completed.`);
+    });
+    els.runTrainingCard.querySelector('[data-training-next="1"]')?.addEventListener("click", () => startTrainingStage(next));
   }
 
   const RUN_PREVIEW_SAMPLES = 12;
@@ -2402,7 +2831,7 @@
 
   function drillsInFolder(root, folderId) {
     if (root === "builtin") return builtInCatalog.drills.filter(drill => drill.libraryFolderId === folderId);
-    return library.drills.filter(drill => (drill.folderId || null) === (folderId || null));
+    return library.drills.filter(drill => !drill.customSkillId && (drill.folderId || null) === (folderId || null));
   }
 
   function folderItemCount(root, folder) {
@@ -2435,12 +2864,111 @@
   }
 
   function selectLibraryRoot(root) {
+    libraryView.section = "browser";
     libraryView.root = root === "user" ? "user" : "builtin";
     libraryView.folderId = libraryRootFolderId(libraryView.root);
     libraryView.query = "";
     els.librarySearchInput.value = "";
     renderDrillList();
     renderLibraryEditState();
+  }
+
+  function selectTrainingLibrary(pathId = libraryView.trainingPathId, stageNumber = null) {
+    libraryView.section = "training";
+    libraryView.trainingPathId = availableTrainingPaths().some(path => path.id === pathId) ? pathId : null;
+    libraryView.trainingStageNumber = Number.isInteger(stageNumber) ? stageNumber : null;
+    renderDrillList();
+    renderLibraryEditState();
+  }
+
+  function openTrainingStage(drill) {
+    if (!drill?.training) return;
+    selectTrainingLibrary(drill.training.pathId, drill.training.stageNumber);
+  }
+
+  function startTrainingStage(drill) {
+    if (!drill?.training) return;
+    libraryView.section = "training";
+    libraryView.trainingPathId = drill.training.pathId;
+    trainingProgress = { ...trainingProgress, lastPathId: drill.training.pathId };
+    saveTrainingProgress();
+    selectLibraryDrill(drill.customSkillId ? "user" : "builtin", drill, "run");
+  }
+
+  function renderTrainingPanel() {
+    els.trainingPanel.replaceChildren();
+    const selectedPath = availableTrainingPaths().find(path => path.id === libraryView.trainingPathId);
+    if (!selectedPath) {
+      const intro = document.createElement("div");
+      intro.className = "training-intro";
+      intro.innerHTML = `<span><strong>Choose one skill</strong><span>Each path moves from a predictable feed to a more realistic pattern. Progress stays on this device.</span></span><button class="button primary compact" type="button" data-add-skill>+ Add skill</button>`;
+      intro.querySelector("[data-add-skill]").addEventListener("click", () => globalThis.dispatchEvent(new CustomEvent("ttrs:skill-ai", { detail: {} })));
+      els.trainingPanel.appendChild(intro);
+      const list = document.createElement("div");
+      list.className = "training-path-list";
+      for (const path of availableTrainingPaths()) {
+        const stages = trainingStages(path.id);
+        const completeCount = stages.filter(stageIsComplete).length;
+        const next = stages.find(stage => !stageIsComplete(stage)) || stages.at(-1);
+        const card = document.createElement("div");
+        card.className = "training-path-card-wrap";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `training-path-card${path.userOwned ? " user-owned" : ""}`;
+        button.style.setProperty("--training-accent", path.accent);
+        button.innerHTML = `<span class="training-path-top"><span class="training-path-name"><strong>${escapeHtml(path.name)}</strong>${path.userOwned ? '<em>User-created</em>' : ''}</span><span>${completeCount}/${stages.length}</span></span><small>${escapeHtml(path.description)}</small><span class="training-progress-track" aria-label="${completeCount} of ${stages.length} steps completed"><i style="width:${stages.length ? completeCount / stages.length * 100 : 0}%"></i></span><span class="training-path-next">${completeCount === stages.length ? "Review path" : `Next: ${escapeHtml(next?.training.title || "Start")}`} <b>›</b></span>`;
+        button.addEventListener("click", () => selectTrainingLibrary(path.id));
+        card.appendChild(button);
+        if (path.userOwned) {
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "training-path-delete";
+          deleteButton.setAttribute("aria-label", `Delete ${path.name}`);
+          deleteButton.title = "Delete skill";
+          deleteButton.textContent = "🗑";
+          deleteButton.addEventListener("click", () => askConfirm("Delete skill?", `Delete “${path.name}” and its practice drills?`, () => deleteCustomSkill(path.id)));
+          card.appendChild(deleteButton);
+        }
+        list.appendChild(card);
+      }
+      els.trainingPanel.appendChild(list);
+      return;
+    }
+
+    const stages = trainingStages(selectedPath.id);
+    const selectedStage = stages.find(drill => drill.training.stageNumber === libraryView.trainingStageNumber);
+    if (selectedStage) {
+      const stage = selectedStage.training;
+      const complete = stageIsComplete(selectedStage);
+      const lesson = document.createElement("article");
+      lesson.className = "training-lesson";
+      lesson.innerHTML = `<button class="training-lesson-back" type="button" aria-label="Back to ${escapeHtml(selectedPath.name)} progression">← <span>Progression</span></button><div class="training-lesson-heading"><span>${escapeHtml(selectedPath.name)} · ${escapeHtml(trainingUnitLabel(selectedStage))}</span><h2>${escapeHtml(stage.title)}</h2><p>${escapeHtml(stage.goal)}</p></div><section class="training-lesson-section focus"><span>What to do</span><p>${escapeHtml(stage.focus)}</p></section><section class="training-lesson-section target"><span>Complete when</span><p>${escapeHtml(stage.target)}</p></section><div class="training-lesson-actions"><button class="button primary wide" type="button" data-start-training="1">${complete ? "Practise this drill again" : "Start practice"}</button><small>${complete ? "You have completed this drill. Repeating it will not reset your progress." : "After the drill, record Not yet or Complete."}</small></div>`;
+      lesson.querySelector(".training-lesson-back").addEventListener("click", () => selectTrainingLibrary(selectedPath.id));
+      lesson.querySelector('[data-start-training="1"]').addEventListener("click", () => startTrainingStage(selectedStage));
+      els.trainingPanel.appendChild(lesson);
+      return;
+    }
+    const completeCount = stages.filter(stageIsComplete).length;
+    const head = document.createElement("div");
+    head.className = "training-path-header";
+    head.innerHTML = `<button class="training-back" type="button" aria-label="Back to skills">←</button><div><span>${completeCount} of ${stages.length} ${selectedPath.userOwned ? "practice drills" : "steps"} complete</span><h3>${escapeHtml(selectedPath.name)}</h3><p>${escapeHtml(selectedPath.description)}</p>${selectedPath.userOwned ? '<div class="training-owner-actions"><button class="button compact ghost" type="button" data-edit-skill>Edit with AI</button><button class="button compact danger" type="button" data-delete-skill>Delete skill</button></div>' : ''}</div>`;
+    head.querySelector("button").addEventListener("click", () => selectTrainingLibrary(null));
+    head.querySelector("[data-edit-skill]")?.addEventListener("click", () => globalThis.dispatchEvent(new CustomEvent("ttrs:skill-ai", { detail: { skillId: selectedPath.id } })));
+    head.querySelector("[data-delete-skill]")?.addEventListener("click", () => askConfirm("Delete skill?", `Delete “${selectedPath.name}” and its practice drills?`, () => deleteCustomSkill(selectedPath.id)));
+    els.trainingPanel.appendChild(head);
+
+    const stageList = document.createElement("div");
+    stageList.className = "training-stage-list";
+    for (const drill of stages) {
+      const stage = drill.training;
+      const complete = stageIsComplete(drill);
+      const card = document.createElement("article");
+      card.className = `training-stage-card${complete ? " complete" : ""}`;
+      card.innerHTML = `<div class="training-stage-number">${complete ? "✓" : stage.stageNumber}</div><div class="training-stage-copy"><span>${escapeHtml(trainingUnitLabel(drill))}</span><h4>${escapeHtml(stage.title)}</h4><p>${escapeHtml(stage.goal)}</p><button class="button primary wide" type="button">${complete ? "Review drill" : "View drill"}</button></div>`;
+      card.querySelector("button").addEventListener("click", () => openTrainingStage(drill));
+      stageList.appendChild(card);
+    }
+    els.trainingPanel.appendChild(stageList);
   }
 
   function selectLibraryDrill(source, drill, destination = "run") {
@@ -2454,8 +2982,25 @@
 
   function renderDrillList() {
     els.drillList.replaceChildren();
-    els.builtInLibraryTab.classList.toggle("active", libraryView.root === "builtin");
-    els.myDrillsLibraryTab.classList.toggle("active", libraryView.root === "user");
+    const trainingOpen = libraryView.section === "training";
+    const lessonOpen = trainingOpen && Number.isInteger(libraryView.trainingStageNumber);
+    document.body.classList.toggle("training-lesson-open", lessonOpen);
+    els.trainingLibraryTab.classList.toggle("active", trainingOpen);
+    els.builtInLibraryTab.classList.toggle("active", !trainingOpen && libraryView.root === "builtin");
+    els.myDrillsLibraryTab.classList.toggle("active", !trainingOpen && libraryView.root === "user");
+    els.trainingLibraryTab.setAttribute("aria-selected", String(trainingOpen));
+    els.builtInLibraryTab.setAttribute("aria-selected", String(!trainingOpen && libraryView.root === "builtin"));
+    els.myDrillsLibraryTab.setAttribute("aria-selected", String(!trainingOpen && libraryView.root === "user"));
+    els.trainingPanel.hidden = !trainingOpen;
+    els.libraryBrowserPanel.hidden = trainingOpen;
+    els.libraryEyebrow.textContent = trainingOpen ? "Guided practice" : "Drill library";
+    els.libraryTitle.textContent = trainingOpen ? "Skills" : libraryView.root === "user" ? "My drills" : "Drills";
+    els.librarySubtitle.textContent = trainingOpen ? "Build one skill at a time with guided practice." : libraryView.root === "user" ? "Create and organise your own robot drills." : "Choose a ready-made drill to run.";
+    if (trainingOpen) {
+      renderTrainingPanel();
+      renderLibraryEditState();
+      return;
+    }
     renderLibraryBreadcrumb();
 
     const query = String(libraryView.query || "").trim().toLowerCase();
@@ -2489,7 +3034,7 @@
       }
     }
 
-    const allInRoot = libraryView.root === "builtin" ? builtInCatalog.drills : library.drills;
+    const allInRoot = libraryView.root === "builtin" ? builtInCatalog.drills : library.drills.filter(drill => !drill.customSkillId);
     const pool = query
       ? allInRoot.filter(drill => {
           const haystack = `${drill.name} ${drill.description || ""} ${(drill.tags || []).join(" ")} ${folderLabelForDrill(libraryView.root, drill)}`.toLowerCase();
@@ -2539,7 +3084,7 @@
     if (!library || !builtInCatalog) return;
     const builtIn = isActiveBuiltIn();
     const currentFolder = libraryView.root === "user" ? folderById("user", libraryView.folderId) : null;
-    els.newDrillBtn.hidden = false;
+    els.newDrillBtn.hidden = libraryView.section === "training";
     els.newFolderBtn.hidden = libraryView.root !== "user";
     els.renameFolderBtn.hidden = libraryView.root !== "user" || !currentFolder;
     els.deleteFolderBtn.hidden = libraryView.root !== "user" || !currentFolder;
@@ -2575,7 +3120,7 @@
     }
 
     const builtInCount = builtInCatalog.drills.length;
-    const userCount = library.drills.length;
+    const userCount = library.drills.filter(drill => !drill.customSkillId).length;
     els.libraryStatus.textContent = `${builtInCount} built-in · ${userCount} My drill${userCount === 1 ? "" : "s"}`;
   }
 
@@ -6160,12 +6705,12 @@
     if (state.mode === "position") {
       const tiltStatus = state.tiltMessage ? `<p class="pose-tilt-status">${escapeHtml(state.tiltMessage)}</p>` : "";
       els.poseCalibrationGuide.innerHTML = `<div class="pose-essential-controls">
-          <label><span class="pose-symmetric-caption single"><span>yaw <output>${signed(state.pose.yawDeg,0)}°</output></span></span><input type="range" min="-180" max="180" step="1" value="${state.pose.yawDeg}" data-pose-installation="yawDeg"></label>
-          <label><span class="pose-symmetric-caption single"><span>pitch <output>${signed(state.pose.pitchDeg,1)}°</output></span></span><input type="range" min="-30" max="30" step="0.5" value="${pitchSliderDeg}" data-pose-installation="pitchSliderDeg"></label>
-          <label><span class="pose-symmetric-caption single"><span>roll <output>${signed(state.pose.rollDeg,1)}°</output></span></span><input type="range" min="-20" max="20" step="0.5" value="${state.pose.rollDeg}" data-pose-installation="rollDeg"></label>
-          <label><span class="pose-symmetric-caption triple"><span>left <output>${signed(leftEdgeCm,1)} cm</output></span><span>middle <output>${signed(middleOffsetCm,1)} cm</output></span><span>right <output>${signed(rightEdgeOffsetCm,1)} cm</output></span></span><input type="range" min="0" max="${tableWidthCm}" step="0.5" value="${leftEdgeCm}" data-pose-installation="leftEdgeCm"></label>
-          <label><span class="pose-symmetric-caption single"><span>back edge <output>${signed(state.pose.x*100,0)} cm</output></span></span><input type="range" min="-300" max="300" step="1" value="${state.pose.x*100}" data-pose-installation="xCm"></label>
-          <label><span class="pose-symmetric-caption double"><span>floor <output>${signed(baseHeightCm,0)} cm</output></span><span>table <output>${signed(state.pose.z*100,0)} cm</output></span></span><input type="range" min="${floorRangeMinCm}" max="${floorRangeMaxCm}" step="1" value="${baseHeightCm}" data-pose-installation="floorHeightCm"></label>
+          <label><span class="pose-symmetric-caption single"><span>yaw · <output>${signed(state.pose.yawDeg,0)}°</output></span></span><input type="range" min="-180" max="180" step="1" value="${state.pose.yawDeg}" data-pose-installation="yawDeg"></label>
+          <label><span class="pose-symmetric-caption single"><span>pitch · <output>${signed(state.pose.pitchDeg,1)}°</output></span></span><input type="range" min="-30" max="30" step="0.5" value="${pitchSliderDeg}" data-pose-installation="pitchSliderDeg"></label>
+          <label><span class="pose-symmetric-caption single"><span>roll · <output>${signed(state.pose.rollDeg,1)}°</output></span></span><input type="range" min="-20" max="20" step="0.5" value="${state.pose.rollDeg}" data-pose-installation="rollDeg"></label>
+          <label><span class="pose-symmetric-caption triple"><span>left · <output>${signed(leftEdgeCm,2)} cm</output></span><span>middle · <output>${signed(middleOffsetCm,2)} cm</output></span><span>right · <output>${signed(rightEdgeOffsetCm,2)} cm</output></span></span><input type="range" min="0" max="${tableWidthCm}" step="0.25" value="${leftEdgeCm}" data-pose-installation="leftEdgeCm"></label>
+          <label><span class="pose-symmetric-caption single"><span>back edge · <output>${signed(state.pose.x*100,0)} cm</output></span></span><input type="range" min="-300" max="300" step="1" value="${state.pose.x*100}" data-pose-installation="xCm"></label>
+          <label><span class="pose-symmetric-caption double"><span>floor · <output>${signed(baseHeightCm,0)} cm</output></span><span>table · <output>${signed(state.pose.z*100,0)} cm</output></span></span><input type="range" min="${floorRangeMinCm}" max="${floorRangeMaxCm}" step="1" value="${baseHeightCm}" data-pose-installation="floorHeightCm"></label>
         </div>
         <div class="pose-setup-actions"><button class="button secondary pose-sensor-action" type="button" data-pose-action="measure-tilt" ${tiltCapture ? "disabled" : ""}>${tiltCapture ? "Hold still…" : "Estimate roll+pitch using phone sensors"}</button><button class="button primary" type="button" data-pose-action="start">Start calibration shots</button></div>${tiltStatus}`;
     } else if (state.mode === "ready") {
@@ -8943,6 +9488,7 @@
     clone.folderId = library.folders.some(folder => folder.id === folderId) ? folderId : null;
     delete clone.builtIn;
     delete clone.libraryFolderId;
+    delete clone.training;
     clone.nodes.forEach(node => {
       const old = node.id;
       node.id = makeId(node.type);
@@ -9047,7 +9593,7 @@
     library.drills.push(clone);
     library.activeDrillSource = "user";
     library.activeDrillId = clone.id;
-    libraryView = { root: "user", folderId: clone.folderId, query: "" };
+    libraryView = { section: "browser", root: "user", folderId: clone.folderId, query: "", trainingPathId: null };
     els.librarySearchInput.value = "";
     selection = null;
     commit({ message: "Copied to My drills" });
@@ -9062,7 +9608,7 @@
     library.drills.push(clone);
     library.activeDrillSource = "user";
     library.activeDrillId = clone.id;
-    libraryView = { root: "user", folderId: clone.folderId || null, query: "" };
+    libraryView = { section: "browser", root: "user", folderId: clone.folderId || null, query: "", trainingPathId: null };
     selection = null;
     commit({ message: "Drill duplicated" });
   }
@@ -9183,7 +9729,7 @@
     if (!drill || isActiveBuiltIn()) return;
     const target = els.moveDrillFolderSelect.value || null;
     drill.folderId = library.folders.some(folder => folder.id === target) ? target : null;
-    libraryView = { root: "user", folderId: drill.folderId || null, query: "" };
+    libraryView = { section: "browser", root: "user", folderId: drill.folderId || null, query: "", trainingPathId: null };
     els.moveDrillDialog.close();
     commit({ message: "Drill moved" });
   }
@@ -9206,7 +9752,7 @@
     reader.addEventListener("load", () => {
       try {
         library = sanitizeLibrary(JSON.parse(String(reader.result)));
-        libraryView = { root: library.activeDrillSource === "user" ? "user" : "builtin", folderId: library.activeDrillSource === "user" ? (activeDrill()?.folderId || null) : (activeDrill()?.libraryFolderId || "builtin-root"), query: "" };
+        libraryView = { section: "browser", root: library.activeDrillSource === "user" ? "user" : "builtin", folderId: library.activeDrillSource === "user" ? (activeDrill()?.folderId || null) : (activeDrill()?.libraryFolderId || "builtin-root"), query: "", trainingPathId: null };
         selection = null;
         stopPlayback();
         commit({ message: "My drills, player models and calibration imported" });
@@ -9701,6 +10247,7 @@
     els.deleteSelectionBtn.addEventListener("click", deleteSelection);
     els.fitBtn.addEventListener("click", fitGraph);
 
+    els.trainingLibraryTab.addEventListener("click", () => selectTrainingLibrary());
     els.builtInLibraryTab.addEventListener("click", () => selectLibraryRoot("builtin"));
     els.myDrillsLibraryTab.addEventListener("click", () => selectLibraryRoot("user"));
     els.librarySearchInput.addEventListener("input", () => { libraryView.query = els.librarySearchInput.value; renderDrillList(); });
@@ -9934,7 +10481,10 @@
   const VISUAL_FIXTURE_NAMES = Object.freeze([
     "library", "run", "run-ball", "editor-graph", "add-node", "add-random", "add-repeat",
     "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
-    "pose-calibration", "robot", "calibration",
+    "pose-calibration", "robot", "calibration", "skill-add", "skill-add-proposal", "skill-custom", "skill-custom-overview", "skill-quality-report",
+    "skill-forehand-loop",
+    "skill-forehand-loop-1", "skill-forehand-loop-2", "skill-forehand-loop-3", "skill-forehand-loop-4",
+    "skill-forehand-loop-practice-1",
   ]);
 
   function prepareVisualFixtureScroll(name) {
@@ -9953,12 +10503,16 @@
     const requestedPage = Math.max(0, Number(new URLSearchParams(location.search).get("visualScrollPage")) || 0);
     const pageHeight = Math.max(1, target.clientHeight);
     const start = name === "editor-graph" ? target.scrollTop : 0;
-    const rootScreen = {
+    const rootScreen = name === "skill-forehand-loop-practice-1"
+      ? els.runScreen
+      : name === "skill-forehand-loop" || name.startsWith("skill-forehand-loop-")
+      ? els.libraryScreen
+      : ({
       library: els.libraryScreen,
       run: els.runScreen,
       "run-ball": els.runScreen,
       robot: els.robotScreen,
-    }[name];
+    }[name]);
     let maximum = Math.max(0, target.scrollHeight - pageHeight);
     if (rootScreen) {
       const contentBottom = Math.max(
@@ -10004,7 +10558,48 @@
     };
 
     if (name === "library") {
-      libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
+      libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: null };
+      navigateApp("library", { push: false });
+      renderAll();
+    } else if (name === "skill-quality-report") {
+      libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: null };
+      navigateApp("library", { push: false });
+      renderAll();
+      setTimeout(() => globalThis.dispatchEvent(new CustomEvent("ttrs:skill-quality-tests")), 0);
+    } else if (["skill-add", "skill-add-proposal", "skill-custom", "skill-custom-overview"].includes(name)) {
+      libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: null };
+      navigateApp("library", { push: false });
+      renderAll();
+      setTimeout(() => {
+        globalThis.dispatchEvent(new CustomEvent("ttrs:skill-ai", { detail: {} }));
+        if (name === "skill-add") return;
+        const prompt = document.getElementById("skillPrompt");
+        const generate = document.getElementById("skillGenerateBtn");
+        if (!prompt || !generate) return;
+        prompt.value = ["skill-custom", "skill-custom-overview"].includes(name)
+          ? "Teach me an aggresive forehand step aroun dopening straight down the line"
+          : "I want to improve my forehand counterloop against medium topspin.";
+        generate.click();
+        if (["skill-custom", "skill-custom-overview"].includes(name)) setTimeout(() => {
+          document.getElementById("skillSaveBtn")?.click();
+          if (name === "skill-custom-overview") setTimeout(() => document.querySelector(".training-back")?.click(), 0);
+        }, 0);
+      }, 0);
+    } else if (name === "skill-forehand-loop") {
+      libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: "forehand-loop" };
+      navigateApp("library", { push: false });
+      renderAll();
+    } else if (name === "skill-forehand-loop-practice-1") {
+      const fixtureDrill = builtInCatalog.drills.find(drill => drill.training?.pathId === "forehand-loop" && drill.training.stageNumber === 1);
+      if (!fixtureDrill) throw new Error("Missing forehand loop practice stage 1");
+      selectBuiltIn(fixtureDrill.name);
+      navigateApp("run", { push: false });
+      renderAll();
+    } else if (name.startsWith("skill-forehand-loop-")) {
+      const stageNumber = Number(name.at(-1));
+      const fixtureDrill = builtInCatalog.drills.find(drill => drill.training?.pathId === "forehand-loop" && drill.training.stageNumber === stageNumber);
+      if (!fixtureDrill) throw new Error(`Missing forehand loop stage ${stageNumber}`);
+      libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: "forehand-loop", trainingStageNumber: stageNumber };
       navigateApp("library", { push: false });
       renderAll();
     } else if (name === "run") {
@@ -10091,6 +10686,14 @@
     showVisualFixture,
     getLibrary: () => library,
     getActiveDrill: () => activeDrill(),
+    getCustomSkill: id => {
+      const skill = library.skills.find(item => item.id === id);
+      if (!skill) return null;
+      return { ...skill, stages: trainingStages(id).map(drill => ({ ...drill.training, drill: JSON.parse(JSON.stringify(drill)) })) };
+    },
+    saveCustomSkillProposal,
+    materializeIntuitiveSkillProposal,
+    deleteCustomSkill,
     getAiContext,
     isActiveBuiltIn: () => isActiveBuiltIn(),
     validateDrill,
@@ -10202,10 +10805,10 @@
     library = initializeLibrary();
     repairLibraryIfNeeded();
     liveTuning = loadLiveTuningPreference();
-    // Always start the browser at its root. The active drill can live in any
-    // folder, but entering the app should show the library structure rather
-    // than silently dropping the user inside that drill's folder.
-    libraryView = { root: "builtin", folderId: "builtin-root", query: "" };
+    // Start in guided training and resume only the last opened skill path.
+    // The active drill may live elsewhere, but it must not silently replace
+    // the player's learning context on launch.
+    libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: trainingProgress.lastPathId };
     bindEvents();
     els.graphWorld.style.transform = `scale(${graphZoom})`;
     els.graphSurface.style.width = `${SURFACE_WIDTH * graphZoom}px`;

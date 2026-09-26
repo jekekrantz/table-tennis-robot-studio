@@ -14,6 +14,19 @@ Captured 2026-09-04. These are product observations and future work, not complet
 
 ## Completed
 
+### Add guided skill development — completed 2026-09-22
+
+- Add Skills alongside the complete built-in drill catalog and My drills, with
+  the tab ordered after My drills while remaining the opening destination.
+- Provide four-step paths for forehand loop, forehand opening, and backhand
+  flip, backed by 12 purpose-built robot drills that progress from predictable
+  technique feeds to movement, variation, and recovery patterns.
+- Show one coaching focus and one observable completion target while running a
+  learning drill. Let the player record Not yet or Complete step, continue
+  directly to the next step, revisit any stage, and keep progress locally.
+- Treat this as self-assessed practice. The robot does not claim to judge stroke
+  quality without future video or sensor analysis.
+
 ### Support flexible robot installations — completed 2026-09-17
 
 - Ask whether the robot is supported by the table, floor, or another platform before pose calibration.

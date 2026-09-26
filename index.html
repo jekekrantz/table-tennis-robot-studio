@@ -27,35 +27,39 @@
     <main class="app-main">
       <section id="libraryScreen" class="app-screen library-screen" data-screen="library">
         <header class="screen-header">
-          <div><p class="eyebrow">Start here</p><h2>Drill library</h2><p>Choose a drill to run, or create your own.</p></div>
+          <div><p id="libraryEyebrow" class="eyebrow">Start here</p><h2 id="libraryTitle">Skills</h2><p id="librarySubtitle">Build one skill at a time with guided practice.</p></div>
           <button id="newDrillBtn" class="button primary screen-primary-action" type="button">＋ New drill</button>
         </header>
 
         <section class="library-panel panel-card">
           <div class="library-root-tabs" role="tablist" aria-label="Drill library source">
-            <button id="builtInLibraryTab" class="library-root-tab active" type="button">Built-in</button>
+            <button id="builtInLibraryTab" class="library-root-tab" type="button">Drills</button>
             <button id="myDrillsLibraryTab" class="library-root-tab" type="button">My drills</button>
+            <button id="trainingLibraryTab" class="library-root-tab active" type="button">Skills</button>
           </div>
-          <div class="library-search-row">
-            <label class="library-search"><span class="sr-only">Search drills</span><input id="librarySearchInput" type="search" placeholder="Search drills…" autocomplete="off"></label>
-            <button id="libraryMoreBtn" class="icon-button" type="button" title="Library actions" aria-label="Library actions">⋯</button>
-          </div>
-          <nav id="libraryBreadcrumb" class="library-breadcrumb" aria-label="Current drill folder"></nav>
-          <div id="drillList" class="drill-list library-browser"></div>
-          <div class="library-folder-actions">
-            <button id="newFolderBtn" class="button compact ghost" type="button">New folder</button>
-            <button id="renameFolderBtn" class="button compact ghost" type="button">Rename folder</button>
-            <button id="deleteFolderBtn" class="button compact ghost" type="button">Remove folder</button>
-          </div>
-          <p id="libraryStatus" class="library-status" aria-live="polite"></p>
-          <details id="libraryAdvancedActions" class="library-advanced-actions">
-            <summary>Import / export</summary>
-            <div class="library-actions-row">
-              <button id="importBtn" class="button ghost" type="button">Import My drills</button>
-              <button id="exportBtn" class="button ghost" type="button">Export My drills</button>
-              <input id="importInput" type="file" accept=".json,application/json" hidden>
+          <div id="trainingPanel" class="training-panel" aria-live="polite"></div>
+          <div id="libraryBrowserPanel" hidden>
+            <div class="library-search-row">
+              <label class="library-search"><span class="sr-only">Search drills</span><input id="librarySearchInput" type="search" placeholder="Search drills…" autocomplete="off"></label>
+              <button id="libraryMoreBtn" class="icon-button" type="button" title="Library actions" aria-label="Library actions">⋯</button>
             </div>
-          </details>
+            <nav id="libraryBreadcrumb" class="library-breadcrumb" aria-label="Current drill folder"></nav>
+            <div id="drillList" class="drill-list library-browser"></div>
+            <div class="library-folder-actions">
+              <button id="newFolderBtn" class="button compact ghost" type="button">New folder</button>
+              <button id="renameFolderBtn" class="button compact ghost" type="button">Rename folder</button>
+              <button id="deleteFolderBtn" class="button compact ghost" type="button">Remove folder</button>
+            </div>
+            <p id="libraryStatus" class="library-status" aria-live="polite"></p>
+            <details id="libraryAdvancedActions" class="library-advanced-actions">
+              <summary>Import / export</summary>
+              <div class="library-actions-row">
+                <button id="importBtn" class="button ghost" type="button">Import My drills</button>
+                <button id="exportBtn" class="button ghost" type="button">Export My drills</button>
+                <input id="importInput" type="file" accept=".json,application/json" hidden>
+              </div>
+            </details>
+          </div>
         </section>
       </section>
 
@@ -74,6 +78,8 @@
               <span id="runStatus" class="run-status" aria-live="polite"></span>
             </section>
           </section>
+
+          <section id="runTrainingCard" class="run-training-card panel-card" hidden></section>
 
           <section class="run-preview-card panel-card" aria-labelledby="runPreviewTitle">
             <div class="run-preview-heading">

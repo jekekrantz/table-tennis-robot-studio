@@ -32,6 +32,7 @@ for expected in [
     "poseCalibrationDialog", "poseCalibrationTableSvg", "poseCalibrationSideSvg", "poseCalibrationGuide",
     "placementChoiceDialog", "poseTopViewBtn", "poseSideViewBtn",
     "poseCalibrationConfidence", "savePoseCalibrationBtn", "cancelPoseCalibrationBtn",
+    "trainingLibraryTab", "trainingPanel", "libraryBrowserPanel", "runTrainingCard",
     "builtInLibraryTab", "myDrillsLibraryTab", "libraryBreadcrumb", "librarySearchInput",
     "newFolderBtn", "copyBuiltInBtn", "moveDrillBtn", "folderDialog", "moveDrillDialog",
     "libraryScreen", "runScreen", "editorScreen", "robotScreen",
@@ -121,6 +122,8 @@ for token in (
     'RobotGeometry.constants.NOVA_HEIGHT_M',
     'data-pose-installation="floorHeightCm"',
     'data-pose-installation="xCm"',
+    'data-pose-installation="leftEdgeCm"',
+    'step="0.25" value="${leftEdgeCm}" data-pose-installation="leftEdgeCm"',
 ):
     if token not in app:
         raise SystemExit(f"Missing fixed-pivot/base-back model integration: {token}")
@@ -334,8 +337,19 @@ for token in (
         raise SystemExit(f"Missing integrated feature UI: {token}")
 
 # Library/navigation semantics.
-if 'libraryView = { root: "builtin", folderId: "builtin-root", query: "" };' not in app:
-    raise SystemExit("Drill browser must start at the Built-in root")
+if 'libraryView = { section: "training", root: "builtin", folderId: "builtin-root", query: "", trainingPathId: trainingProgress.lastPathId };' not in app:
+    raise SystemExit("The app must start in guided training and resume the last opened skill path")
+for token in (
+    'const TRAINING_PATHS', 'function renderTrainingPanel()', 'function renderRunTrainingCard(',
+    'function openTrainingStage(', 'TRAINING_PROGRESS_STORAGE_KEY',
+    'What to do', 'Start practice', 'Complete step', 'Not yet',
+    '"forehand-loop"', '"forehand-opening"', '"backhand-flip"',
+):
+    if token not in app:
+        raise SystemExit(f"Missing guided skill progression behavior: {token}")
+for token in ('.training-lesson {', 'body.training-lesson-open', '.training-lesson-section p', '.training-lesson-actions .button'):
+    if token not in css:
+        raise SystemExit(f"Missing full-page skill lesson styling: {token}")
 for token in ('className = "library-parent-item"', 'Parent folder', 'path.at(-2)'):
     if token not in app:
         raise SystemExit(f"Missing explicit parent-folder navigation: {token}")
@@ -364,7 +378,7 @@ for removed_preset in ("Serve + third ball", "Two forehands then backhand", "Mat
         raise SystemExit(f"Removed built-in drill was recreated: {removed_preset}")
 if '>Restore defaults</button>' in html:
     raise SystemExit("Built-in drills must not rely on a destructive Restore defaults action")
-for token in ("Built-in", "My drills", "Copy to My drills", "New folder"):
+for token in (">Skills</button>", ">Drills</button>", "My drills", "Copy to My drills", "New folder"):
     if token not in html:
         raise SystemExit(f"Missing separated-library UI: {token}")
 if 'name: "Serve / receive"' not in app:
@@ -372,7 +386,7 @@ if 'name: "Serve / receive"' not in app:
 for token in ("makeBuiltInCatalog", "sanitizeLibrary", "builtIn = true", "stableIds.has(node.referencedDrillId)"):
     if token not in app:
         raise SystemExit(f"Missing separated-library model: {token}")
-for token in ('const DEFAULT_LIBRARY_VERSION = 9;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
+for token in ('const DEFAULT_LIBRARY_VERSION = 10;', 'DEFAULT_VARIATION_PROFILES', 'DEFAULT_SERVE_PRESETS',
               'variationProfile: "shortNeutral"', 'variationProfile: "short"', 'variationProfile: "rally"',
               'variationProfile: "deep"', 'variationProfile: "spin"',
               'variationProfile: "fast"', 'variationProfile: "serveShort"', 'variationProfile: "serveFast"',
