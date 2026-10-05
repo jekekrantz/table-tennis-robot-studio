@@ -43,6 +43,7 @@
     robotConnectBtn: $("robotConnectBtn"),
     robotStatusBtn: $("robotStatusBtn"),
     robotStatusText: $("robotStatusText"),
+    fullscreenBtn: $("fullscreenBtn"),
     calibrationBtn: $("calibrationBtn"),
     importBtn: $("importBtn"),
     exportBtn: $("exportBtn"),
@@ -258,6 +259,7 @@
     drillDetailsBtn: $("drillDetailsBtn"),
     editorAutosaveText: $("editorAutosaveText"),
     inspectorBackBtn: $("inspectorBackBtn"),
+    inspectorDeleteBtn: $("inspectorDeleteBtn"),
     inspectorNameField: $("inspectorNameField"),
     addNodeMenuBtn: $("addNodeMenuBtn"),
     addNodeDialog: $("addNodeDialog"),
@@ -358,6 +360,7 @@
   const intuitiveComputeRevisions = new Map();
   const intuitiveFeedbackByNodeId = new Map();
   const manualFeedbackByNodeId = new Map();
+  const trajectoryPlotBoundsByNodeId = new Map();
   const timingRangeCache = new Map();
   let shotVariationRng = ShotVariation?.createRng(Date.now());
 
@@ -1822,12 +1825,13 @@
     return cleanSkill;
   }
 
-  function materializeIntuitiveSkillProposal(source) {
+  function materializeIntuitiveSkillProposal(source, requestedPose = null) {
     const table = library.calibration.table;
+    const pose = requestedPose ? PoseCalibration.sanitizePose(requestedPose) : { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" };
     const planningCalibration = {
       ...library.calibration,
-      pose: { x: 0, y: 0, z: 0, yawDeg: 0, pitchDeg: 0, rollDeg: 0, placement: "table" },
-      placementMode: "table",
+      pose,
+      placementMode: pose.placement === "floor" || pose.placement === "other" ? "ground" : "table",
     };
     const bounds = novaFeasibleBounds(planningCalibration);
     const range = (value, fallback) => Array.isArray(value) && value.length === 2 ? value.map(Number) : fallback;
@@ -1907,6 +1911,94 @@
     }
     const failed = reports.filter(item => !item.feasible);
     return { valid:failed.length===0 && resolvedStages.length>0, proposal:{...source,stages:resolvedStages}, report:{valid:failed.length===0,summary:`${reports.length-failed.length}/${reports.length} proposed balls are feasible.`,shots:reports} };
+  }
+
+  function drillToIntuitivePlan(drill) {
+    if (!drill) return null;
+    const calibration = { ...library.calibration, pose: { ...drillPose(drill) } };
+    const outcomeRange = (values, digits) => values.map(value => rounded(value, digits));
+    const nodes = drill.nodes.map((node, index) => {
+      const base = { id: node.id, type: node.type, label: node.label, x: node.x, y: node.y };
+      if (!isBallNode(node)) {
+        if (node.type === "counter") return { ...base, startCount: node.startCount, clearOnNodeIds: [...(node.clearOnNodeIds || [])] };
+        if (node.type === "drill") return { ...base, referencedDrillId: node.referencedDrillId };
+        return base;
+      }
+      const prediction = novaFeasiblePrediction(node.params, calibration, trajectoryOptionsForNode(node, true))
+        || predictTrajectory(node.params, calibration, trajectoryOptionsForNode(node, true));
+      const landing = receiverLanding(prediction, node.type === "serve");
+      const variation = node.variation?.enabled ? ShotVariation.normalizeVariation(node.variation, node.params, prediction?.net?.clearanceM) : null;
+      const placement = variation?.placement || {};
+      const depth = landing ? (landing.x - prediction.table.length / 2) * 100 : 70;
+      const lateral = landing ? landing.y * 100 : 0;
+      const clearance = Number.isFinite(prediction?.net?.clearanceM) ? prediction.net.clearanceM * 100 : 10;
+      const rectangle = Number.isFinite(placement.depthMinCm);
+      return { ...base, outcome: {
+        depthCm: outcomeRange(rectangle ? [placement.depthMinCm, placement.depthMaxCm] : [Math.max(0, depth - (placement.depthCm || 10)), Math.min(137, depth + (placement.depthCm || 10))], 1),
+        lateralCm: outcomeRange(rectangle ? [placement.lateralMinCm, placement.lateralMaxCm] : [Math.max(-76, lateral - (placement.lateralCm || 10)), Math.min(76, lateral + (placement.lateralCm || 10))], 1),
+        speedMps: outcomeRange(variation ? [variation.speed.minMps, variation.speed.maxMps] : [Math.max(1, node.params.speedMps - .5), Math.min(20, node.params.speedMps + .5)], 1),
+        spinRps: outcomeRange(variation ? [variation.spin.minRps, variation.spin.maxRps] : [Math.max(-120, node.params.spinRps - 5), Math.min(120, node.params.spinRps + 5)], 1),
+        netClearanceCm: outcomeRange(variation ? [variation.clearance.minCm, variation.clearance.maxCm] : [Math.max(.2, clearance - 2), Math.min(80, clearance + 2)], 1),
+      } };
+    });
+    return {
+      format: "table-tennis-robot-studio/intuitive-drill", formatVersion: 1,
+      name: drill.name, description: drill.description || "", tags: [...(drill.tags || [])],
+      startNodeId: drill.startNodeId, settings: JSON.parse(JSON.stringify(drill.settings || {})), nodes,
+      edges: drill.edges.map(edge => ({ id:edge.id, source:edge.source, sourceSlot:edge.sourceSlot, target:edge.target, weight:edge.weight, delaySeconds:edge.delaySeconds, timingMode:edge.timingMode, autoSpeedPct:edge.autoSpeedPct })),
+    };
+  }
+
+  function materializeIntuitiveDrillPlan(plan, currentDrill = null) {
+    const ballNodes = plan.nodes.filter(node => isBallNodeType(node.type));
+    const synthetic = { format:"table-tennis-robot-studio/skill", formatVersion:2, name:plan.name, description:plan.description || "", accent:"#55c98c", stages:[{ title:plan.name, goal:plan.description || "Playable drill", focus:"Follow the drill pattern.", target:"Complete the requested repetitions.", drills:[{ name:plan.name, description:plan.description || "", repetitions:plan.settings?.repetitions ?? 3, adaptiveSpeedPct:plan.settings?.firstShotTiming?.speedPct ?? 100, balls:ballNodes.map(node => ({ id:node.id, type:node.type, label:node.label, outcome:node.outcome })) }] }] };
+    const requestedPose = currentDrill ? drillPose(currentDrill) : null;
+    const resolved = ballNodes.length ? materializeIntuitiveSkillProposal(synthetic, requestedPose) : { valid:true, proposal:{stages:[]}, report:{valid:true,summary:"No ball outcomes needed trajectory solving.",shots:[]} };
+    const resolvedBalls = new Map((resolved.proposal.stages[0]?.drill?.nodes || []).map(node => [node.id, node]));
+    const nodes = plan.nodes.map((node, index) => {
+      if (isBallNodeType(node.type)) return resolvedBalls.get(node.id) || { id:node.id, type:node.type, label:node.label, x:180+(index%4)*270, y:220+Math.floor(index/4)*210, params:{speedMps:6,spinRps:0,elevationDeg:10,aimDeg:0} };
+      if (node.type === "counter") return { id:node.id, type:"counter", label:String(node.label||"Repeater"), x:finite(node.x,180+(index%4)*270), y:finite(node.y,220+Math.floor(index/4)*210), startCount:Math.max(0,Math.round(finite(node.startCount,2))), clearOnNodeIds:Array.isArray(node.clearOnNodeIds)?node.clearOnNodeIds.map(String):[] };
+      if (node.type === "drill") return { id:node.id, type:"drill", label:String(node.label||"Sub-drill"), x:finite(node.x,180+(index%4)*270), y:finite(node.y,220+Math.floor(index/4)*210), referencedDrillId:String(node.referencedDrillId||"") };
+      return { id:node.id, type:"random", label:String(node.label||"Random choice"), x:finite(node.x,180+(index%4)*270), y:finite(node.y,220+Math.floor(index/4)*210) };
+    });
+    nodes.forEach((node, index) => { if (!Number.isFinite(node.x)) node.x=180+(index%4)*270;if(!Number.isFinite(node.y))node.y=220+Math.floor(index/4)*210; });
+    let edges = Array.isArray(plan.edges) ? plan.edges.map((edge,index)=>({ id:String(edge.id||`edge-${index+1}`), source:String(edge.source), sourceSlot:["next","branch","A","B"].includes(edge.sourceSlot)?edge.sourceSlot:"next", target:String(edge.target), weight:clamp(edge.weight,.01,100000,1), delaySeconds:clamp(edge.delaySeconds,0,3600,0), timingMode:edge.timingMode==="manual"?"manual":"adaptive", autoSpeedPct:clamp(edge.autoSpeedPct,50,200,100) })) : [];
+    if (!edges.length && nodes.every(node => isBallNode(node))) edges = nodes.slice(0,-1).map((node,index)=>({id:makeId("edge"),source:node.id,sourceSlot:"next",target:nodes[index+1].id,weight:1,delaySeconds:0,timingMode:"adaptive",autoSpeedPct:100}));
+    const drill = { id:currentDrill?.id || makeId("ai-drill"), name:String(plan.name||"AI drill").slice(0,90), description:String(plan.description||"").slice(0,600), tags:Array.isArray(plan.tags)?plan.tags.map(String).slice(0,20):[], robotPoseReference:"base_back", robotPose:currentDrill?.robotPose ? {...currentDrill.robotPose} : {x:0,y:0,z:0,yawDeg:0,pitchDeg:0,rollDeg:0,placement:"table"}, startNodeId:String(plan.startNodeId||nodes[0]?.id||""), settings:plan.settings||currentDrill?.settings||{repetitions:3,delayBetweenSets:0,firstShotTiming:{mode:"adaptive",speedPct:100}}, nodes, edges };
+    const structure = validateDrill(drill);
+    const failed = resolved.report.shots.filter(item => !item.feasible);
+    const report = { ...resolved.report, valid:failed.length===0&&structure.valid, summary:failed.length?resolved.report.summary:structure.valid?resolved.report.summary:`All balls are feasible, but the graph has ${structure.errors.length} structural error${structure.errors.length===1?"":"s"}.`, structureErrors:[...structure.errors] };
+    return { valid:report.valid, plan, drill, portable:{format:"table-tennis-robot-studio/drill",formatVersion:1,name:drill.name,description:drill.description,createdWith:"Table Tennis Robot Studio",createdAt:new Date().toISOString(),trainingGoal:"",level:"",instructions:"",drill}, report };
+  }
+
+  function getAiFeasibilityGuide(currentDrill = null) {
+    const reference = defaultDrill("AI feasibility reference");
+    reference.robotPose = { ...(currentDrill ? drillPose(currentDrill) : library.calibration?.pose || drillPose(reference)) };
+    const specs = [
+      ["shot", "shortNoSpin"],
+      ["shot", "shortBackspinBackhand"],
+      ["shot", "deepBackspinCenter"],
+      ["shot", "topspinElbow"],
+      ["shot", "deepTopspinForehand"],
+      ["shot", "deepTopspinBackhand"],
+      ["serve", "shortBackspinBackhand"],
+      ["serve", "shortNoSpinMiddle"],
+      ["serve", "fastLongTopspinBackhand"],
+    ];
+    const examples = [];
+    for (const [type, key] of specs) {
+      const node = type === "serve" ? presetServe(reference, key, null, true) : variedPresetShot(reference, key);
+      reference.nodes = [node]; reference.startNodeId = node.id; reference.edges = [];
+      const plan = drillToIntuitivePlan(reference);
+      const result = materializeIntuitiveDrillPlan(plan, reference);
+      const planned = plan.nodes[0];
+      if (result.valid && planned?.outcome) examples.push({ type, label:planned.label, outcome:planned.outcome });
+    }
+    return {
+      basis:"Locally verified with the current saved calibration and robot pose; outcome examples only.",
+      guidance:"Use these as feasible anchors. Preserve the requested placement/spin relationship, and widen ranges around a nearby anchor instead of combining unrelated extremes.",
+      examples,
+    };
   }
 
   function deleteCustomSkill(skillId) {
@@ -2215,6 +2307,12 @@
       }));
 
     drill.description = String(raw?.description || "").trim().slice(0, 600);
+    drill.aiHistory = (Array.isArray(raw?.aiHistory) ? raw.aiHistory : []).slice(-12).map(turn => ({
+      userRequest: String(turn?.userRequest || "").slice(0, 2000),
+      assistantOutput: turn?.assistantOutput && typeof turn.assistantOutput === "object" ? JSON.parse(JSON.stringify(turn.assistantOutput)) : null,
+      feasibility: turn?.feasibility && typeof turn.feasibility === "object" ? JSON.parse(JSON.stringify(turn.feasibility)) : null,
+      createdAt: String(turn?.createdAt || new Date().toISOString()),
+    }));
     if (raw?.training && typeof raw.training === "object") {
       drill.training = {
         pathId: String(raw.training.pathId || "").slice(0, 120),
@@ -2373,8 +2471,11 @@
 
   function getAiContext() {
     const calibrationOpen = Boolean(els.calibrationDialog?.open);
-    const screen = calibrationOpen ? "Calibration" : appViewLabel(appView);
-    const drillVisible = !calibrationOpen && (appView === "run" || appView === "editor");
+    const poseOpen = Boolean(els.poseCalibrationDialog?.open);
+    const addNodeOpen = Boolean(els.addNodeDialog?.open);
+    const modalOpen = calibrationOpen || poseOpen || addNodeOpen;
+    const screen = calibrationOpen ? "Calibration" : poseOpen ? "Robot placement" : addNodeOpen ? "Add drill node" : appViewLabel(appView);
+    const drillVisible = !calibrationOpen && !poseOpen && (appView === "run" || appView === "editor");
     const drill = drillVisible ? activeDrill() : null;
     const context = {
       screen,
@@ -2390,9 +2491,9 @@
       context.localContext.push(`Browsing: ${libraryView.root === "builtin" ? "Built-in drills" : "My drills"}`);
       context.localContext.push(`Folder: ${path}`);
       context.localContext.push(libraryView.query ? `Search filter: ${libraryView.query}` : "Search filter: none");
-    } else if (!calibrationOpen && appView === "robot") {
-      context.localContext.push(`Idle STOP: ${robotSettings.stopAfterNoShotMinutes ? `${robotSettings.stopAfterNoShotMinutes} minutes after the last shot` : "Never"}`);
-      context.localContext.push(`BLE disconnect: ${robotSettings.disconnectAfterMinutes ? `${robotSettings.disconnectAfterMinutes} minutes unused` : "Never"}`);
+    } else if (!modalOpen && appView === "robot") {
+      context.localContext.push(`Idle STOP: ${library.robotSettings.stopAfterNoShotMinutes ? `${library.robotSettings.stopAfterNoShotMinutes} minutes after the last shot` : "Never"}`);
+      context.localContext.push(`BLE disconnect: ${library.robotSettings.disconnectAfterIdleMinutes ? `${library.robotSettings.disconnectAfterIdleMinutes} minutes unused` : "Never"}`);
       context.localContext.push(`Adaptive timing player: ${activePlayerModel().name} at ${fmt(activePlayerModel().timingSpeedPct,0)}%`);
     } else if (!calibrationOpen && appView === "run" && drill) {
       context.localContext.push("Playback: continuous loops until stopped");
@@ -2402,15 +2503,45 @@
     } else if (calibrationOpen) {
       const section = els.calibrationPoseTab?.classList.contains("active") ? "Robot pose" : els.calibrationTableTab?.classList.contains("active") ? "Table and trajectory" : "Guided launch calibration";
       context.localContext.push(`Open section: ${section}`);
+    } else if (poseOpen) {
+      context.localContext.push("Open tool: Robot placement");
+    } else if (addNodeOpen) {
+      context.localContext.push(`Open tool: ${els.addNodeDialogTitle?.textContent || "Add to drill"}`);
     }
-    if (!calibrationOpen && appView === "editor" && selection?.kind === "node") {
+    if (!calibrationOpen && !poseOpen && drill && appView === "editor" && selection?.kind === "node") {
       const node = getNode(drill, selection.id);
       if (node) context.selection = `${node.type}: ${node.label}`;
-    } else if (!calibrationOpen && appView === "editor" && selection?.kind === "edge") {
+    } else if (!calibrationOpen && !poseOpen && appView === "editor" && selection?.kind === "edge") {
       context.selection = "shot transition";
       context.localContext.push("Editing the delay between two drill nodes");
     }
     return context;
+  }
+
+  function getAiActionCatalog() {
+    return {
+      screens: ["library", "run", "editor", "robot", "calibration"],
+      builtIns: (builtInCatalog?.drills || []).map(drill => ({
+        id: drill.id,
+        name: builtInDisplayName(drill.name),
+        folder: BUILT_IN_FOLDER_DEFS.find(folder => folder.id === drill.libraryFolderId)?.name || "Built-in drills",
+      })),
+    };
+  }
+
+  function performAiAction(action) {
+    if (action?.action === "open_builtin_drill") {
+      const drill = builtInCatalog.drills.find(item => item.id === String(action.builtInDrillId));
+      if (!drill) throw new Error("That built-in drill is not available.");
+      selectLibraryDrill("builtin", drill, "run");
+      return `Opened ${builtInDisplayName(drill.name)}`;
+    }
+    if (action?.action === "open_screen") {
+      if (action.screen === "calibration") openCalibrationWorkspace("guided");
+      else navigateApp(action.screen, { push: true });
+      return `Opened ${action.screen}`;
+    }
+    throw new Error("Unsupported UI action.");
   }
 
   function navigateApp(view, { push = true, allowBuiltInEditor = false } = {}) {
@@ -2446,6 +2577,11 @@
     renderRobotSetupSummary();
   }
 
+  function syncVisualViewportHeight() {
+    const height = Math.max(320, Math.round(window.visualViewport?.height || window.innerHeight));
+    document.documentElement.style.setProperty("--app-viewport-height", `${height}px`);
+  }
+
   function goBackApp() {
     inspectorOpen = false;
     document.body.classList.remove("details-open");
@@ -2469,6 +2605,12 @@
     document.body.classList.remove("details-open");
     renderInspector();
     renderGraph();
+  }
+
+  function renderInspectorWithoutJumping() {
+    const scrollTop = els.inspectorContent.scrollTop;
+    renderInspector();
+    els.inspectorContent.scrollTop = scrollTop;
   }
 
   function activeDrillDescription(drill = activeDrill()) {
@@ -3100,6 +3242,7 @@
     els.addDrillNodeBtn.disabled = builtIn;
     els.addCounterBtn.disabled = builtIn;
     els.deleteSelectionBtn.disabled = builtIn;
+    if (els.inspectorDeleteBtn) els.inspectorDeleteBtn.disabled = builtIn;
 
     const inspector = els.inspectorContent;
     inspector.querySelectorAll("input,select,textarea,button").forEach(control => {
@@ -3943,7 +4086,7 @@
     });
   }
 
-  function deleteSelection() {
+  function deleteSelection(options = {}) {
     if (!activeDrillEditable()) { toast("Built-in presets are read-only. Copy it to My drills to edit."); return; }
     const drill = activeDrill();
     if (!drill || !selection) return;
@@ -3958,16 +4101,47 @@
 
     const node = getNode(drill, selection.id);
     if (!node) return;
+    const confirmed = options === true || options?.confirmed === true;
+    if (!confirmed) {
+      askConfirm(
+        "Remove this node?",
+        `Remove “${node.label}” from the drill? The previous and next nodes will be reconnected when there is one clear next path.`,
+        () => deleteSelection({ confirmed: true }),
+        { actionLabel: "Remove node", actionClass: "danger" }
+      );
+      return;
+    }
+    const incomingEdges = incoming(drill, node.id).map(edge => ({ ...edge }));
+    const outgoingEdges = outgoing(drill, node.id).map(edge => ({ ...edge }));
+    const singleSuccessor = outgoingEdges.length === 1 ? outgoingEdges[0] : null;
     drill.nodes = drill.nodes.filter(n => n.id !== node.id);
     drill.edges = drill.edges.filter(e => e.source !== node.id && e.target !== node.id);
+    let repaired = 0;
+    if (singleSuccessor && getNode(drill, singleSuccessor.target)) {
+      for (const edge of incomingEdges) {
+        if (edge.source === singleSuccessor.target || !getNode(drill, edge.source)) continue;
+        drill.edges.push({
+          ...edge,
+          target: singleSuccessor.target,
+          delaySeconds: singleSuccessor.delaySeconds,
+          timingMode: singleSuccessor.timingMode,
+          autoSpeedPct: singleSuccessor.autoSpeedPct,
+        });
+        repaired += 1;
+      }
+    }
     for (const candidate of drill.nodes) {
       if (candidate.type === "counter") candidate.clearOnNodeIds = candidate.clearOnNodeIds.filter(id => id !== node.id);
     }
-    if (drill.startNodeId === node.id) drill.startNodeId = drill.nodes[0]?.id ?? null;
+    if (drill.startNodeId === node.id) {
+      drill.startNodeId = singleSuccessor && getNode(drill, singleSuccessor.target)
+        ? singleSuccessor.target
+        : drill.nodes[0]?.id ?? null;
+    }
     selection = null;
     inspectorOpen = false;
     document.body.classList.remove("details-open");
-    commit({ message: `Deleted “${node.label}”` });
+    commit({ message: repaired ? `Removed “${node.label}” and reconnected ${repaired} path${repaired === 1 ? "" : "s"}` : `Removed “${node.label}”` });
   }
 
   function renderInspector() {
@@ -3975,12 +4149,14 @@
     if (!drill || !selection) {
       document.body.classList.remove("ball-details");
       if (els.inspectorNameField) els.inspectorNameField.hidden = true;
+      if (els.inspectorDeleteBtn) els.inspectorDeleteBtn.hidden = true;
       els.inspectorContent.innerHTML = `<div class="empty-inspector"><h2>Inspector</h2><p>Select a node or connection.</p></div>`;
       return;
     }
     if (selection.kind === "edge") {
       document.body.classList.remove("ball-details");
       if (els.inspectorNameField) els.inspectorNameField.hidden = true;
+      if (els.inspectorDeleteBtn) els.inspectorDeleteBtn.hidden = true;
       const edge = getEdge(drill, selection.id);
       if (!edge) { selection = null; renderInspector(); return; }
       renderEdgeInspector(drill, edge);
@@ -4012,20 +4188,25 @@
   function renderNodeInspector(drill, node) {
     document.body.classList.toggle("ball-details", isBallNode(node));
     if (els.inspectorNameField) { els.inspectorNameField.hidden = false; els.inspectorNameField.value = node.label; }
+    if (els.inspectorDeleteBtn) {
+      els.inspectorDeleteBtn.hidden = false;
+      els.inspectorDeleteBtn.disabled = !activeDrillEditable();
+    }
     let html = "";
 
-    if (isBallNode(node)) html += shotInspectorHtml(node);
+    if (isBallNode(node)) html += shotInspectorHtml(node) + ballOutputHtml(drill, node);
     else if (node.type === "random") html += randomInspectorHtml(drill, node);
     else if (node.type === "drill") html += drillNodeInspectorHtml(drill, node);
     else html += counterInspectorHtml(drill, node);
 
-    if (!isBallNode(node)) html += incomingHtml(drill, node);
+    html += incomingHtml(drill, node);
     els.inspectorContent.innerHTML = html;
     bindCommonInspector(drill, node);
     if (isBallNode(node)) bindShotInspector(drill, node);
     else if (node.type === "random") bindRandomInspector(drill, node);
     else if (node.type === "drill") bindDrillNodeInspector(drill, node);
     else bindCounterInspector(drill, node);
+    bindConnectionRows(drill);
   }
 
   function shotInspectorHtml(node) {
@@ -4441,15 +4622,42 @@
     `;
   }
 
+  function ballOutputHtml(drill, node) {
+    return `
+      <section class="connection-section node-output-section">
+        <h3>Output</h3>
+        ${singleConnectionRowHtml(drill, node, outgoing(drill, node.id)[0] ?? null, "next")}
+      </section>
+    `;
+  }
+
+  function incomingSourceOptions(drill, targetNodeId, selectedId = null) {
+    return drill.nodes
+      .filter(candidate => candidate.id !== targetNodeId)
+      .map(candidate => `<option value="${attr(candidate.id)}"${candidate.id === selectedId ? " selected" : ""}>${escapeHtml(candidate.label)} · ${candidate.type}</option>`)
+      .join("");
+  }
+
   function incomingHtml(drill, node) {
     const edges = incoming(drill, node.id);
     return `
-      <section class="connection-section">
-        <h3>Incoming paths</h3>
+      <section class="connection-section node-input-section">
+        <h3>Input</h3>
+        <label class="field"><span>Drill START points to</span><select class="drill-start-node-field">${nodeOptions(drill, drill.startNodeId, false)}</select></label>
         ${edges.length ? edges.map(edge => {
           const source = getNode(drill, edge.source);
-          return `<button class="button wide ghost incoming-edge-button" data-edge-id="${attr(edge.id)}" type="button">← ${escapeHtml(source?.label || "Missing")} · ${edgeTimingLabel(drill, edge)}</button>`;
-        }).join("") : `<p class="helper">No incoming paths.</p>`}
+          const slot = source?.type === "counter" ? (edge.sourceSlot === "A" ? "Repeat" : "Finish") : source?.type === "random" ? "Weighted path" : "Next";
+          return `<div class="connection-row incoming-connection-row">
+            <label><span>Previous node · ${slot}</span><select class="incoming-source-field" data-edge-id="${attr(edge.id)}">${incomingSourceOptions(drill, node.id, edge.source)}</select></label>
+            <button class="incoming-edge-button" data-edge-id="${attr(edge.id)}" type="button" title="Edit timing" aria-label="Edit incoming connection timing">${edgeTimingLabel(drill, edge)}</button>
+            <button class="remove-connection" data-remove-edge="${attr(edge.id)}" type="button" title="Remove input">×</button>
+          </div>`;
+        }).join("") : `<p class="helper">No previous node points here${drill.startNodeId === node.id ? "; this is the START node" : ""}.</p>`}
+        <div class="add-row add-input-row">
+          <label class="field"><span>Add input from</span><select class="add-incoming-source-field"><option value="">Choose node</option>${incomingSourceOptions(drill, node.id)}</select></label>
+          <button class="button add-incoming-button" type="button">Add</button>
+        </div>
+        <p class="helper">Choose END in an output to finish the set. START and END are part of the drill path even though they do not fire a ball.</p>
       </section>
     `;
   }
@@ -4709,7 +4917,7 @@
     await yieldToUi();
     if (!isCurrent()) return;
     saveLibrary();
-    renderInspector();
+    renderInspectorWithoutJumping();
     await yieldToUi();
     if (!isCurrent()) return;
     renderGraph();
@@ -4916,8 +5124,35 @@
       const maxText = container.querySelector(".interval-max");
       const minRange = container.querySelector(".range-min");
       const maxRange = container.querySelector(".range-max");
+      let lastCommittedText = `${minText.value}\u0000${maxText.value}`;
+      const paintTrackOnly = () => {
+        const key = intervalRangeKey(container);
+        const spec = INTUITIVE_RANGE_SPECS[key];
+        const domainMin = finite(container.dataset.domainMin, spec.min);
+        const domainMax = finite(container.dataset.domainMax, spec.max);
+        const span = Math.max(spec.step, domainMax - domainMin);
+        const lo = clamp(minRange.value, domainMin, domainMax, domainMin);
+        const hi = clamp(maxRange.value, domainMin, domainMax, domainMax);
+        const track = container.querySelector(".dual-range");
+        track.style.setProperty("--range-start", `${(lo - domainMin) / span * 100}%`);
+        track.style.setProperty("--range-end", `${(hi - domainMin) / span * 100}%`);
+      };
       const sync = (source, commitChange = false) => {
-        if ((source === minText || source === maxText) && ["", "-", ".", "-."].includes(source.value.trim()) && !commitChange) return;
+        const textSource = source === minText || source === maxText;
+        if (textSource && !commitChange) {
+          const draft = source.value.trim();
+          if (["", "-", ".", "-."].includes(draft)) return;
+          const parsed = Number(draft);
+          if (!Number.isFinite(parsed)) return;
+          const key = intervalRangeKey(container);
+          const spec = INTUITIVE_RANGE_SPECS[key];
+          const domainMin = finite(container.dataset.domainMin, spec.min);
+          const domainMax = finite(container.dataset.domainMax, spec.max);
+          const inputMin = key === "clearance" ? spec.min : domainMin;
+          (source === minText ? minRange : maxRange).value = clamp(parsed, inputMin, domainMax, parsed);
+          paintTrackOnly();
+          return;
+        }
         let lo = source === minRange ? finite(minRange.value) : finite(minText.value, finite(minRange.value));
         let hi = source === maxRange ? finite(maxRange.value) : finite(maxText.value, finite(maxRange.value));
         const key = intervalRangeKey(container);
@@ -4934,7 +5169,19 @@
       };
       [minText, maxText].forEach(input => {
         input.addEventListener("input", () => sync(input));
-        input.addEventListener("change", () => sync(input, true));
+        const commitText = () => {
+          const currentText = `${minText.value}\u0000${maxText.value}`;
+          if (currentText === lastCommittedText) return;
+          sync(input, true);
+          lastCommittedText = `${minText.value}\u0000${maxText.value}`;
+        };
+        input.addEventListener("change", commitText);
+        input.addEventListener("keydown", event => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          commitText();
+          input.blur();
+        });
       });
       [minRange, maxRange].forEach(input => {
         input.addEventListener("input", () => sync(input));
@@ -4997,7 +5244,10 @@
     const profile = profileShotVariation(node, 24);
     if (!profile.ok) manualFeedbackByNodeId.set(node.id, '<strong class="trajectory-miss">No valid shot exists inside all four launch intervals.</strong>');
     else manualFeedbackByNodeId.delete(node.id);
-    commit();
+    saveLibrary();
+    renderInspectorWithoutJumping();
+    renderGraph();
+    renderValidation();
   }
 
   function bindManualShotInspector(node) {
@@ -5011,7 +5261,6 @@
       drill.edges.push({ id: makeId("edge"), source: node.id, sourceSlot: "branch", target, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
       commit({ message: "Weighted path added" });
     });
-    bindConnectionRows(drill);
   }
 
   function bindDrillNodeInspector(drill, node) {
@@ -5019,7 +5268,6 @@
       node.referencedDrillId = event.target.value || null;
       commit();
     });
-    bindConnectionRows(drill);
   }
 
   function bindCounterInspector(drill, node) {
@@ -5030,10 +5278,50 @@
       if (!input.checked) node.clearOnNodeIds = node.clearOnNodeIds.filter(item => item !== id);
       commit({ render: false });
     }));
-    bindConnectionRows(drill);
+  }
+
+  function availableOutputSlot(drill, source, ignoredEdgeId = null) {
+    if (!source) return null;
+    if (source.type === "random") return "branch";
+    const slots = source.type === "counter" ? ["B", "A"] : ["next"];
+    return slots.find(slot => !drill.edges.some(edge => edge.id !== ignoredEdgeId && edge.source === source.id && edge.sourceSlot === slot)) || null;
   }
 
   function bindConnectionRows(drill) {
+    els.inspectorContent.querySelectorAll(".drill-start-node-field").forEach(select => select.addEventListener("change", () => {
+      drill.startNodeId = select.value || drill.nodes[0]?.id || null;
+      commit({ message: "Drill start updated" });
+    }));
+
+    els.inspectorContent.querySelectorAll(".incoming-source-field").forEach(select => select.addEventListener("change", () => {
+      const edge = getEdge(drill, select.dataset.edgeId);
+      const source = getNode(drill, select.value);
+      if (!edge || !source) return;
+      const slot = source.id === edge.source ? edge.sourceSlot : availableOutputSlot(drill, source, edge.id);
+      if (!slot) {
+        toast(`“${source.label}” has no unused output. Change its output first.`);
+        renderInspector();
+        return;
+      }
+      edge.source = source.id;
+      edge.sourceSlot = slot;
+      commit({ message: "Previous node updated" });
+    }));
+
+    els.inspectorContent.querySelectorAll(".add-incoming-button").forEach(button => button.addEventListener("click", () => {
+      const container = button.closest(".node-input-section");
+      const source = getNode(drill, container?.querySelector(".add-incoming-source-field")?.value);
+      const targetId = selection?.kind === "node" ? selection.id : null;
+      if (!source || !targetId) return;
+      const slot = availableOutputSlot(drill, source);
+      if (!slot) {
+        toast(`“${source.label}” has no unused output. Change its output first.`);
+        return;
+      }
+      drill.edges.push({ id: makeId("edge"), source: source.id, sourceSlot: slot, target: targetId, weight: 1, delaySeconds: 0, timingMode: "adaptive", autoSpeedPct: 100 });
+      commit({ message: "Input path added" });
+    }));
+
     els.inspectorContent.querySelectorAll(".edge-target-field").forEach(select => select.addEventListener("change", () => {
       const edgeId = select.dataset.edgeId;
       let edge = edgeId ? getEdge(drill, edgeId) : null;
@@ -6066,11 +6354,18 @@
     const representativePoints = segments(representative).flat();
     const xs = allPoints.concat(representativePoints).map(point => point.x).concat([0, table.length]);
     const zs = allPoints.concat(representativePoints).map(point => point.z).concat([table.netHeight]);
-    const bounds = {
+    const measuredBounds = {
       minX: Math.min(...xs) - .03,
       maxX: Math.max(...xs) + .03,
       maxY: Math.max(...zs) + .02,
     };
+    const previousBounds = trajectoryPlotBoundsByNodeId.get(node.id);
+    const bounds = previousBounds ? {
+      minX: Math.min(previousBounds.minX, measuredBounds.minX),
+      maxX: Math.max(previousBounds.maxX, measuredBounds.maxX),
+      maxY: Math.max(previousBounds.maxY, measuredBounds.maxY),
+    } : measuredBounds;
+    trajectoryPlotBoundsByNodeId.set(node.id, bounds);
     // This compact editor plot deliberately gives height its own scale. Keeping
     // a single physical x/z scale left most of a phone-width SVG empty and made
     // the arc-height differences unreadable.
@@ -8982,14 +9277,16 @@
   }
 
   async function startPlayback() {
-    if (calibrationTestRunning) { toast("Stop the calibration test shot first."); return; }
+    els.runStatus.textContent = "Checking drill and robot…";
+    if (calibrationTestRunning) { els.runStatus.textContent = "Stop the calibration test shot first"; toast("Stop the calibration test shot first."); return; }
     const drill = activeDrill();
-    if (!drill) return;
+    if (!drill) { els.runStatus.textContent = "Choose a drill first"; return; }
     const validation = validateDrill(drill);
-    if (!validation.valid) { toast("Fix drill errors before playing."); return; }
+    if (!validation.valid) { els.runStatus.textContent = "Fix drill errors before playing"; toast("Fix drill errors before playing."); return; }
     if (validation.trajectoryWarnings.length) {
       const acknowledgementKey = trajectoryWarningAcknowledgementKey(drill, validation.trajectoryWarnings);
       if (!acknowledgedTrajectoryWarnings.has(acknowledgementKey)) {
+        els.runStatus.textContent = "Waiting for trajectory confirmation…";
         askConfirm(
           "Play despite trajectory warning?",
           trajectoryWarningAcknowledgementText(validation.trajectoryWarnings),
@@ -9000,6 +9297,7 @@
       }
     }
     if (!poseStaleAcknowledged && PoseCalibration.isStale(currentPoseSession())) {
+      els.runStatus.textContent = "Waiting for robot-position confirmation…";
       askConfirm(
         "Check the robot position?",
         "This saved position has not been used or checked in two weeks. If the robot may have moved, cancel and choose Update pose. Otherwise continue with the saved position.",
@@ -9008,8 +9306,9 @@
       );
       return;
     }
-    if (!robot) { toast("Robot controller module did not load."); return; }
+    if (!robot) { els.runStatus.textContent = "Robot controller unavailable"; toast("Robot controller module did not load."); return; }
     if (!robot.connected || !robot.authenticated) {
+      els.runStatus.textContent = "Connect Nova to start the drill";
       requestRobotConnection("Play drill", () => startPlayback());
       return;
     }
@@ -9026,6 +9325,7 @@
     activeNodeRef = null;
     activeEdgeRef = null;
     runtimeCounterDisplay = new Map();
+    els.runStatus.textContent = "Preparing the first ball…";
     updatePlayButton();
     currentPoseSession().lastRobotUseAt = new Date().toISOString();
     saveLibrary();
@@ -9140,8 +9440,6 @@
     const playbackStillRequested = () => playbackRunning && token === playbackToken;
 
     try {
-      await robot.ensureReadyForStart();
-      if (!playbackStillRequested()) return;
       if (infinite) {
         let currentBatch = takeNextBatch();
         if (!currentBatch) throw new Error("The drill produced no playable shots.");
@@ -9152,13 +9450,17 @@
         currentBatch = retuneIfNeeded(currentBatch);
         const firstRecord = currentBatch.shots[0].record;
         const startPacket = Protocol.buildStartPacket([firstRecord], { mode: 3, value: 0, sequence: 0 });
-        showActiveBatch(currentBatch, "starting continuous stream");
+        const firstPause = currentBatch.shots[0].encodedDelay;
+        showActiveBatch(currentBatch, "checking Nova Ready…");
         let ballBaseline = robot.ballCounter;
+        const startRequestedAt = performance.now();
         const started = await robot.beginBatch(startPacket, {
           description: "endless one-slot stream",
           shouldStart: playbackStillRequested,
         });
         if (started == null || !playbackStillRequested()) return;
+        robot.log(`Ready check, heartbeat, and Start accepted in ${Math.round(performance.now() - startRequestedAt)} ms · first-ball pre-pause ${fmt(firstPause,2)} s`);
+        showActiveBatch(currentBatch, `started · first ball in about ${fmt(firstPause,1)}s`);
         const liveContext = {
           token,
           currentBatch,
@@ -9222,13 +9524,17 @@
             value: segment.batches.length,
             sequence: 0,
           });
-          showActiveBatch(currentBatch, `starting ${segment.batches.length}-shot stream`);
+          const firstPause = currentBatch.shots[0].encodedDelay;
+          showActiveBatch(currentBatch, "checking Nova Ready…");
           let ballBaseline = robot.ballCounter;
+          const startRequestedAt = performance.now();
           const started = await robot.beginBatch(startPacket, {
             description: `${segment.batches.length}-shot one-slot stream`,
             shouldStart: playbackStillRequested,
           });
           if (started == null || !playbackStillRequested()) break;
+          robot.log(`Ready check, heartbeat, and Start accepted in ${Math.round(performance.now() - startRequestedAt)} ms · first-ball pre-pause ${fmt(firstPause,2)} s`);
+          showActiveBatch(currentBatch, `started · first ball in about ${fmt(firstPause,1)}s`);
           const liveContext = {
             token,
             currentBatch,
@@ -10214,7 +10520,42 @@
     els.calibrationDialog.showModal();
   }
 
+  function fullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function updateFullscreenButton() {
+    if (!els.fullscreenBtn) return;
+    const active = Boolean(fullscreenElement());
+    const label = active ? "Exit full screen" : "Enter full screen";
+    els.fullscreenBtn.setAttribute("aria-label", label);
+    els.fullscreenBtn.title = label;
+    els.fullscreenBtn.setAttribute("aria-pressed", String(active));
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (fullscreenElement()) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (!exit) throw new Error("Fullscreen exit is not available");
+        await exit.call(document);
+      } else {
+        const root = document.documentElement;
+        const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+        if (!enter) throw new Error("Fullscreen is not available");
+        await enter.call(root);
+      }
+    } catch (_) {
+      toast("This browser does not allow full screen here.");
+      updateFullscreenButton();
+    }
+  }
+
   function bindEvents() {
+    els.fullscreenBtn?.addEventListener("click", () => { void toggleFullscreen(); });
+    document.addEventListener("fullscreenchange", updateFullscreenButton);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+    updateFullscreenButton();
     els.robotConnectBtn.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotDialogConnectBtn?.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotStatusBtn.addEventListener("click", () => navigateApp("robot", { push: true }));
@@ -10236,6 +10577,7 @@
     els.runDrillMenuBtn?.addEventListener("click", openDrillDetails);
     els.drillDetailsBtn?.addEventListener("click", openDrillDetails);
     els.inspectorBackBtn?.addEventListener("click", closeInspectorScreen);
+    els.inspectorDeleteBtn?.addEventListener("click", () => deleteSelection());
 
     els.addNodeMenuBtn?.addEventListener("click", openAddNodeMenu);
     els.closeAddNodeDialogBtn?.addEventListener("click", () => els.addNodeDialog.close());
@@ -10463,7 +10805,10 @@
       if (callback) callback();
     });
 
-    window.addEventListener("resize", () => renderGraph());
+    syncVisualViewportHeight();
+    window.addEventListener("resize", () => { syncVisualViewportHeight(); renderGraph(); });
+    window.visualViewport?.addEventListener("resize", syncVisualViewportHeight);
+    window.visualViewport?.addEventListener("scroll", syncVisualViewportHeight);
     const emergencyPageExit = () => {
       clearRobotIdleTimer();
       clearRobotIdleStopTimer();
@@ -10686,6 +11031,9 @@
     showVisualFixture,
     getLibrary: () => library,
     getActiveDrill: () => activeDrill(),
+    drillToIntuitivePlan,
+    materializeIntuitiveDrillPlan,
+    getAiFeasibilityGuide,
     getCustomSkill: id => {
       const skill = library.skills.find(item => item.id === id);
       if (!skill) return null;
@@ -10695,6 +11043,8 @@
     materializeIntuitiveSkillProposal,
     deleteCustomSkill,
     getAiContext,
+    getAiActionCatalog,
+    performAiAction,
     isActiveBuiltIn: () => isActiveBuiltIn(),
     validateDrill,
     saveLibrary,

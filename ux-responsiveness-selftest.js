@@ -54,8 +54,10 @@ assert(!/^\s*renderInspector\(\);\s*$/m.test(liveTuning), "Run tuning must not u
 // double-click activation cannot immediately reverse the first click.
 const playback = functionBody(app, "startPlayback");
 assert(playback.includes("const playbackStillRequested"));
-assert(playback.includes("if (!playbackStillRequested()) return;"));
+assert(playback.includes("started == null || !playbackStillRequested()"));
 assert.strictEqual((playback.match(/shouldStart: playbackStillRequested/g) || []).length, 3);
+assert.strictEqual((playback.match(/robot[.]ensureReadyForStart[(]/g) || []).length, 0, "Play must not perform a duplicate Ready check before beginBatch");
+assert(playback.includes("first ball in about"), "Play must explain the Nova's encoded first-ball pre-pause after Start is accepted");
 assert(app.includes("if (event.detail > 1) return;"));
 
 // Unit-test the controller gate with pessimistic asynchronous delays. These
@@ -168,7 +170,7 @@ function profileGuiValidTuning() {
   const profile = profileGuiValidTuning();
   // Deployment protection: preflight already checks full bundle equality; these
   // checks make failures explain the missing UX guarantees directly.
-  for (const token of ["shouldStart: playbackStillRequested", 'if (appView === "editor") renderInspector()', "if (event.detail > 1) return;", "progressiveShotEnvelopeCloud", "performance.now() - sliceStarted < 6"]) {
+  for (const token of ["shouldStart: playbackStillRequested", "first ball in about", 'if (appView === "editor") renderInspector()', "if (event.detail > 1) return;", "progressiveShotEnvelopeCloud", "performance.now() - sliceStarted < 6"]) {
     assert(bundle.includes(token), `Generated deployment bundle is missing UX protection: ${token}`);
   }
   console.log(`UX responsiveness self-test PASS · solver p95 ${profile.p95.toFixed(2)} ms · max ${profile.max.toFixed(2)} ms · ${profile.maxEvaluations} evaluations max`);

@@ -40,14 +40,19 @@ for expected in [
     "addServeBtn",
     "editorRunBtn", "robotDiagnosticsBtn", "robotDialogContext",
     "robotDialogConnectBtn",
-    "aiGlobalBtn", "robotIdleStopInput", "robotIdleStopStatus",
+    "fullscreenBtn", "aiGlobalBtn", "robotIdleStopInput", "robotIdleStopStatus",
     "robotIdleDisconnectInput", "robotIdleStatus",
     "playerModelSelect", "playerTimingSpeed", "newPlayerModelBtn",
     "duplicatePlayerModelBtn", "deletePlayerModelBtn",
-    "inspectorBackBtn", "inspectorNameField", "inspectorAiMount",
+    "inspectorBackBtn", "inspectorDeleteBtn", "inspectorNameField", "inspectorAiMount",
 ]:
     if expected not in ids:
         raise SystemExit(f"Missing required UI control: {expected}")
+
+for token in ('function toggleFullscreen()', 'requestFullscreen || root.webkitRequestFullscreen',
+              'document.addEventListener("fullscreenchange", updateFullscreenButton)'):
+    if token not in app:
+        raise SystemExit(f"Missing full-screen behavior: {token}")
 
 if 'data-player-model-field="spinChangeRecognitionSeconds"' not in html:
     raise SystemExit("Missing advanced spin-change recognition setting")
@@ -91,9 +96,14 @@ for token in ("postBouncePoints", "secondBounce", "postBounceClipped", "thirdArc
               'SECOND_BOUNCE_COLOR = "#ff79c6"', 'THIRD_BOUNCE_COLOR = "#ffd166"', "trajectory-bounce-legend"):
     if token not in app:
         raise SystemExit(f"Missing post-bounce trajectory integration: {token}")
-for token in ('drillVisible = !calibrationOpen', 'context.localContext.push(`Browsing:', 'contextualDrill(context)', 'APP_CAPABILITIES', 'Ask about drills or the library'):
+for token in ('drillVisible = !calibrationOpen && !poseOpen', 'context.localContext.push(`Browsing:', 'contextualDrill(context)', 'APP_CAPABILITIES', 'Ask about drills or the library'):
     if token not in app and token not in features and token not in core:
         raise SystemExit(f"Missing screen-aware AI context behavior: {token}")
+for token in ('resolveAssistantIntent', 'open_builtin_drill', 'getAiActionCatalog', 'performAiAction', 'data-modal-ai'):
+    if token not in app and token not in features and token not in core:
+        raise SystemExit(f"Missing allow-listed AI navigation behavior: {token}")
+if 'library.robotSettings.disconnectAfterIdleMinutes' not in app:
+    raise SystemExit("Robot AI context must use the persisted idle-disconnect setting")
 if 'Math.abs(table.netHeight - regulationTable().netHeight) > 1e-6' not in app:
     raise SystemExit("default regulation net height label must stay hidden in trajectory views")
 
@@ -226,6 +236,45 @@ if 'difficult to sample' in app or 'Narrow one or more intervals' in app:
     raise SystemExit("Broad allowed intervals must be internally compressed rather than rejected")
 if 'id="inspectorCloseBtn"' in html or '<strong>Details</strong>' in html:
     raise SystemExit("Shot inspector must use one hierarchical back/name/AI header")
+for token in (
+    'aria-label="Save and close drill"',
+    'aria-label="Save and close node"',
+    '"Remove this node?"',
+    'const singleSuccessor = outgoingEdges.length === 1',
+    'target: singleSuccessor.target',
+    'function ballOutputHtml',
+    'Drill START points to',
+    'Add input from',
+    'Choose END in an output to finish the set.',
+    'function availableOutputSlot',
+    'function syncVisualViewportHeight',
+    'window.visualViewport?.addEventListener("resize", syncVisualViewportHeight)',
+    'function renderInspectorWithoutJumping',
+    'trajectoryPlotBoundsByNodeId.get(node.id)',
+):
+    if token not in app and token not in html:
+        raise SystemExit(f"Missing direct node editing/mobile editor behavior: {token}")
+for token in (
+    '--app-viewport-height', '.save-done-button', '.inspector-delete-button',
+    '.incoming-connection-row', 'overflow-y:auto',
+):
+    if token not in css:
+        raise SystemExit(f"Missing direct node editing/mobile editor style: {token}")
+for token in (
+    'if (textSource && !commitChange)',
+    '(source === minText ? minRange : maxRange).value',
+    'input.addEventListener("change", commitText)',
+    'if (event.key !== "Enter") return;',
+):
+    if token not in app:
+        raise SystemExit(f"Range text entry must defer interval correction until commit: {token}")
+for token in (
+    "returnView: 'library'",
+    "aiState.returnView=context.screen==='Run drill'?'run'",
+    "api.navigateApp(target,{push:false,allowBuiltInEditor:true})",
+):
+    if token not in features:
+        raise SystemExit(f"AI apply must return to the invoking workflow: {token}")
 for token in ('liveTuningInlineHtml(p, node.type)', 'testShotVariationBtn', 'variationDepthField'):
     if token in app:
         raise SystemExit(f"Obsolete manual shot-editor clutter remains: {token}")

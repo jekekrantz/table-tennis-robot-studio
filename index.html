@@ -15,6 +15,10 @@
       <p id="topbarContext">Drill library</p>
     </div>
     <div class="topbar-actions">
+      <button id="fullscreenBtn" class="fullscreen-button" type="button" aria-label="Enter full screen" title="Enter full screen">
+        <svg class="fullscreen-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+        <svg class="fullscreen-exit-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+      </button>
       <button id="aiGlobalBtn" class="global-ai-button" type="button" aria-label="Open AI assist">✨ <span>AI</span></button>
       <button id="robotStatusBtn" class="global-robot-status disconnected" type="button" aria-label="Open robot controls">
         <span class="robot-status-dot" aria-hidden="true"></span>
@@ -120,7 +124,7 @@
 
       <section id="editorScreen" class="app-screen editor-screen" data-screen="editor" hidden>
         <header class="screen-header editor-screen-header">
-          <button id="editorBackBtn" class="screen-back-button" type="button" aria-label="Back">←</button>
+          <button id="editorBackBtn" class="screen-back-button save-done-button" type="button" aria-label="Save and close drill" title="Save and close drill">✓</button>
           <div class="screen-title-grow"><p class="eyebrow">Drill editor</p><h2 id="activeDrillTitle">Drill</h2><p id="editorAutosaveText">Autosaved locally</p></div>
           <button id="drillDetailsBtn" class="button compact ghost" type="button">Drill details</button>
           <button id="editorRunBtn" class="button compact primary" type="button">▶ Run drill</button>
@@ -144,7 +148,7 @@
           </section>
 
           <aside class="inspector panel editor-inspector" aria-label="Details">
-            <header class="inspector-screen-header"><button id="inspectorBackBtn" class="screen-back-button" type="button" aria-label="Back to graph">←</button><input id="inspectorNameField" type="text" maxlength="90" aria-label="Name" hidden><span id="inspectorAiMount"></span></header>
+            <header class="inspector-screen-header"><button id="inspectorBackBtn" class="screen-back-button save-done-button" type="button" aria-label="Save and close node" title="Save and close node">✓</button><input id="inspectorNameField" type="text" maxlength="90" aria-label="Name" hidden><button id="inspectorDeleteBtn" class="icon-button inspector-delete-button" type="button" aria-label="Delete node" title="Delete node" hidden>⌫</button><span id="inspectorAiMount"></span></header>
             <div id="inspectorContent" class="inspector-content"><div class="empty-inspector"><h2>Nothing selected</h2><p>Tap a node or connection to inspect it.</p></div></div>
           </aside>
         </div>
@@ -535,7 +539,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-09-07.11" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-10-05.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

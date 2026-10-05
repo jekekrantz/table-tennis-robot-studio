@@ -3,21 +3,80 @@
   const DRILL_VERSION=1;
   const SKILL_FORMAT='table-tennis-robot-studio/skill';
   const SKILL_VERSION=2;
+  const INTUITIVE_DRILL_FORMAT='table-tennis-robot-studio/intuitive-drill';
+  const INTUITIVE_DRILL_VERSION=1;
+  const ASSISTANT_ACTION_FORMAT='table-tennis-robot-studio/assistant-action';
+  const ASSISTANT_ACTION_VERSION=1;
   const MAX_SHARE_CHARS=12000;
   const MAX_FILE_BYTES=512*1024;
   const MAX_NODES=240;
   const MAX_EDGES=600;
   const APP_CAPABILITIES=`Table Tennis Robot Studio is a browser-based controller and drill builder for Pongbot Nova.
 - Library: browse built-in drills or My drills, use folders and search, create drills, and import/export or share drills.
-- Run: preview sampled receiver-side landing positions, calibrate the robot pose, play continuously until Stop, and use Player tuning while a drill runs. Timing is authored on drill graph connections.
+- Run: preview sampled receiver-side landing positions, calibrate the robot pose, play continuously until Stop, and use Player tuning while a drill runs. Timing is authored on drill graph connections. Starting may include app-side preparation before the first ball: reconnecting or initializing Nova when needed, waiting for Ready, preparing the first command batch, and honoring first-shot timing.
 - Drill editor: build sequences with Shot, Serve, Random choice, Repeat/loop, and Sub-drill nodes; configure placement, speed, spin, trajectory, variation, and timing.
 - Robot: connect/disconnect Nova, select and edit saved player models for Adaptive Auto timing, inspect status and diagnostics, open calibration, and configure idle STOP and BLE-disconnect timers. Idle STOP leaves BLE connected for a quick re-initialization; BLE disconnect releases the radio and requires reconnecting later.
 - Calibration: guided launch calibration, robot-pose calibration, and table/trajectory model settings.
-- AI assist: answer app questions or create/revise validated drills. AI suggestions never directly control the robot; the app validates drill structure and ranges, and the user still applies and starts a drill.`;
+- AI assist: answer app questions or create/revise validated drills. AI suggestions never directly control the robot; the app validates drill structure and ranges, and the user still applies and starts a drill.
+- Spin capability: the intuitive outcome API controls only forward/backward spin (topspin, backspin, or no-spin). It cannot request sidespin. If a user asks for sidespin, explain this limitation explicitly instead of creating or labeling a substitute drill.`;
+  function normalizedWords(value){return String(value||'').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,' ').trim();}
+  function editDistance(a,b){a=normalizedWords(a).replace(/ /g,'');b=normalizedWords(b).replace(/ /g,'');const row=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i+=1){let prev=row[0];row[0]=i;for(let j=1;j<=b.length;j+=1){const hold=row[j];row[j]=Math.min(row[j]+1,row[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));prev=hold;}}return row[b.length];}
+  function builtInMatch(prompt,catalog=[]){
+    const text=normalizedWords(prompt).replace(/\b(built in|builtin|drill|preset|please|the|a|an|open|show|find|run|play|start|take me to|i want(?: to)?(?: do)?|give me|get me)\b/g,' ').replace(/\s+/g,' ').trim();
+    if(!text)return null;let best=null;
+    for(const item of Array.isArray(catalog)?catalog:[]){const name=normalizedWords(item?.name);if(!name)continue;const distance=editDistance(text,name),score=distance/Math.max(text.replace(/ /g,'').length,name.replace(/ /g,'').length,1);if(name.includes(text)||text.includes(name)||score<=.34){if(!best||score<best.score)best={item,score};}}
+    return best?.item||null;
+  }
+  function resolveAssistantIntent(prompt,{builtIns=[],hasCurrentDrill=false,currentScreen=''}={}){
+    const raw=String(prompt||'').trim(),text=normalizedWords(raw);
+    const asksToOpen=/\b(open|show|find|run|play|start|take me to|go to|go back to)\b/.test(text);
+    const asksForBuiltInChoices=/\b(?:which|what|show me|find)\b.*\b(?:built in|builtin)\b.*\bdrills\b/.test(text);
+    const asksForSidespin=/\b(?:side spin|sidespin)\b/.test(text);
+    const directNavigationQuestion=/^(?:can|could|would) you (?:open|show|take)\b/.test(text);
+    const imperativeDoNot=/^(?:do not|don t)\b/.test(text);
+    const isQuestion=!directNavigationQuestion&&!imperativeDoNot&&(/^(?:how|where|what|why|when|which|can|could|would|will|does|do|is|are|should)\b/.test(text)||/\?$/.test(raw));
+    const explicitFresh=/\b(?:completely new|brand new|new drill|separate drill|new(?: [a-z0-9-]+){0,8} (?:drill|copy)|(?:copy|duplicate)\b.*\b(?:pattern|current|this|drill)|instead of (?:adding|editing)|keep\b.*\b(?:built in|builtin|original|current drill)\b.*\bunchanged)\b/.test(text);
+    const explicitCreate=/\b(?:create|build|design|generate)(?: me)?\b/.test(text)||/\bmake (?:me|a new|an? .* new)\b/.test(text);
+    const editMutation=hasCurrentDrill&&(/\b(?:add|prepend|change|modify|reduce|increase|slow|slower|faster|keep|leave|give|move|set)\b/.test(text)||/^start (?:this|the|same)\b/.test(text));
+    const catalogMatch=builtInMatch(raw,builtIns);
+    if(asksForSidespin)return {action:'answer'};
+    if(asksForBuiltInChoices)return {action:'answer'};
+    if(isQuestion)return {action:'answer'};
+    if(asksToOpen&&/\b(?:built in|builtin|preset)\b/.test(text)&&!/\b(?:copy|duplicate|new)\b/.test(text)&&catalogMatch)return {action:'open_builtin_drill',builtInDrillId:String(catalogMatch.id),destination:'run'};
+    if(asksToOpen){
+      if(/\b(robot|nova)( settings| setup| screen)?\b/.test(text))return {action:'open_screen',screen:'robot'};
+      if(/\bcalibrat/.test(text))return {action:'open_screen',screen:'calibration'};
+      if(/\b(library|drill library|my drills|built in drills)\b/.test(text))return {action:'open_screen',screen:'library'};
+      if(/\b(editor|edit drill)\b/.test(text)&&hasCurrentDrill)return {action:'open_screen',screen:'editor'};
+      if(/\b(run screen|current drill|this drill)\b/.test(text)&&hasCurrentDrill&&!editMutation)return {action:'open_screen',screen:'run'};
+    }
+    if(explicitFresh||explicitCreate||(!hasCurrentDrill&&/\bmake\b.*\b(?:drill|pattern)\b/.test(text)))return {action:'create_drill',destination:currentScreen==='Run drill'?'run':'editor'};
+    if(editMutation)return {action:'edit_drill',destination:currentScreen==='Run drill'?'run':'editor'};
+    if(/\b(built in|builtin|preset)\b/.test(text)){const match=builtInMatch(raw,builtIns);if(match)return {action:'open_builtin_drill',builtInDrillId:String(match.id),destination:'run'};}
+    if(asksToOpen){
+      if(catalogMatch)return {action:'open_builtin_drill',builtInDrillId:String(catalogMatch.id),destination:'run'};
+    }
+    if(catalogMatch&&/\b(?:want to do|want the|use the|select)\b/.test(text))return {action:'open_builtin_drill',builtInDrillId:String(catalogMatch.id),destination:'run'};
+    if(hasCurrentDrill&&!/^(how|where|what|why|help)\b/.test(text))return {action:'edit_drill',destination:currentScreen==='Run drill'?'run':'editor'};
+    return {action:'answer'};
+  }
+  function validateAssistantAction(data,{builtIns=[]}={}){
+    const errors=[];if(!data||typeof data!=='object'||Array.isArray(data))errors.push('The assistant action must be an object.');
+    if(data?.format!==ASSISTANT_ACTION_FORMAT)errors.push(`Expected format ${ASSISTANT_ACTION_FORMAT}.`);
+    if(Number(data?.formatVersion)!==ASSISTANT_ACTION_VERSION)errors.push(`Unsupported assistant action version ${data?.formatVersion??'missing'}.`);
+    const action=String(data?.action||'');if(!['create_drill','edit_drill','open_builtin_drill','open_screen','answer'].includes(action))errors.push('Unsupported assistant action.');
+    if(['create_drill','edit_drill'].includes(action)&&!validateIntuitiveDrillPlan(data?.drillPlan).valid)errors.push('A create/edit action needs a valid drillPlan.');
+    if(action==='open_builtin_drill'&&!builtIns.some(item=>String(item?.id)===String(data?.builtInDrillId)))errors.push('The built-in drill ID is not available.');
+    if(action==='open_screen'&&!['library','run','editor','robot','calibration'].includes(String(data?.screen)))errors.push('The screen is not available.');
+    if(action==='answer'&&!String(data?.answer||'').trim())errors.push('An answer action needs answer text.');
+    return {valid:errors.length===0,errors:[...new Set(errors)]};
+  }
+  function parseExternalAssistantAction(text,options={}){for(const candidate of extractJsonCandidates(text).reverse()){try{const obj=JSON.parse(candidate),check=validateAssistantAction(obj,options);if(check.valid)return clone(obj);}catch(_){}}throw new Error('No valid Table Tennis Robot Studio assistant action was found in the AI response.');}
   function clone(v){return JSON.parse(JSON.stringify(v));}
   function makePortableDrill(drill,meta={}){
     if(!drill||typeof drill!=='object')throw new Error('A drill is required.');
-    return {format:DRILL_FORMAT,formatVersion:DRILL_VERSION,name:String(drill.name||'Shared drill').slice(0,90),description:String(drill.description||'').slice(0,600),createdWith:'Table Tennis Robot Studio',createdAt:meta.createdAt||new Date().toISOString(),trainingGoal:meta.trainingGoal||drill.trainingGoal||'',level:meta.level||drill.level||'',instructions:meta.instructions||drill.instructions||'',drill:clone(drill)};
+    const clean=clone(drill);delete clean.aiHistory;delete clean.training;delete clean.customSkillId;
+    return {format:DRILL_FORMAT,formatVersion:DRILL_VERSION,name:String(drill.name||'Shared drill').slice(0,90),description:String(drill.description||'').slice(0,600),createdWith:'Table Tennis Robot Studio',createdAt:meta.createdAt||new Date().toISOString(),trainingGoal:meta.trainingGoal||drill.trainingGoal||'',level:meta.level||drill.level||'',instructions:meta.instructions||drill.instructions||'',drill:clean};
   }
   function validateShotVariation(variation,errors){
     if(!variation?.enabled)return;
@@ -129,6 +188,92 @@
       "- Outcome ranges describe the ROBOT'S INCOMING FEED. A requested direction for the player's return (for example, open down the line) belongs in focus/target coaching text; do not move the incoming feed to that return target."
     );
   }
+  function validateIntuitiveDrillPlan(data){
+    const errors=[];
+    if(!data||typeof data!=='object'||Array.isArray(data))errors.push('The drill plan must be an object.');
+    if(data?.format!==INTUITIVE_DRILL_FORMAT)errors.push(`Expected format ${INTUITIVE_DRILL_FORMAT}.`);
+    if(Number(data?.formatVersion)!==INTUITIVE_DRILL_VERSION)errors.push(`Unsupported intuitive drill version ${data?.formatVersion??'missing'}.`);
+    if(!String(data?.name||'').trim())errors.push('The drill needs a name.');
+    const nodes=Array.isArray(data?.nodes)?data.nodes:[],edges=Array.isArray(data?.edges)?data.edges:[];
+    if(!nodes.length||nodes.length>MAX_NODES)errors.push(`A drill needs 1 to ${MAX_NODES} nodes.`);
+    if(edges.length>MAX_EDGES)errors.push(`A drill may contain at most ${MAX_EDGES} connections.`);
+    const ids=new Set();
+    nodes.forEach((node,index)=>{
+      const id=String(node?.id||'');if(!id)errors.push(`Node ${index+1} needs an id.`);else if(ids.has(id))errors.push(`Node id ${id} is duplicated.`);else ids.add(id);
+      if(!['shot','serve','random','drill','counter'].includes(node?.type))errors.push(`Node ${id||index+1} has unsupported type ${String(node?.type)}.`);
+      if(node?.type==='shot'||node?.type==='serve'){
+        const o=node?.outcome||{};
+        for(const [key,min,max]of[['depthCm',0,137],['lateralCm',-76,76],['speedMps',1,20],['spinRps',-120,120],['netClearanceCm',.2,80]])if(!rangePair(o[key],min,max))errors.push(`Node ${id||index+1} ${key} must be a [minimum, maximum] range inside ${min}…${max}.`);
+      }
+      if(node?.type==='drill'&&!String(node?.referencedDrillId||''))errors.push(`Sub-drill node ${id||index+1} needs referencedDrillId.`);
+    });
+    if(data?.startNodeId&&!ids.has(String(data.startNodeId)))errors.push('startNodeId does not name a node.');
+    edges.forEach((edge,index)=>{
+      if(!ids.has(String(edge?.source))||!ids.has(String(edge?.target)))errors.push(`Connection ${index+1} references a missing node.`);
+      if(!['next','branch','A','B'].includes(edge?.sourceSlot))errors.push(`Connection ${index+1} has an unsupported sourceSlot.`);
+    });
+    return {valid:errors.length===0,errors:[...new Set(errors)].slice(0,20)};
+  }
+  function parseExternalIntuitiveDrillResult(text){
+    const valid=[];for(const candidate of extractJsonCandidates(text)){try{const obj=JSON.parse(candidate);const check=validateIntuitiveDrillPlan(obj);if(check.valid)valid.push(obj);}catch(_){}}
+    if(!valid.length)throw new Error('No valid intuitive Table Tennis Robot Studio drill was found in the AI response.');
+    return clone(valid.at(-1));
+  }
+  function drillHistoryText(history){const safe=(Array.isArray(history)?history:[]).slice(-12).map((turn,index)=>({turn:index+1,userRequest:String(turn?.userRequest||'').slice(0,2000),assistantOutput:turn?.assistantOutput||null,feasibility:turn?.feasibility||null}));return safe.length?`DRILL CREATION/EDIT HISTORY (oldest to newest):\n${JSON.stringify(safe,null,2)}\n\n`:'';}
+  function safeFeasibilityGuide(guide){
+    if(!guide||typeof guide!=='object')return null;
+    const examples=(Array.isArray(guide.examples)?guide.examples:[]).slice(0,12).map(item=>({type:item?.type==='serve'?'serve':'shot',label:String(item?.label||'Feasible example').slice(0,80),outcome:clone(item?.outcome||{})})).filter(item=>['depthCm','lateralCm','speedMps','spinRps','netClearanceCm'].every(key=>rangePair(item.outcome[key],key==='lateralCm'?-76:key==='spinRps'?-120:key==='netClearanceCm'?.2:key==='speedMps'?1:0,key==='depthCm'?137:key==='lateralCm'?76:key==='speedMps'?20:key==='spinRps'?120:80)));
+    return examples.length?{basis:String(guide.basis||'Locally verified feasible outcome examples.').slice(0,240),guidance:String(guide.guidance||'Use these as anchors, not hard limits.').slice(0,320),examples}:null;
+  }
+  function buildExternalDrillRequestBase({userRequest='',currentPlan=null,history=[],appContext=null,feasibilityGuide=null}={}){
+    const safeContext=appContext&&typeof appContext==='object'?{screen:String(appContext.screen||''),activeDrill:appContext.activeDrill?String(appContext.activeDrill):null,drillSource:appContext.drillSource?String(appContext.drillSource):null,selection:appContext.selection?String(appContext.selection):null,localContext:Array.isArray(appContext.localContext)?appContext.localContext.slice(0,8).map(item=>String(item).slice(0,160)):[]}:null;
+    const guide=safeFeasibilityGuide(feasibilityGuide);
+    return `You design one executable table-tennis robot drill for a Pongbot Nova. The app, not you, converts desired ball outcomes into physical launch parameters.\n\nPLAYER REQUEST:\n${userRequest||'(no request supplied)'}\n\n${drillHistoryText(history)}${currentPlan?`CURRENT DRILL IN THE SAME INTUITIVE API (preserve anything not requested):\n${JSON.stringify(currentPlan,null,2)}\n\n`:''}VISIBLE APP CONTEXT:\n${safeContext?JSON.stringify(safeContext,null,2):'(none)'}\n\n${guide?`CURRENT CALIBRATED FEASIBILITY GUIDE (outcomes only; do not expose or infer hidden robot parameters):\n${JSON.stringify(guide,null,2)}\n\n`:''}INTUITIVE BALL API AND COORDINATES:\n- Output desired outcomes, never wheel values, launch elevation, launch aim, PWM, calibration coefficients, or protocol commands.\n- The coordinate frame is fixed to the table: the robot normally stands centered at the back edge of its table half and faces the receiver. The app applies the saved calibrated robot pose when it solves the outcomes.\n- depthCm is on the RECEIVER half: 0 at the net, 137 at the receiver end line.\n- lateralCm is from center: positive toward the ROBOT'S LEFT (right-handed receiver's forehand), negative toward robot's right.\n- speedMps is launch speed. spinRps: positive topspin, negative backspin, near-zero no-spin. netClearanceCm is above the net top.\n- Each is an inclusive [minimum, maximum] interval matching the player's Intuitive editor. Prefer useful ranges over identical endpoints.\n- shot placement is its receiver-side first bounce. serve placement is its receiver-side second physical bounce.\n- Outcome ranges describe the incoming robot feed, not the direction of the player's return.\n\nDRILL GRAPH API:\n- Ball node types: shot and serve. Structural types: random and counter. A current drill may also contain a drill node with referencedDrillId: preserve it when editing, but never invent a new sub-drill reference because unrelated saved drills are not shared with you.\n- A shot/serve node has id, type, label, and outcome. random selects one outgoing branch using positive edge weights. counter uses startCount and A/B edges for Repeat/Finish.\n- Connections use source, sourceSlot (next, branch, A, or B), target, weight, timingMode, delaySeconds, and autoSpeedPct. adaptive timing normally uses autoSpeedPct 50…200; manual timing uses delaySeconds.\n- Missing outgoing connection ends a path. Every path should terminate. Keep graphs compact and purposeful.\n- settings.repetitions: 0 repeats indefinitely, otherwise 1…999999. firstShotTiming uses {"mode":"adaptive","speedPct":100} or {"mode":"manual","delaySeconds":1}.\n\nTABLE-TENNIS DEFAULTS:\n- Assume a right-handed receiver unless stated. wide FH/BH means receiver forehand/backhand; elbow is crossover; deep is near the end line; short normally needs a serve node when two table bounces are required.\n- Falkenberg means backhand, forehand from backhand corner, wide forehand. Match-like means controlled, purposeful uncertainty rather than chaos.\n- Make feeds train the stated action. State important assumptions in description.\n\nReturn exactly one JSON object, without prose, using this schematic contract:\n{"format":"${INTUITIVE_DRILL_FORMAT}","formatVersion":${INTUITIVE_DRILL_VERSION},"name":"...","description":"...","tags":["..."],"startNodeId":"ball-1","settings":{"repetitions":3,"delayBetweenSets":0,"firstShotTiming":{"mode":"adaptive","speedPct":100}},"nodes":[{"id":"ball-1","type":"shot","label":"Backspin to backhand","outcome":{"depthCm":[65,85],"lateralCm":[-55,-38],"speedMps":[4.6,5.5],"spinRps":[-24,-15],"netClearanceCm":[8,14]}}],"edges":[]}.\n\nMaximum ${MAX_NODES} nodes and ${MAX_EDGES} connections. The app will return per-ball feasibility feedback and nearest modeled outcomes when a combination cannot be produced.`;
+  }
+  function buildExternalDrillRequest(input={}){
+    return buildExternalDrillRequestBase(input).replace(
+      "- Each is an inclusive [minimum, maximum] interval matching the player's Intuitive editor. Prefer useful ranges over identical endpoints.",
+      "- Each is an inclusive [minimum, maximum] interval matching the player's Intuitive editor. Legal bounds: depthCm 0…137, lateralCm -76…76, speedMps 1…20, spinRps -120…120, and netClearanceCm 0.2…80. Prefer useful ranges over identical endpoints."
+    ).replace(
+      'Missing outgoing connection ends a path. Every path should terminate. Keep graphs compact and purposeful.',
+      "Missing outgoing connection ends a path. There is no literal END node or END edge target: terminate by omitting the final node's outgoing connection. Every reachable path should terminate. Keep graphs compact and purposeful."
+    );
+  }
+  function buildExternalDrillRevisionRequestBase({userRequest='',proposal=null,report=null,currentPlan=null,history=[],appContext=null,feasibilityGuide=null}={}){
+    return `${buildExternalDrillRequest({userRequest,currentPlan,history,appContext,feasibilityGuide})}\n\nTHE APP TESTED THE LAST PROPOSAL WITH ITS CALIBRATED TRAJECTORY AND NOVA HARDWARE MODEL. Revise the complete drill so every ball is feasible while preserving the requested training intent and graph behavior. Adjust intuitive outcome intervals, not hidden launch parameters.\n\nLAST PROPOSAL:\n${JSON.stringify(proposal,null,2)}\n\nFEASIBILITY REPORT:\n${JSON.stringify(report,null,2)}\n`;
+  }
+  function buildExternalDrillRevisionRequest(input={}){
+    return buildExternalDrillRevisionRequestBase(input).replace(
+      'Adjust intuitive outcome intervals, not hidden launch parameters.',
+      'Adjust intuitive outcome intervals, not hidden launch parameters. Keep every interval inside the documented legal bounds, especially netClearanceCm at or above 0.2. When nearestModeledOutcome is present, widen a legal interval around that outcome rather than copying an illegal endpoint.'
+    );
+  }
+  function buildExternalAssistantRequestBase({userRequest='',intent=null,currentPlan=null,history=[],appContext=null,actionCatalog=null,feasibilityGuide=null}={}){
+    const catalog={screens:['library','run','editor','robot','calibration'],builtIns:(Array.isArray(actionCatalog?.builtIns)?actionCatalog.builtIns:[]).slice(0,160).map(item=>({id:String(item.id),name:String(item.name),folder:String(item.folder||'')}))};
+    const routed=intent||resolveAssistantIntent(userRequest,{builtIns:catalog.builtIns,hasCurrentDrill:Boolean(currentPlan),currentScreen:appContext?.screen});
+    const base=`You are the action planner for Table Tennis Robot Studio. The app has already routed the user's request, but you must communicate the result using the exact allow-listed action contract below. Never invent a screen or built-in drill ID. The app validates every response and never lets AI directly control the robot.\n\nUSER REQUEST:\n${userRequest||'(none)'}\n\nROUTED INTENT:\n${JSON.stringify(routed,null,2)}\n\nAVAILABLE UI TARGETS:\n${JSON.stringify(catalog,null,2)}\n\nAPP CAPABILITIES:\n${APP_CAPABILITIES}\n\nACTION CONTRACT (return exactly one JSON object, no prose):\n- Create: {"format":"${ASSISTANT_ACTION_FORMAT}","formatVersion":${ASSISTANT_ACTION_VERSION},"action":"create_drill","destination":"editor|run","drillPlan":{...}}\n- Edit: {"format":"${ASSISTANT_ACTION_FORMAT}","formatVersion":${ASSISTANT_ACTION_VERSION},"action":"edit_drill","destination":"editor|run","drillPlan":{...}}\n- Open a listed built-in: {"format":"${ASSISTANT_ACTION_FORMAT}","formatVersion":${ASSISTANT_ACTION_VERSION},"action":"open_builtin_drill","builtInDrillId":"exact-listed-id","destination":"run"}\n- Navigate: {"format":"${ASSISTANT_ACTION_FORMAT}","formatVersion":${ASSISTANT_ACTION_VERSION},"action":"open_screen","screen":"library|run|editor|robot|calibration"}\n- Answer: {"format":"${ASSISTANT_ACTION_FORMAT}","formatVersion":${ASSISTANT_ACTION_VERSION},"action":"answer","answer":"concise app guidance"}\n\nFollow ROUTED INTENT. If it is create_drill or edit_drill, include drillPlan and use the drill-design instructions that follow. For other actions, do not include a drillPlan.\n\n`;
+    if(!['create_drill','edit_drill'].includes(routed.action))return base;
+    const referencesCurrent=/\b(?:copy|duplicate|this|current|same|pattern|original)\b/.test(normalizedWords(userRequest));
+    const suppliedPlan=routed.action==='edit_drill'||referencesCurrent?currentPlan:null;
+    return base+buildExternalDrillRequest({userRequest,currentPlan:suppliedPlan,history,appContext,feasibilityGuide});
+  }
+  function buildExternalAssistantRequest(input={}){
+    const request=buildExternalAssistantRequestBase(input).replace(
+      'Follow ROUTED INTENT. If it is create_drill or edit_drill, include drillPlan and use the drill-design instructions that follow. For other actions, do not include a drillPlan.',
+      'Follow ROUTED INTENT exactly. Do not replace open_screen or open_builtin_drill with written navigation instructions. For answer requests, answer the question directly and reuse its important user-facing terms instead of silently replacing them with internal synonyms. For answer requests about a category of built-ins, name concrete matching entries from AVAILABLE UI TARGETS. Use exact visible status terminology from VISIBLE APP CONTEXT when it answers the question. If it is create_drill or edit_drill, include drillPlan and use the drill-design instructions that follow. For other actions, do not include a drillPlan.'
+    );
+    if(!['create_drill','edit_drill'].includes(input.intent?.action))return request;
+    return request.replace(
+      'Return exactly one JSON object, without prose, using this schematic contract:',
+      'Construct the drillPlan property using this schematic contract. Do not return this object by itself; the final response must be the assistant-action envelope required above:'
+    ).replace(
+      '- Make feeds train the stated action. State important assumptions in description.',
+      "- Make feeds train the stated action. State important assumptions in description. Before returning, cross-check that every label and description agrees with its numeric lateral/depth/spin ranges. For a supplied current drill, preserve every unrequested node, edge, setting, label, and outcome field exactly. If the user changes only spin, do not change placement, speed, or clearance. When a request varies only one dimension such as depth or placement, keep the other outcome ranges identical across those alternatives unless the user explicitly requests additional variation. If a new placement pattern does not specify spin, use one consistent controlled spin type across comparable balls instead of inventing unrelated spin changes. When the user asks only for a copy or timing change, preserve all outcome intervals exactly."
+    ).replace(
+      '- Falkenberg means backhand, forehand from backhand corner, wide forehand. Match-like means controlled, purposeful uncertainty rather than chaos.',
+      '- Falkenberg always includes the ordered core sequence: backhand, pivot forehand from the backhand corner, then wide forehand. A Falkenberg-style request must preserve all three stages; attach requested random alternatives only after or around that complete core rather than replacing the pivot stage. Match-like means controlled, purposeful uncertainty rather than chaos.'
+    );
+  }
   function buildExternalAiRequest({currentDrill=null,userRequest='',appContext=null,requestKind='drill' }={}){
     const safeContext=appContext&&typeof appContext==='object'?{screen:String(appContext.screen||''),activeDrill:appContext.activeDrill?String(appContext.activeDrill):null,drillSource:appContext.drillSource?String(appContext.drillSource):null,selection:appContext.selection?String(appContext.selection):null,localContext:Array.isArray(appContext.localContext)?appContext.localContext.slice(0,8).map(item=>String(item).slice(0,160)):[],robotStatus:appContext.robotStatus?String(appContext.robotStatus):null,activity:appContext.activity?String(appContext.activity):null}:null;
     const contextText=`${safeContext?JSON.stringify(safeContext,null,2):'(no visible screen context supplied)'}\n\nAPP CAPABILITIES:\n${APP_CAPABILITIES}`;
@@ -143,5 +288,5 @@
       .replace('"weight":1,"delaySeconds":1}', '"weight":1,"delaySeconds":0,"timingMode":"adaptive","autoSpeedPct":100}')
       .replace('edge delays 0..3600 s;', 'connection timingMode adaptive or manual; adaptive autoSpeedPct 50..200; manual delaySeconds 0..3600 s;');
   }
-  return Object.freeze({DRILL_FORMAT,DRILL_VERSION,SKILL_FORMAT,SKILL_VERSION,MAX_SHARE_CHARS,MAX_FILE_BYTES,makePortableDrill,validatePortableDrill,validateSkillProposal,serializePortableDrill,deserializePortableDrill,makeShareUrl,parseShareHash,safeFilename,parseExternalAiResult,parseExternalSkillResult,buildExternalSkillRequest:buildCorrectedExternalSkillRequest,buildExternalSkillRevisionRequest,buildExternalAiRequest:buildValidatedExternalAiRequest});
+  return Object.freeze({DRILL_FORMAT,DRILL_VERSION,SKILL_FORMAT,SKILL_VERSION,INTUITIVE_DRILL_FORMAT,INTUITIVE_DRILL_VERSION,ASSISTANT_ACTION_FORMAT,ASSISTANT_ACTION_VERSION,MAX_SHARE_CHARS,MAX_FILE_BYTES,makePortableDrill,validatePortableDrill,validateSkillProposal,validateIntuitiveDrillPlan,validateAssistantAction,resolveAssistantIntent,serializePortableDrill,deserializePortableDrill,makeShareUrl,parseShareHash,safeFilename,parseExternalAiResult,parseExternalSkillResult,parseExternalIntuitiveDrillResult,parseExternalAssistantAction,buildExternalSkillRequest:buildCorrectedExternalSkillRequest,buildExternalSkillRevisionRequest,buildExternalDrillRequest,buildExternalDrillRevisionRequest,buildExternalAssistantRequest,buildExternalAiRequest:buildValidatedExternalAiRequest});
 });

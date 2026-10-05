@@ -1,0 +1,51 @@
+{
+  "format": "table-tennis-robot-studio/ai-intuitiveness-model-policy",
+  "formatVersion": 1,
+  "purpose": "Use the least expensive model that reliably performs each evaluation stage while preserving isolated, comparable API-role responses.",
+  "suiteProfiles": {
+    "v1": {
+      "expectedCaseCount": 10,
+      "singleConfigurationFallback": { "model": "gpt-5.6-luna", "effort": "low" }
+    },
+    "v2": {
+      "expectedCaseCount": 40,
+      "singleConfigurationFallback": { "model": "gpt-5.6-luna", "effort": "medium" }
+    },
+    "v3": {
+      "expectedCaseCount": 140,
+      "singleConfigurationFallback": { "model": "gpt-5.6-terra", "effort": "medium" }
+    }
+  },
+  "preferredStagePolicy": {
+    "isolatedApiResponse": {
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "appliesTo": ["initial requests", "feasibility follow-up requests"],
+      "isolation": "Give the model exactly one saved request string and no other evaluation or app context."
+    },
+    "mechanicalEvaluation": {
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "appliesTo": ["derive app state", "run deterministic checks", "apply the acceptance rubric when no judgment conflict exists"]
+    },
+    "diagnosisAndRepair": {
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "appliesTo": ["analyze unacceptable cases", "identify the earliest faulty stage", "implement and verify general fixes"]
+    },
+    "hardCaseEscalation": {
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "appliesTo": ["unresolved or contradictory failures after a Terra medium attempt"]
+    }
+  },
+  "escalationRules": [
+    "Do not choose a stronger model merely because a suite contains more cases; batch repetitive cases instead.",
+    "Raise isolatedApiResponse from Luna low to Luna medium only if the saved output is malformed, violates the supplied contract, or fails the v1 calibration comparison in a way attributable to response quality.",
+    "Use Terra medium only for cases or stages requiring diagnosis, code changes, or substantial judgment.",
+    "Use Sol medium only after Terra medium leaves a concrete failure unresolved or produces conflicting diagnoses.",
+    "Do not use high, xhigh, max, or ultra effort unless a future run records evidence that medium failed and the higher effort corrected the failure."
+  ],
+  "provenanceRule": "For every generated response, record the actual model and effort on that response round. Record any deviation from this policy and its reason in the suite findings.",
+  "availabilityRule": "If a named model is unavailable, choose the cheapest available model in the same role (efficient, balanced, or workhorse), preserve the effort level, and record the substitution."
+}

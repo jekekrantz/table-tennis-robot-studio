@@ -1,0 +1,28 @@
+{
+  "format": "table-tennis-robot-studio/ai-intuitiveness-quality-rubric",
+  "formatVersion": 1,
+  "qualityScale": {
+    "10": "Ideal: exactly satisfies the request, preserves context, reaches the intuitive destination, and needs no correction or avoidable extra work.",
+    "8-9": "Good: correct and useful, with only minor wording, specificity, or efficiency weaknesses.",
+    "6-7": "Usable: reaches the right outcome but has noticeable friction, an avoidable revision, or a meaningful omission.",
+    "4-5": "Poor: partially useful, but requires correction, another AI round, or substantial user interpretation.",
+    "1-3": "Wrong: wrong action, destination, drill, or unusable response; recovery is possible but the user would reasonably feel the feature failed.",
+    "0": "Catastrophic: unsafe, destructive, irrecoverable, or wholly unrelated behavior."
+  },
+  "severityScale": {
+    "9-10": "Critical: unsafe/destructive behavior or broad loss of user work.",
+    "7-8": "High: common request produces the wrong drill/action, silently changes the wrong content, or leaves no practical recovery path.",
+    "4-6": "Medium: blocks completion or causes substantial confusion, but recovery is clear and local.",
+    "1-3": "Low: extra friction, weak wording, or a minor mismatch that does not block the goal.",
+    "0": "No issue."
+  },
+  "instructions": [
+    "Judge from the perspective of an ordinary user who knows table tennis but does not know the app internals.",
+    "Score the latest completed response round and resulting app state, while noting how many revision rounds were required.",
+    "Do not award a high score merely because JSON is valid; judge whether the user reached the requested outcome intuitively.",
+    "Do not fail a response merely because an app feasibility revision was needed, but reduce quality for avoidable extra rounds and unusable intermediate states.",
+    "Estimate issue severity independently from response quality. Severity measures likely user impact if the underlying problem recurs, not how badly this particular wording sounds.",
+    "For every score below 8, provide a concise reason. For every identified issue, name the earliest faulty stage and assign severity 0 through 10.",
+    "Sort proposed fixes by descending severity, then estimated recurrence, then implementation leverage."
+  ]
+}

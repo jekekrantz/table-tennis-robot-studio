@@ -12,7 +12,7 @@ for file in \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
   drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js adaptive-timing.js adaptive-timing-selftest.js \
   built-in-library-selftest.js \
-  studio-features-core.js studio-features-selftest.js studio-features.js \
+  studio-features-core.js studio-features-selftest.js studio-features.js ai-intuitiveness-selftest.js scripts/ai_intuitiveness_eval.js \
   continuous-runtime-selftest.js vendor/qrcode.min.js; do
   node --check "$file"
 done
@@ -42,6 +42,7 @@ node built-in-library-selftest.js
 
 echo "[8/13] Sharing / AI / continuous-runtime / UX responsiveness"
 node studio-features-selftest.js
+node ai-intuitiveness-selftest.js
 node continuous-runtime-selftest.js
 node ux-responsiveness-selftest.js
 

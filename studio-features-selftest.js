@@ -49,4 +49,77 @@ const revisionRequest=Core.buildExternalSkillRevisionRequest({userRequest:'learn
 assert(revisionRequest.includes('FEASIBILITY REPORT'));
 assert(revisionRequest.includes('ball-1'));
 assert(!Core.validateSkillProposal({...skill,stages:[]}).valid);
+const intuitiveDrill={
+  format:Core.INTUITIVE_DRILL_FORMAT,
+  formatVersion:Core.INTUITIVE_DRILL_VERSION,
+  name:'Opening pattern',description:'Backspin then recover',tags:['opening'],startNodeId:'b1',
+  settings:{repetitions:3,delayBetweenSets:0,firstShotTiming:{mode:'adaptive',speedPct:90}},
+  nodes:[
+    {id:'b1',type:'shot',label:'Backspin',outcome:{depthCm:[65,85],lateralCm:[-55,-38],speedMps:[4.6,5.5],spinRps:[-24,-15],netClearanceCm:[8,14]}},
+    {id:'b2',type:'shot',label:'Recovery topspin',outcome:{depthCm:[75,100],lateralCm:[20,45],speedMps:[6.5,8],spinRps:[15,26],netClearanceCm:[8,14]}}
+  ],
+  edges:[{id:'e1',source:'b1',sourceSlot:'next',target:'b2',weight:1,timingMode:'adaptive',delaySeconds:0,autoSpeedPct:90}]
+};
+assert(Core.validateIntuitiveDrillPlan(intuitiveDrill).valid);
+assert.strictEqual(Core.parseExternalIntuitiveDrillResult(JSON.stringify(intuitiveDrill)).nodes.length,2);
+const intuitiveRequest=Core.buildExternalDrillRequest({userRequest:'make an opening drill',currentPlan:intuitiveDrill,history:[{userRequest:'start easy',assistantOutput:intuitiveDrill,feasibility:{valid:true}}]});
+assert(intuitiveRequest.includes('INTUITIVE BALL API AND COORDINATES'));
+assert(intuitiveRequest.includes('DRILL CREATION/EDIT HISTORY'));
+assert(intuitiveRequest.includes('saved calibrated robot pose'));
+assert(!intuitiveRequest.includes('elevationDeg'));
+const intuitiveRevision=Core.buildExternalDrillRevisionRequest({userRequest:'make an opening drill',proposal:intuitiveDrill,report:{valid:false,shots:[{id:'b2',feasible:false}]}});
+assert(intuitiveRevision.includes('nearest modeled outcomes'));
+assert(intuitiveRevision.includes('b2'));
+assert(!Core.validateIntuitiveDrillPlan({...intuitiveDrill,nodes:[{...intuitiveDrill.nodes[0],outcome:{...intuitiveDrill.nodes[0].outcome,depthCm:[150,170]}}]}).valid);
+assert(Core.validateIntuitiveDrillPlan({...intuitiveDrill,nodes:[{id:'sub',type:'drill',label:'Existing sequence',referencedDrillId:'saved-1'}],startNodeId:'sub',edges:[]}).valid);
+const actionCatalog={builtIns:[{id:'builtin-falkenberg',name:'Falkenberg',folder:'Footwork'}]};
+assert.deepStrictEqual(Core.resolveAssistantIntent('Open the builtin faulkenerg drill',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Drill library'}),{action:'open_builtin_drill',builtInDrillId:'builtin-falkenberg',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('I want the builtin faulkenerg drill',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Drill library'}),{action:'open_builtin_drill',builtInDrillId:'builtin-falkenberg',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Make me a new drill for forehand counterlooping',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'create_drill',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Keep everything the same, but give me more recovery after the second ball',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'edit_drill',destination:'editor'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Make a new easier copy of this drill and keep the built-in unchanged',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'create_drill',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('I want to do the Falkenberg drill',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Drill library'}),{action:'open_builtin_drill',builtInDrillId:'builtin-falkenberg',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Go back to the drill library',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Calibration'}),{action:'open_screen',screen:'library'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Take me to robot settings',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Drill library'}),{action:'open_screen',screen:'robot'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Make a new 2 backhands then 2 forehands pattern rather than opening the preset',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Drill library'}),{action:'create_drill',destination:'editor'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Copy this built-in into a new drill called Fast Falkenberg and make its timing faster',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'create_drill',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Duplicate the current pattern as Beginner Falkenberg without changing the original',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'create_drill',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Start this same drill with a short no-spin serve',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'edit_drill',destination:'editor'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Keep every ball unchanged but make the timing slower',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'edit_drill',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('It says Ready, so why did Start not feed a ball immediately?',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'answer'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Can the AI start the robot while it is disconnected?',{...actionCatalog,hasCurrentDrill:false,currentScreen:'Robot'}),{action:'answer'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Leave this drill alone and show the library',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'open_screen',screen:'library'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Take me to robot settings; do not change this drill',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'open_screen',screen:'robot'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Create a new short sidespin serve practice',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'answer'});
+assert(Core.buildExternalAssistantRequest({userRequest:'Create a sidespin serve',intent:{action:'answer'},appContext:{screen:'Drill editor'},actionCatalog}).includes('cannot request sidespin'));
+assert.deepStrictEqual(Core.resolveAssistantIntent('Open the built-in fast long topspin to backhand instead of changing this',{...actionCatalog,builtIns:[...actionCatalog.builtIns,{id:'fast-long',name:'Fast long topspin to backhand'}],hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'open_builtin_drill',builtInDrillId:'fast-long',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Make a separate drill with two backhands then a random forehand',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'create_drill',destination:'run'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Do not add to this graph; create a new short backspin serve drill',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Drill editor'}),{action:'create_drill',destination:'editor'});
+assert.deepStrictEqual(Core.resolveAssistantIntent('Slow only the first ball timing; do not alter any ball outcomes',{...actionCatalog,hasCurrentDrill:true,currentScreen:'Run drill'}),{action:'edit_drill',destination:'run'});
+const createAction={format:Core.ASSISTANT_ACTION_FORMAT,formatVersion:Core.ASSISTANT_ACTION_VERSION,action:'create_drill',destination:'editor',drillPlan:intuitiveDrill};
+assert(Core.validateAssistantAction(createAction,actionCatalog).valid);
+assert.strictEqual(Core.parseExternalAssistantAction(JSON.stringify(createAction),actionCatalog).action,'create_drill');
+assert(!Core.validateAssistantAction({...createAction,action:'open_builtin_drill',builtInDrillId:'made-up'},actionCatalog).valid);
+const assistantRequest=Core.buildExternalAssistantRequest({userRequest:'Make me a drill',intent:{action:'create_drill',destination:'editor'},currentPlan:null,appContext:{screen:'Drill library'},actionCatalog});
+assert(assistantRequest.includes('assistant-action'));
+assert(assistantRequest.includes('builtin-falkenberg'));
+assert(assistantRequest.includes('Follow ROUTED INTENT'));
+assert(assistantRequest.includes('reuse its important user-facing terms'));
+const copyRequest=Core.buildExternalAssistantRequest({userRequest:'Copy this pattern as a new slower drill',intent:{action:'create_drill',destination:'run'},currentPlan:intuitiveDrill,appContext:{screen:'Run drill'},actionCatalog});
+assert(copyRequest.includes('CURRENT DRILL IN THE SAME INTUITIVE API'));
+assert(copyRequest.includes('preserve all outcome intervals exactly'));
+assert(copyRequest.includes('preserve every unrequested node'));
+assert(copyRequest.includes('every label and description agrees'));
+assert(copyRequest.includes('varies only one dimension'));
+const guidedRequest=Core.buildExternalAssistantRequest({userRequest:'Create a new backspin drill',intent:{action:'create_drill',destination:'editor'},appContext:{screen:'Drill library'},actionCatalog,feasibilityGuide:{basis:'Locally verified.',guidance:'Use anchors.',examples:[{type:'shot',label:'Backspin anchor',outcome:intuitiveDrill.nodes[0].outcome}]}});
+assert(guidedRequest.includes('CURRENT CALIBRATED FEASIBILITY GUIDE'));
+assert(guidedRequest.includes('Backspin anchor'));
+assert(!guidedRequest.includes('wheelA'));
+assert(guidedRequest.includes('There is no literal END node'));
+assert(guidedRequest.includes('Falkenberg always includes the ordered core sequence'));
+assert(assistantRequest.includes('final response must be the assistant-action envelope'));
+assert(!assistantRequest.includes('Return exactly one JSON object, without prose, using this schematic contract:'));
+assert(intuitiveRevision.includes('netClearanceCm at or above 0.2'));
+const privateHistory=Core.makePortableDrill({...drill,aiHistory:[{userRequest:'private prompt'}]});
+assert.strictEqual(privateHistory.drill.aiHistory,undefined);
 console.log('PASS sharing/AI/serve feature logic');
