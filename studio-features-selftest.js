@@ -111,6 +111,9 @@ assert(copyRequest.includes('preserve all outcome intervals exactly'));
 assert(copyRequest.includes('preserve every unrequested node'));
 assert(copyRequest.includes('every label and description agrees'));
 assert(copyRequest.includes('varies only one dimension'));
+assert(copyRequest.includes('selection identifies the exact selected node'));
+assert(copyRequest.includes('Every shot/serve label must be unique'));
+assert(copyRequest.includes('if the user changes only lateral placement'));
 const guidedRequest=Core.buildExternalAssistantRequest({userRequest:'Create a new backspin drill',intent:{action:'create_drill',destination:'editor'},appContext:{screen:'Drill library'},actionCatalog,feasibilityGuide:{basis:'Locally verified.',guidance:'Use anchors.',examples:[{type:'shot',label:'Backspin anchor',outcome:intuitiveDrill.nodes[0].outcome}]}});
 assert(guidedRequest.includes('CURRENT CALIBRATED FEASIBILITY GUIDE'));
 assert(guidedRequest.includes('Backspin anchor'));
@@ -120,6 +123,8 @@ assert(guidedRequest.includes('Falkenberg always includes the ordered core seque
 assert(assistantRequest.includes('final response must be the assistant-action envelope'));
 assert(!assistantRequest.includes('Return exactly one JSON object, without prose, using this schematic contract:'));
 assert(intuitiveRevision.includes('netClearanceCm at or above 0.2'));
+assert(intuitiveRevision.includes('Revise only nodes reported infeasible'));
+assert(intuitiveRevision.includes('Preserve all existing labels except the specific duplicate label'));
 const privateHistory=Core.makePortableDrill({...drill,aiHistory:[{userRequest:'private prompt'}]});
 assert.strictEqual(privateHistory.drill.aiHistory,undefined);
 console.log('PASS sharing/AI/serve feature logic');
