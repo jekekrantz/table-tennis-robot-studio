@@ -22,6 +22,7 @@ SOURCES = [
     "shot-variation.js",
     "table-bounce.js",
     "adaptive-timing.js",
+    "developer-shot-analysis.js",
     "studio-features-core.js",
     "app.js",
     "studio-features.js",

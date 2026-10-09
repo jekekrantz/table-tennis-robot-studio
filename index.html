@@ -79,6 +79,7 @@
             <section class="run-controls" aria-label="Drill playback controls">
               <button id="playBtn" class="play-button run-play-button" type="button"><span id="playIcon" aria-hidden="true">▶</span><span id="playText">Play</span></button>
               <button id="updateRobotPoseBtn" class="button run-calibrate-button primary" type="button">Calibrate pose</button>
+              <button id="shotAnalysisBtn" class="button run-shot-analysis-button ghost" type="button" hidden>◉ Analyze shot</button>
               <span id="runStatus" class="run-status" aria-live="polite"></span>
             </section>
           </section>
@@ -179,6 +180,20 @@
               <div class="robot-idle-setting-title"><span>Disconnect BLE when unused</span><details class="info-disclosure"><summary aria-label="About automatic BLE disconnect">i</summary><div class="info-popover">BLE disconnect performs the orderly STOP stage first, then closes the Bluetooth connection. Starting again requires the browser device chooser and Nova authentication, so this timeout is longer than STOP.</div></details></div>
               <select id="robotIdleDisconnectInput" aria-label="Disconnect BLE when unused"><option value="0">Never</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
               <p id="robotIdleStatus" class="helper" aria-live="polite"></p>
+            </div>
+          </section>
+          <section class="developer-settings-card panel-card">
+            <div><h3>Developer features</h3><p>Experimental tools for collecting synchronized robot, camera and audio evidence. They do not change the shot sent to Nova.</p></div>
+            <label class="developer-toggle"><input id="developerModeInput" type="checkbox"><span><strong>Developer mode</strong><small>Shows unfinished diagnostic controls in Run.</small></span></label>
+            <div id="developerRetentionOptions" class="developer-retention-options" hidden>
+              <strong>Retain debugging artifacts on this device</strong>
+              <label><input id="developerRetainLogsInput" type="checkbox"> Event and frame-timing logs</label>
+              <label><input id="developerRetainVideoInput" type="checkbox"> Recorded video and audio</label>
+              <label><input id="developerRetainImagesInput" type="checkbox"> Calibration, background and still images</label>
+              <label><input id="developerCaptureAudioInput" type="checkbox" checked> Include audio in new recordings</label>
+              <p class="helper">Retention is off by default. Media is stored locally in this browser and is never included in exported drills.</p>
+              <button id="developerClearArtifactsBtn" class="button compact danger" type="button">Clear stored artifacts</button>
+              <p id="developerStorageStatus" class="helper" aria-live="polite"></p>
             </div>
           </section>
           <section class="player-model-card panel-card">
@@ -505,6 +520,74 @@
     </div>
   </dialog>
 
+  <dialog id="shotAnalysisDialog" class="shot-analysis-dialog">
+    <div class="dialog-frame shot-analysis-frame">
+      <header>
+        <div><p class="eyebrow">Developer mode</p><h2>Shot analysis capture</h2><p>Collect synchronized evidence for the future inverse-motion estimator.</p></div>
+        <button id="closeShotAnalysisBtn" class="icon-button" type="button" aria-label="Close">×</button>
+      </header>
+
+      <section class="shot-analysis-playback" aria-label="Drill controls">
+        <button id="shotAnalysisPlayBtn" class="play-button" type="button"><span id="shotAnalysisPlayIcon" aria-hidden="true">▶</span><span id="shotAnalysisPlayText">Start drill</span></button>
+        <span id="shotAnalysisPlaybackStatus" aria-live="polite">Drill stopped</span>
+      </section>
+
+      <section class="shot-analysis-camera-card">
+        <div class="shot-analysis-camera-stage">
+          <video id="shotAnalysisVideo" playsinline muted></video>
+          <canvas id="shotAnalysisOverlay" aria-label="Camera alignment and table landmark overlay"></canvas>
+          <div id="shotAnalysisCameraEmpty" class="shot-analysis-camera-empty"><strong>Camera off</strong><span>Mount the phone in landscape on a tripod beside the net, far enough back to see both end lines and the ball above the table.</span></div>
+        </div>
+        <p id="shotAnalysisCameraStatus" class="helper" aria-live="polite">Enable the rear camera to begin.</p>
+        <div class="shot-analysis-primary-actions">
+          <button id="shotAnalysisCameraBtn" class="button primary" type="button">Enable camera</button>
+          <button id="shotAnalysisRecordBtn" class="button danger" type="button" disabled>Start recording</button>
+        </div>
+        <div class="shot-analysis-secondary-actions">
+          <button id="shotAnalysisSnapshotBtn" class="button ghost" type="button" disabled>Save still</button>
+          <button id="shotAnalysisBackgroundBtn" class="button ghost" type="button" disabled>Set empty background</button>
+        </div>
+      </section>
+
+      <details class="shot-analysis-calibration" open>
+        <summary>Camera and table calibration</summary>
+        <p>From the side-of-net position, keep both end lines and net posts visible. Mark the requested landmarks; the first four create an image-to-table mapping.</p>
+        <label class="field"><span>Camera side, viewed from the robot toward the player</span><select id="shotAnalysisCameraSide"><option value="left">Left long side</option><option value="right">Right long side</option></select></label>
+        <p id="shotAnalysisLandmarkPrompt" class="shot-analysis-landmark-prompt">No table landmarks saved.</p>
+        <div class="shot-analysis-secondary-actions">
+          <button id="shotAnalysisMarkTableBtn" class="button primary" type="button" disabled>Mark table</button>
+          <button id="shotAnalysisResetTableBtn" class="button ghost" type="button">Reset marks</button>
+        </div>
+      </details>
+
+      <section class="shot-analysis-dataset" aria-labelledby="shotDatasetTitle">
+        <div class="section-title-row"><h3 id="shotDatasetTitle">Balanced dataset run</h3><span id="shotDatasetBadge" class="status-badge neutral">100 balls</span></div>
+        <p>Ten fixed trajectory conditions spanning speed, spin, depth and left/right placement. Their order rotates between repetitions to reduce time-drift bias.</p>
+        <div class="shot-dataset-fields">
+          <label class="field"><span>Repetitions per condition</span><input id="shotDatasetRepetitions" type="number" min="1" max="20" step="1" value="10"></label>
+          <label class="field"><span>Ball interval</span><div class="input-suffix"><input id="shotDatasetInterval" type="number" min="0.7" max="2" step="0.05" value="1.25"><span>s</span></div></label>
+        </div>
+        <p id="shotDatasetSummary" class="helper">100 balls · about 2m 7s plus pre/post-roll.</p>
+        <button id="shotDatasetStartBtn" class="button primary wide" type="button">Record balanced dataset</button>
+        <p id="shotDatasetStatus" class="helper" aria-live="polite">Requires camera, microphone and six saved table landmarks.</p>
+      </section>
+
+      <section class="shot-analysis-diagnostics">
+        <div class="section-title-row"><h3>Capture session</h3><span id="shotAnalysisCaptureBadge" class="status-badge neutral">Idle</span></div>
+        <p id="shotAnalysisRetentionSummary" class="helper"></p>
+        <pre id="shotAnalysisEventSummary" aria-live="polite">No events captured.</pre>
+        <div class="shot-analysis-secondary-actions">
+          <button id="shotAnalysisDownloadLogBtn" class="button ghost" type="button" disabled>Download log</button>
+          <button id="shotAnalysisDownloadVideoBtn" class="button ghost" type="button" disabled>Download recording</button>
+          <button id="shotDatasetDownloadBtn" class="button ghost wide" type="button" disabled>Download dataset files</button>
+          <button id="shotAnalysisNewSessionBtn" class="button ghost wide" type="button">New session</button>
+        </div>
+      </section>
+
+      <p class="shot-analysis-warning"><strong>Experimental:</strong> captures and calibration are diagnostic only. They are not yet used to estimate or command a return shot.</p>
+    </div>
+  </dialog>
+
   <dialog id="folderDialog" class="confirm-dialog library-dialog">
     <div class="dialog-frame small">
       <h2 id="folderDialogTitle">New folder</h2>
@@ -539,7 +622,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-10-05.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-10-09.3" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

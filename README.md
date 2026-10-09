@@ -281,6 +281,18 @@ Primary research source:
 
 See `MODEL_SOURCES.md` for sources, assumptions and remaining limitations.
 
+## Developer shot-analysis capture
+
+Robot → Developer features can enable an experimental, local-only **Analyze
+shot** tool on the Run screen. It records synchronized camera/audio, Nova ball
+events, active modeled shots and video-frame timestamps; supports guided table
+landmarks, a table-plane homography, background/still capture, downloads, and
+independent opt-in browser retention for logs, video/audio and images. A finite
+balanced protocol records ten trajectory conditions with exact command metadata,
+automatic pre/post-roll, and a replay manifest. It does not yet estimate a
+player's shot or change robot commands. See
+`docs/developer-shot-analysis.md`.
+
 ## Persistence and JSON schema
 
 Browser data uses one current storage key:

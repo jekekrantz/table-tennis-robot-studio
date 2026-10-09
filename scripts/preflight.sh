@@ -10,7 +10,7 @@ for file in \
   app.js pongbot-protocol.js pongbot-ble.js selftest.js emergency-shutdown-selftest.js \
   robot-geometry.js robot-geometry-selftest.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
-  drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js adaptive-timing.js adaptive-timing-selftest.js \
+  drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js adaptive-timing.js adaptive-timing-selftest.js developer-shot-analysis.js developer-shot-analysis-selftest.js \
   built-in-library-selftest.js \
   studio-features-core.js studio-features-selftest.js studio-features.js ai-intuitiveness-selftest.js scripts/ai_intuitiveness_eval.js \
   continuous-runtime-selftest.js vendor/qrcode.min.js; do
@@ -38,6 +38,7 @@ node pose-calibration-selftest.js
 node shot-variation-selftest.js
 node table-bounce-selftest.js
 node adaptive-timing-selftest.js
+node developer-shot-analysis-selftest.js
 node built-in-library-selftest.js
 
 echo "[8/13] Sharing / AI / continuous-runtime / UX responsiveness"
@@ -63,7 +64,7 @@ python3 - <<'PY'
 from pathlib import Path
 for required in [
     'docs/drill-file-format.md','docs/ai-drill-assistant.md',
-    'docs/continuous-playback.md','docs/custom-firmware-readiness.md','docs/deployment.md','docs/shot-variation.md','docs/robot-pose-calibration.md','docs/visual-development.md',
+    'docs/continuous-playback.md','docs/custom-firmware-readiness.md','docs/deployment.md','docs/shot-variation.md','docs/robot-pose-calibration.md','docs/visual-development.md','docs/developer-shot-analysis.md',
     'docs/ux-responsiveness.md','vendor/QRCode-LICENSE.txt'
 ]:
     if not Path(required).is_file(): raise SystemExit(f'Missing {required}')

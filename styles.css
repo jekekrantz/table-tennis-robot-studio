@@ -264,6 +264,8 @@ button { color: inherit; }
 .status-badge.neutral { background: #29313f; color: #bec8d4; }
 .status-badge.valid { background: color-mix(in srgb,var(--success),transparent 80%); color: #9be5bb; }
 .status-badge.invalid { background: color-mix(in srgb,var(--danger),transparent 82%); color: #ffb5bb; }
+.status-badge.success { background:color-mix(in srgb,var(--success),transparent 80%); color:#9be5bb; }
+.status-badge.warning { background:color-mix(in srgb,var(--warning),transparent 80%); color:#f2d58d; }
 .validation-list { margin: 9px 0 0; padding-left: 18px; color: var(--muted); font-size: .72rem; line-height: 1.4; }
 .path-help p { margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 
@@ -1840,6 +1842,7 @@ body.training-lesson-open .library-panel { padding:0; border:0; background:trans
 }
 .run-play-button { width:100%; height:48px; border-radius:10px; background:var(--success); border-color:var(--success); color:#07150e; font-size:1rem; }
 .run-calibrate-button { min-width:126px; height:48px; padding:8px 12px; border-radius:10px; white-space:nowrap; }
+.run-shot-analysis-button { grid-column:1 / -1; min-height:42px; border-color:#6d55a0; background:#211b31; color:#d8c8ff; }
 .run-status { grid-column:1 / -1; min-height:0; color:var(--muted); font-size:.66rem; }
 .run-status:empty { display:none; }
 .session-adjustments-card h3,.run-setup-card h3,.robot-page-card h3,.model-default-card h3 { margin:0; }
@@ -2219,6 +2222,17 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .robot-idle-setting { display:grid; gap:8px; border-top:1px solid var(--border); padding-top:12px; }
 .robot-idle-setting-title { display:flex; align-items:center; justify-content:space-between; gap:10px; color:#d5deea; font-size:.74rem; font-weight:750; }
 .robot-idle-setting .info-popover { right:0; width:min(260px,calc(100vw - 48px)); }
+.developer-settings-card { display:grid; gap:12px; align-content:start; }
+.developer-settings-card h3,.developer-settings-card p { margin:0; }
+.developer-settings-card > div:first-child p { margin-top:5px; color:var(--muted); font-size:.72rem; line-height:1.45; }
+.developer-toggle { display:flex; align-items:flex-start; gap:10px; border-top:1px solid var(--border); padding-top:12px; cursor:pointer; }
+.developer-toggle input { margin-top:3px; }
+.developer-toggle strong,.developer-toggle small { display:block; }
+.developer-toggle small { margin-top:3px; color:var(--muted); font-size:.68rem; line-height:1.35; }
+.developer-retention-options { display:grid; gap:9px; border-top:1px solid var(--border); padding-top:12px; }
+.developer-retention-options > strong { color:#d7caef; font-size:.74rem; }
+.developer-retention-options > label { display:flex; align-items:flex-start; gap:8px; color:#d5deea; font-size:.72rem; line-height:1.35; }
+.developer-retention-options > label input { margin-top:2px; }
 .robot-menu-icon { font-size:1.25rem; color:#9ecaff; }
 .player-model-card { display:grid; gap:12px; align-content:start; }
 .player-model-card .section-title-row { align-items:flex-start; }
@@ -2247,6 +2261,47 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .drill-details-frame textarea { width:100%; border:1px solid #3b4658; border-radius:8px; background:var(--panel-3); padding:9px; resize:vertical; outline:none; }
 .details-fieldset { margin:14px 0; padding:12px; border:1px solid var(--border); border-radius:10px; }
 .details-fieldset legend { padding:0 5px; color:#cbd4df; font-size:.78rem; font-weight:750; }
+
+/* Developer shot-analysis capture */
+.shot-analysis-dialog { width:min(860px,calc(100vw - 24px)); max-height:calc(100dvh - 24px); border:1px solid #55446f; border-radius:15px; background:var(--panel); color:var(--text); padding:0; }
+.shot-analysis-dialog::backdrop { background:rgba(3,5,9,.84); }
+.shot-analysis-frame { max-height:calc(100dvh - 26px); overflow-y:auto; display:grid; gap:14px; }
+.shot-analysis-frame > header { position:sticky; top:0; z-index:5; align-items:flex-start; padding-bottom:10px; border-bottom:1px solid var(--border); background:var(--panel); }
+.shot-analysis-frame > header .eyebrow { color:#bda5e5; }
+.shot-analysis-playback { display:grid; grid-template-columns:minmax(150px,220px) minmax(0,1fr); align-items:center; gap:10px; padding:10px; border:1px solid #425066; border-radius:11px; background:#111822; }
+.shot-analysis-playback .play-button { min-height:46px; background:var(--success); border-color:var(--success); color:#07150e; }
+.shot-analysis-playback .play-button.running { background:var(--danger); border-color:var(--danger); color:#21090d; }
+.shot-analysis-playback > span { color:var(--muted); font-size:.72rem; }
+.shot-analysis-camera-card,.shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { margin:0; padding:12px; border:1px solid var(--border); border-radius:12px; background:#111720; }
+.shot-analysis-camera-stage { position:relative; aspect-ratio:16 / 9; overflow:hidden; display:grid; place-items:center; border:1px solid #435068; border-radius:10px; background:#05070a; }
+.shot-analysis-camera-stage video,.shot-analysis-camera-stage canvas { position:absolute; inset:0; width:100%; height:100%; }
+.shot-analysis-camera-stage video { object-fit:contain; }
+.shot-analysis-camera-stage canvas { z-index:2; pointer-events:none; touch-action:none; }
+.shot-analysis-camera-stage canvas.marking { pointer-events:auto; cursor:crosshair; }
+.shot-analysis-camera-empty { z-index:3; width:min(80%,420px); display:grid; gap:6px; color:var(--muted); text-align:center; font-size:.72rem; line-height:1.4; pointer-events:none; }
+.shot-analysis-camera-empty strong { color:#dce5ef; font-size:.9rem; }
+.shot-analysis-camera-card > .helper { margin:8px 0; }
+.shot-analysis-primary-actions,.shot-analysis-secondary-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.shot-analysis-primary-actions .button,.shot-analysis-secondary-actions .button { min-height:42px; }
+.shot-analysis-secondary-actions .wide { grid-column:1 / -1; }
+.shot-analysis-primary-actions .danger.recording { animation:shot-recording-pulse 1.1s ease-in-out infinite alternate; }
+@keyframes shot-recording-pulse { from { box-shadow:0 0 0 0 rgba(231,106,115,.05); } to { box-shadow:0 0 0 5px rgba(231,106,115,.18); } }
+.shot-analysis-calibration summary { cursor:pointer; color:#d9c8f3; font-weight:800; font-size:.82rem; }
+.shot-analysis-calibration > p { color:var(--muted); font-size:.72rem; line-height:1.45; }
+.shot-analysis-landmark-prompt { padding:9px 10px; border-radius:8px; background:#1d1930; color:#e2d7f5!important; }
+.shot-analysis-dataset { display:grid; gap:10px; }
+.shot-analysis-dataset h3,.shot-analysis-dataset p { margin:0; }
+.shot-analysis-dataset > p { color:var(--muted); font-size:.72rem; line-height:1.45; }
+.shot-dataset-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.shot-dataset-fields .input-suffix { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:6px; }
+.shot-dataset-fields .input-suffix input { width:100%; min-width:0; }
+.shot-dataset-fields .input-suffix > span { color:var(--muted); font-size:.72rem; font-weight:700; }
+.shot-analysis-dataset > .wide { width:100%; min-height:46px; }
+.shot-analysis-dataset > .primary.running { background:var(--danger); border-color:var(--danger); color:#21090d; }
+.shot-analysis-diagnostics { display:grid; gap:10px; }
+.shot-analysis-diagnostics h3 { margin:0; }
+.shot-analysis-diagnostics pre { max-height:160px; margin:0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid #303949; border-radius:8px; background:#080c12; color:#b8c6d7; padding:10px; font:600 .64rem/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.shot-analysis-warning { margin:0; padding:10px; border:1px solid #6b5630; border-radius:9px; background:#2a2111; color:#dec795; font-size:.7rem; line-height:1.4; }
 
 /* Phone layout is the product layout. Wider windows only add surrounding space. */
   .run-page-grid,.robot-page-grid { grid-template-columns:1fr; }
@@ -2342,7 +2397,7 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
   .output-port.vertical-port:hover { transform:scale(1.08); }
   .port-caption { display:none; }
 
-  .app-dialog,.calibration-dialog,.pose-calibration-dialog,.robot-dialog,.preview-dialog {
+  .app-dialog,.calibration-dialog,.pose-calibration-dialog,.robot-dialog,.preview-dialog,.shot-analysis-dialog {
     width:min(100vw,430px) !important;
     max-width:none !important;
     height:100dvh;
@@ -2352,6 +2407,13 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
     border-radius:0;
   }
   .add-node-frame,.drill-details-frame { max-height:100%; padding:12px; }
+  .shot-analysis-frame { height:100%; max-height:100%; padding:10px; gap:10px; }
+  .shot-analysis-frame > header h2 { font-size:1.06rem; }
+  .shot-analysis-frame > header p:not(.eyebrow) { display:none; }
+  .shot-analysis-playback { grid-template-columns:1fr; gap:6px; padding:8px; }
+  .shot-analysis-playback > span { text-align:center; }
+  .shot-analysis-camera-card,.shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { padding:9px; }
+  .shot-dataset-fields { grid-template-columns:1fr; }
   .add-node-choice-grid { grid-template-columns:1fr; }
   .dialog-action-row { display:grid; grid-template-columns:1fr 1fr; }
   .dialog-action-row .button { min-height:44px; }
@@ -2553,7 +2615,7 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
     overflow-y:auto;
     overscroll-behavior:contain;
   }
-  .app-dialog,.calibration-dialog,.pose-calibration-dialog,.robot-dialog,.preview-dialog {
+  .app-dialog,.calibration-dialog,.pose-calibration-dialog,.robot-dialog,.preview-dialog,.shot-analysis-dialog {
     height:var(--app-viewport-height,100dvh);
     max-height:var(--app-viewport-height,100dvh) !important;
   }

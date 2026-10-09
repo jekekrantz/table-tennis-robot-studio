@@ -476,6 +476,26 @@ for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor
               'openAddNodeMenu', 'openAddNodeConfig', 'openDrillDetails'):
     if token not in app:
         raise SystemExit(f"Missing app navigation/create flow: {token}")
+for token in ('id="developerModeInput"', 'id="shotAnalysisBtn"', 'id="shotAnalysisDialog"',
+              'id="shotAnalysisPlayBtn"', 'id="shotAnalysisVideo"', 'id="shotAnalysisOverlay"',
+              'id="shotAnalysisCameraSide"',
+              'id="shotDatasetStartBtn"', 'id="shotDatasetRepetitions"', 'id="shotDatasetInterval"',
+              'id="shotDatasetDownloadBtn"',
+              'id="developerRetainLogsInput"', 'id="developerRetainVideoInput"', 'id="developerRetainImagesInput"'):
+    if token not in html:
+        raise SystemExit(f"Missing developer shot-analysis UI: {token}")
+for token in ('DEVELOPER_SETTINGS_STORAGE_KEY', 'function renderDeveloperSettings()',
+              'function analysisShotSnapshot(', 'function startShotAnalysisCamera()',
+              'function persistShotAnalysisSession(', 'function buildDatasetProtocolDrill(',
+              'function startShotDatasetCapture()', 'balancedDatasetSchedule',
+              'robot.addEventListener("ball", noteRobotShot)'):
+    if token not in app:
+        raise SystemExit(f"Missing developer shot-analysis runtime integration: {token}")
+if 'els.shotAnalysisBtn.hidden = !developerSettings.enabled;' not in app:
+    raise SystemExit("Analyze shot must remain hidden unless developer mode is enabled")
+for token in ('.shot-analysis-dialog', '.shot-analysis-camera-stage', '.shot-analysis-dataset', '.developer-settings-card'):
+    if token not in css:
+        raise SystemExit(f"Missing developer shot-analysis responsive styling: {token}")
 if 'navigateApp("library", { push: false })' not in app:
     raise SystemExit("App must start on the drill library")
 if 'function graphLayoutMap(' not in app or 'const GRAPH_CENTER_X = SURFACE_WIDTH / 2;' not in app:
