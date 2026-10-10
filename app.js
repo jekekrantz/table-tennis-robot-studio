@@ -2893,7 +2893,7 @@
     return {
       corners:[point(0,side*table.width/2), point(0,-side*table.width/2), point(table.length,-side*table.width/2), point(table.length,side*table.width/2)],
       net:[point(table.length/2,-side*table.width/2,tableSurface + table.netHeight), point(table.length/2,side*table.width/2,tableSurface + table.netHeight)],
-      centre:[point(table.length/2,-side*table.width/2), point(table.length/2,side*table.width/2)],
+      centre:[point(0,0), point(table.length,0)],
       camera:{ distanceCm:developerSettings.cameraDistanceCm, heightCm:developerSettings.cameraHeightAboveNetCm, pitchDeg:developerSettings.cameraPitchDeg },
     };
   }
@@ -2925,16 +2925,24 @@
         context.setLineDash([]);
         return;
       }
-      context.setLineDash([8, 7]);
+      // Regulation table markings: 20 mm perimeter lines and a 3 mm
+      // longitudinal centre line. Scale the strokes from the projected table
+      // width so they remain physically proportional at different distances.
+      const projectedWidth = Math.hypot(guide[0].x-guide[1].x, guide[0].y-guide[1].y);
+      const tableWidth = library.calibration?.table?.width || 1.525;
+      context.lineWidth = Math.max(2, projectedWidth * .02 / tableWidth);
+      context.setLineDash([]);
       context.beginPath();
       guide.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
       context.closePath();
       context.stroke();
       context.setLineDash([]);
       context.strokeStyle = "rgba(88,214,178,.95)";
+      context.lineWidth = Math.max(1, projectedWidth * .003 / tableWidth);
       context.beginPath();
       context.moveTo(projected.net[0].x, projected.net[0].y);
       context.lineTo(projected.net[1].x, projected.net[1].y);
+      context.lineWidth = Math.max(1, projectedWidth * .003 / tableWidth);
       context.moveTo(projected.centre[0].x, projected.centre[0].y);
       context.lineTo(projected.centre[1].x, projected.centre[1].y);
       context.stroke();
