@@ -142,9 +142,14 @@ See [`android/README.md`](android/README.md) for the wrapper boundary and releas
 signing notes. Debug APKs are for local development; website distribution will
 use a separately signed release APK.
 
-The web app shows a **Download Android app** action under Robot → Developer
-features. Browser users who open camera capture are directed to that local app;
+The web app shows a **DEV** menu in the top bar with a **Download Android app**
+action. Browser users who open camera capture are directed to that local app;
 normal drill editing and robot controls remain usable in the browser.
+
+The Android wrapper checks the website's `android-update.json` on startup. If a
+newer `versionCode` is published, it offers to download the APK, verifies its
+SHA-256, and opens Android's installer. Updates must retain the same application
+ID and signing key, and Android still asks the user to approve installation.
 
 ## GitHub Pages
 

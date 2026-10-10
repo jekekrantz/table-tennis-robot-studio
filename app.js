@@ -256,7 +256,6 @@
     runPoseStatus: $("runPoseStatus"),
     runTrainingCard: $("runTrainingCard"),
     updateRobotPoseBtn: $("updateRobotPoseBtn"),
-    shotAnalysisBtn: $("shotAnalysisBtn"),
     saveEffectiveDrillBtn: $("saveEffectiveDrillBtn"),
     editorRunBtn: $("editorRunBtn"),
     drillDetailsBtn: $("drillDetailsBtn"),
@@ -290,6 +289,11 @@
     robotIdleStopStatus: $("robotIdleStopStatus"),
     robotIdleDisconnectInput: $("robotIdleDisconnectInput"),
     robotIdleStatus: $("robotIdleStatus"),
+    developerMenuBtn: $("developerMenuBtn"),
+    developerScreen: $("developerScreen"),
+    developerBackBtn: $("developerBackBtn"),
+    developerAnalyzeShotBtn: $("developerAnalyzeShotBtn"),
+    developerDatasetBtn: $("developerDatasetBtn"),
     developerModeInput: $("developerModeInput"),
     androidAppDownloadCard: $("androidAppDownloadCard"),
     androidAppDownloadBtn: $("androidAppDownloadBtn"),
@@ -310,7 +314,13 @@
     shotAnalysisOverlay: $("shotAnalysisOverlay"),
     shotAnalysisCameraEmpty: $("shotAnalysisCameraEmpty"),
     shotAnalysisCameraStatus: $("shotAnalysisCameraStatus"),
-    shotAnalysisCameraBtn: $("shotAnalysisCameraBtn"),
+    shotAnalysisSwitchCameraBtn: $("shotAnalysisSwitchCameraBtn"),
+    shotCameraDistanceInput: $("shotCameraDistanceInput"),
+    shotCameraDistanceOutput: $("shotCameraDistanceOutput"),
+    shotCameraHeightInput: $("shotCameraHeightInput"),
+    shotCameraHeightOutput: $("shotCameraHeightOutput"),
+    shotCameraPitchInput: $("shotCameraPitchInput"),
+    shotCameraPitchOutput: $("shotCameraPitchOutput"),
     shotAnalysisRecordBtn: $("shotAnalysisRecordBtn"),
     shotAnalysisSnapshotBtn: $("shotAnalysisSnapshotBtn"),
     shotAnalysisBackgroundBtn: $("shotAnalysisBackgroundBtn"),
@@ -331,6 +341,7 @@
     shotDatasetStatus: $("shotDatasetStatus"),
     shotDatasetBadge: $("shotDatasetBadge"),
     shotDatasetDownloadBtn: $("shotDatasetDownloadBtn"),
+    shotAnalysisDataset: $("shotAnalysisDataset"),
     playerModelSelect: $("playerModelSelect"),
     playerModelName: $("playerModelName"),
     playerTimingSpeed: $("playerTimingSpeed"),
@@ -422,6 +433,8 @@
   let shotAnalysisExpectedShot = null;
   let shotDatasetFinalizePromise = null;
   let resolveShotDatasetFinalize = null;
+  let shotAnalysisVideoDevices = [];
+  let shotDatasetTransient = null;
 
   const Protocol = globalThis.PongbotProtocol;
   const NOVA_LIMITS = Protocol?.FIRMWARE_LIMITS;
@@ -1048,12 +1061,7 @@
     const interval = Math.round(clamp(intervalSeconds, .7, 2, 1.25) * 100) / 100;
     const schedule = DeveloperShotAnalysis.balancedDatasetSchedule(DATASET_SHOT_CONDITIONS.map(item => item.id), count);
     const conditionMap = new Map(DATASET_SHOT_CONDITIONS.map(item => [item.id, item]));
-    const existing = library.drills.find(item => item.tags?.includes(DATASET_PROTOCOL_TAG));
     const drill = defaultDrill("Developer dataset · balanced trajectories");
-    if (existing) {
-      drill.id = existing.id;
-      drill.folderId = existing.folderId ?? null;
-    }
     drill.description = `${schedule.length}-ball deterministic capture protocol · ${DATASET_SHOT_CONDITIONS.length} conditions × ${count} repetitions · ${interval.toFixed(2)} s interval.`;
     drill.tags = [DATASET_PROTOCOL_TAG, "dataset", "shot-analysis"];
     drill.settings = { repetitions:1, delayBetweenSets:interval };
@@ -1078,13 +1086,15 @@
       };
     });
     drill.startNodeId = drill.nodes[0]?.id || null;
-    const index = existing ? library.drills.findIndex(item => item.id === existing.id) : -1;
-    if (index >= 0) library.drills[index] = drill;
-    else library.drills.push(drill);
+    cleanupTransientDatasetDrill();
+    shotDatasetTransient = {
+      drillId:drill.id,
+      previousSource:library.activeDrillSource,
+      previousId:library.activeDrillId,
+    };
+    library.drills.push(drill);
     library.activeDrillSource = "user";
     library.activeDrillId = drill.id;
-    saveLibrary();
-    renderAll();
     return {
       drill,
       manifest:{
@@ -1098,6 +1108,14 @@
         schedule:manifestSchedule,
       },
     };
+  }
+
+  function cleanupTransientDatasetDrill() {
+    if (!shotDatasetTransient) return;
+    library.drills = library.drills.filter(drill => drill.id !== shotDatasetTransient.drillId);
+    library.activeDrillSource = shotDatasetTransient.previousSource;
+    library.activeDrillId = shotDatasetTransient.previousId;
+    shotDatasetTransient = null;
   }
 
   function layoutSequence(nodes) {
@@ -2776,10 +2794,17 @@
     els.developerRetainVideoInput.checked = developerSettings.retainVideo;
     els.developerRetainImagesInput.checked = developerSettings.retainImages;
     els.developerCaptureAudioInput.checked = developerSettings.captureAudio;
+    els.developerAnalyzeShotBtn.disabled = !developerSettings.enabled;
+    els.developerDatasetBtn.disabled = !developerSettings.enabled;
     if (els.shotAnalysisCameraSide) els.shotAnalysisCameraSide.value = developerSettings.cameraSide;
+    els.shotCameraDistanceInput.value = String(developerSettings.cameraDistanceCm);
+    els.shotCameraDistanceOutput.textContent = `${developerSettings.cameraDistanceCm} cm`;
+    els.shotCameraHeightInput.value = String(developerSettings.cameraHeightAboveNetCm);
+    els.shotCameraHeightOutput.textContent = `${developerSettings.cameraHeightAboveNetCm} cm`;
+    els.shotCameraPitchInput.value = String(developerSettings.cameraPitchDeg);
+    els.shotCameraPitchOutput.textContent = `${developerSettings.cameraPitchDeg}°`;
     if (els.shotDatasetRepetitions && document.activeElement !== els.shotDatasetRepetitions) els.shotDatasetRepetitions.value = String(developerSettings.datasetRepetitions);
     if (els.shotDatasetInterval && document.activeElement !== els.shotDatasetInterval) els.shotDatasetInterval.value = String(developerSettings.datasetIntervalSeconds);
-    els.shotAnalysisBtn.hidden = !developerSettings.enabled;
     if (els.androidAppDownloadCard) els.androidAppDownloadCard.hidden = isNativeAndroidHost();
     if (!developerSettings.enabled) els.developerStorageStatus.textContent = "";
     renderShotAnalysisControls();
@@ -2848,11 +2873,16 @@
     context.strokeStyle = "rgba(198,168,255,.95)";
     context.fillStyle = "rgba(30,20,48,.45)";
     if (!screenPoints.length) {
+      const distanceScale = clamp(50 / developerSettings.cameraDistanceCm, .42, 1.08, 1);
+      const verticalShift = clamp((developerSettings.cameraHeightAboveNetCm - 30) * .002 - (developerSettings.cameraPitchDeg - 2) * .008, -.16, .16, 0);
+      const centreX = content.x + content.width * .5;
+      const nearHalfWidth = content.width * .44 * distanceScale;
+      const farHalfWidth = content.width * .34 * distanceScale;
       const guide = [
-        { x:content.x + content.width * .08, y:content.y + content.height * .78 },
-        { x:content.x + content.width * .17, y:content.y + content.height * .40 },
-        { x:content.x + content.width * .83, y:content.y + content.height * .40 },
-        { x:content.x + content.width * .92, y:content.y + content.height * .78 },
+        { x:centreX - nearHalfWidth, y:content.y + content.height * (.80 + verticalShift) },
+        { x:centreX - farHalfWidth, y:content.y + content.height * (.42 + verticalShift) },
+        { x:centreX + farHalfWidth, y:content.y + content.height * (.42 + verticalShift) },
+        { x:centreX + nearHalfWidth, y:content.y + content.height * (.80 + verticalShift) },
       ];
       context.setLineDash([8, 7]);
       context.beginPath();
@@ -2869,6 +2899,8 @@
       context.textAlign = "center";
       context.fillStyle = "rgba(229,215,250,.92)";
       context.fillText("SIDE VIEW · NET IN THE CENTRE", content.x + content.width / 2, content.y + 20);
+      context.font = "600 11px system-ui";
+      context.fillText(`${developerSettings.cameraDistanceCm} cm from edge · net + ${developerSettings.cameraHeightAboveNetCm} cm · ${developerSettings.cameraPitchDeg}° down`, content.x + content.width / 2, content.y + 38);
       return;
     }
     context.beginPath();
@@ -2958,7 +2990,8 @@
     const cameraOn = Boolean(shotAnalysisStream);
     const recording = shotAnalysisRecorder?.state === "recording";
     els.shotAnalysisCameraEmpty.hidden = cameraOn;
-    els.shotAnalysisCameraBtn.textContent = cameraOn ? "Turn camera off" : "Enable camera";
+    els.shotAnalysisSwitchCameraBtn.disabled = !cameraOn || shotAnalysisVideoDevices.length < 2;
+    els.shotAnalysisSwitchCameraBtn.textContent = shotAnalysisVideoDevices.length > 1 ? `Switch camera · ${shotAnalysisVideoDevices.length}` : "Switch camera";
     els.shotAnalysisRecordBtn.disabled = !cameraOn || typeof MediaRecorder === "undefined";
     els.shotAnalysisRecordBtn.textContent = recording ? "Stop recording" : "Start recording";
     els.shotAnalysisRecordBtn.classList.toggle("recording", recording);
@@ -2999,14 +3032,17 @@
     shotAnalysisFrameCallbackId = video.requestVideoFrameCallback(onFrame);
   }
 
-  async function startShotAnalysisCamera() {
+  async function startShotAnalysisCamera(deviceId = "") {
     if (shotAnalysisStream) return shotAnalysisStream;
     if (!isNativeAndroidHost()) {
       offerAndroidAppForCamera();
       throw new Error("Install the Android app to use camera capture.");
     }
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera capture is unavailable in this browser.");
-    const video = { facingMode:{ ideal:"environment" }, width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:60, min:30 } };
+    const video = {
+      ...(deviceId ? { deviceId:{ exact:deviceId } } : { facingMode:{ ideal:"environment" } }),
+      width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:60, min:30 },
+    };
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video, audio:developerSettings.captureAudio });
@@ -3018,10 +3054,13 @@
     shotAnalysisStream = stream;
     els.shotAnalysisVideo.srcObject = stream;
     await els.shotAnalysisVideo.play();
+    shotAnalysisVideoDevices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === "videoinput");
     ensureShotAnalysisSession().camera = cameraSettingsForAnalysis();
     ensureShotAnalysisSession().cameraTracks = cameraTrackDetailsForAnalysis();
     analysisLog("camera-start", { settings:cameraSettingsForAnalysis(), tracks:cameraTrackDetailsForAnalysis(), audioTracks:stream.getAudioTracks().length });
-    els.shotAnalysisCameraStatus.textContent = `${fmt(cameraSettingsForAnalysis().width,0)}×${fmt(cameraSettingsForAnalysis().height,0)} · ${fmt(cameraSettingsForAnalysis().frameRate,1)} fps requested/delivered · ${stream.getAudioTracks().length ? "audio on" : "no audio"}`;
+    const activeDeviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+    const activeDevice = shotAnalysisVideoDevices.find(device => device.deviceId === activeDeviceId);
+    els.shotAnalysisCameraStatus.textContent = `${activeDevice?.label || "Rear camera"} · ${fmt(cameraSettingsForAnalysis().width,0)}×${fmt(cameraSettingsForAnalysis().height,0)} · ${fmt(cameraSettingsForAnalysis().frameRate,1)} fps · ${stream.getAudioTracks().length ? "audio on" : "no audio"}`;
     startShotAnalysisFrameLoop();
     renderShotAnalysisControls();
     return stream;
@@ -3042,9 +3081,16 @@
     renderShotAnalysisControls();
   }
 
-  async function toggleShotAnalysisCamera() {
+  async function switchShotAnalysisCamera() {
     try {
-      if (shotAnalysisStream) await stopShotAnalysisCamera(); else await startShotAnalysisCamera();
+      if (!shotAnalysisStream) return await startShotAnalysisCamera();
+      const currentId = shotAnalysisStream.getVideoTracks()[0]?.getSettings?.().deviceId || "";
+      const currentIndex = shotAnalysisVideoDevices.findIndex(device => device.deviceId === currentId);
+      const next = shotAnalysisVideoDevices[(currentIndex + 1 + shotAnalysisVideoDevices.length) % shotAnalysisVideoDevices.length];
+      if (!next || next.deviceId === currentId) return;
+      await stopShotAnalysisCamera();
+      await startShotAnalysisCamera(next.deviceId);
+      toast(`Using ${next.label || "next camera"}`);
     } catch (error) {
       analysisLog("camera-error", { message:error.message });
       toast(`Camera could not start: ${error.message}`);
@@ -3229,7 +3275,7 @@
     downloadBlobFile(`${shotAnalysisSession.id}.${extension}`, shotAnalysisVideoBlob);
   }
 
-  async function openShotAnalysis() {
+  async function openShotAnalysis({ focusDataset = false } = {}) {
     if (!developerSettings.enabled) return;
     if (!isNativeAndroidHost()) {
       offerAndroidAppForCamera();
@@ -3239,6 +3285,13 @@
     renderShotAnalysisControls();
     els.shotAnalysisDialog.showModal();
     setTimeout(drawShotAnalysisOverlay, 0);
+    try {
+      await startShotAnalysisCamera();
+      if (focusDataset) setTimeout(() => els.shotAnalysisDataset.scrollIntoView({ behavior:"smooth", block:"start" }), 100);
+    } catch (error) {
+      analysisLog("camera-error", { message:error.message });
+      els.shotAnalysisCameraStatus.textContent = `Camera unavailable: ${error.message}`;
+    }
   }
 
   async function closeShotAnalysis() {
@@ -3249,6 +3302,7 @@
     if (shotAnalysisRecorder?.state === "recording") await stopShotAnalysisRecording();
     await stopShotAnalysisCamera();
     await persistShotAnalysisSession("dialog-close");
+    cleanupTransientDatasetDrill();
     els.shotAnalysisDialog.close();
   }
 
@@ -3349,12 +3403,14 @@
             resolveShotDatasetFinalize?.();
             resolveShotDatasetFinalize = null;
             shotDatasetFinalizePromise = null;
+            cleanupTransientDatasetDrill();
             renderShotAnalysisControls();
           }
         },
       });
     } catch (error) {
       shotDatasetCaptureRunning = false;
+      cleanupTransientDatasetDrill();
       els.shotDatasetStatus.textContent = `Dataset capture could not start: ${error.message}`;
       analysisLog("dataset-error", { message:error.message });
       toast(error.message);
@@ -3374,7 +3430,7 @@
   }
 
   function appViewLabel(view) {
-    return view === "run" ? "Run drill" : view === "editor" ? "Drill editor" : view === "robot" ? "Robot" : "Drill library";
+    return view === "run" ? "Run drill" : view === "editor" ? "Drill editor" : view === "robot" ? "Robot" : view === "developer" ? "Development" : "Drill library";
   }
 
   function getAiContext() {
@@ -3403,6 +3459,9 @@
       context.localContext.push(`Idle STOP: ${library.robotSettings.stopAfterNoShotMinutes ? `${library.robotSettings.stopAfterNoShotMinutes} minutes after the last shot` : "Never"}`);
       context.localContext.push(`BLE disconnect: ${library.robotSettings.disconnectAfterIdleMinutes ? `${library.robotSettings.disconnectAfterIdleMinutes} minutes unused` : "Never"}`);
       context.localContext.push(`Adaptive timing player: ${activePlayerModel().name} at ${fmt(activePlayerModel().timingSpeedPct,0)}%`);
+    } else if (!modalOpen && appView === "developer") {
+      context.localContext.push(`Development mode: ${developerSettings.enabled ? "enabled" : "disabled"}`);
+      context.localContext.push("Temporary tools: camera alignment and balanced dataset capture");
     } else if (!calibrationOpen && appView === "run" && drill) {
       context.localContext.push("Playback: continuous loops until stopped");
       context.localContext.push("Timing: authored by drill graph connections");
@@ -3428,7 +3487,7 @@
 
   function getAiActionCatalog() {
     return {
-      screens: ["library", "run", "editor", "robot", "calibration"],
+      screens: ["library", "run", "editor", "robot", "developer", "calibration"],
       builtIns: (builtInCatalog?.drills || []).map(drill => ({
         id: drill.id,
         name: builtInDisplayName(drill.name),
@@ -3453,7 +3512,7 @@
   }
 
   function navigateApp(view, { push = true, allowBuiltInEditor = false } = {}) {
-    const normalized = ["library", "run", "editor", "robot"].includes(view) ? view : "library";
+    const normalized = ["library", "run", "editor", "robot", "developer"].includes(view) ? view : "library";
     if (normalized === "editor" && isActiveBuiltIn() && !allowBuiltInEditor) {
       const drill = activeDrill();
       askConfirm(
@@ -3466,7 +3525,7 @@
     }
     if (normalized === "run" && !activeDrill()) view = "library";
     if (normalized === "editor" && !activeDrill()) view = "library";
-    const next = ["library", "run", "editor", "robot"].includes(view) ? view : "library";
+    const next = ["library", "run", "editor", "robot", "developer"].includes(view) ? view : "library";
     if (appView === "run" && next !== "run" && (playbackRunning || calibrationTestRunning || robotIsActive())) {
       void enterRobotIdleState("Leaving Run");
     }
@@ -3475,7 +3534,7 @@
     inspectorOpen = false;
     selection = next === "editor" ? selection : selection;
     document.body.dataset.appView = next;
-    const screens = { library: els.libraryScreen, run: els.runScreen, editor: els.editorScreen, robot: els.robotScreen };
+    const screens = { library: els.libraryScreen, run: els.runScreen, editor: els.editorScreen, robot: els.robotScreen, developer: els.developerScreen };
     Object.entries(screens).forEach(([key, screen]) => { if (screen) screen.hidden = key !== next; });
     if (els.topbarContext) els.topbarContext.textContent = appViewLabel(next);
     if (els.topBackBtn) els.topBackBtn.hidden = appHistory.length === 0;
@@ -11504,6 +11563,8 @@
     document.addEventListener("fullscreenchange", updateFullscreenButton);
     document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
     updateFullscreenButton();
+    els.developerMenuBtn.addEventListener("click", () => navigateApp("developer", { push:true }));
+    els.developerBackBtn.addEventListener("click", goBackApp);
     els.robotConnectBtn.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotDialogConnectBtn?.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotStatusBtn.addEventListener("click", () => navigateApp("robot", { push: true }));
@@ -11575,11 +11636,12 @@
     els.resetLiveTuningBtn.addEventListener("click", resetLiveTuning);
     els.saveEffectiveDrillBtn.addEventListener("click", saveEffectiveDrillAsNew);
     els.updateRobotPoseBtn.addEventListener("click", openPoseCalibration);
-    els.shotAnalysisBtn.addEventListener("click", () => { void openShotAnalysis(); });
+    els.developerAnalyzeShotBtn.addEventListener("click", () => { void openShotAnalysis(); });
+    els.developerDatasetBtn.addEventListener("click", () => { void openShotAnalysis({ focusDataset:true }); });
     els.closeShotAnalysisBtn.addEventListener("click", () => { void closeShotAnalysis(); });
     els.shotAnalysisDialog.addEventListener("cancel", event => { event.preventDefault(); void closeShotAnalysis(); });
     els.shotAnalysisPlayBtn.addEventListener("click", () => { void togglePlaybackFromShotAnalysis(); });
-    els.shotAnalysisCameraBtn.addEventListener("click", () => { void toggleShotAnalysisCamera(); });
+    els.shotAnalysisSwitchCameraBtn.addEventListener("click", () => { void switchShotAnalysisCamera(); });
     els.shotAnalysisRecordBtn.addEventListener("click", () => { void toggleShotAnalysisRecording(); });
     els.shotAnalysisSnapshotBtn.addEventListener("click", () => { void captureShotAnalysisImage("still"); });
     els.shotAnalysisBackgroundBtn.addEventListener("click", () => { void captureShotAnalysisImage("background"); });
@@ -11700,17 +11762,33 @@
     els.robotSettingsShortcutBtn?.addEventListener("click", () => openCalibrationWorkspace("pose"));
     els.developerModeInput.addEventListener("change", () => {
       developerSettings.enabled = els.developerModeInput.checked;
+      if (developerSettings.enabled) {
+        developerSettings.retainLogs = true;
+        developerSettings.retainVideo = true;
+        developerSettings.retainImages = true;
+        developerSettings.captureAudio = true;
+      }
       saveDeveloperSettings();
       renderDeveloperSettings();
       if (developerSettings.enabled) {
         void refreshDeveloperStorageStatus();
-        toast("Developer mode enabled · Analyze shot is now available in Run");
+        toast("Development mode enabled · debugging capture is on");
       } else {
         if (els.shotAnalysisDialog.open) void closeShotAnalysis();
         else void stopShotAnalysisCamera();
         toast("Developer mode disabled");
       }
     });
+    [
+      [els.shotCameraDistanceInput, "cameraDistanceCm"],
+      [els.shotCameraHeightInput, "cameraHeightAboveNetCm"],
+      [els.shotCameraPitchInput, "cameraPitchDeg"],
+    ].forEach(([input, key]) => input.addEventListener("input", () => {
+      developerSettings[key] = finite(input.value, developerSettings[key]);
+      saveDeveloperSettings();
+      renderDeveloperSettings();
+      drawShotAnalysisOverlay();
+    }));
     [
       [els.developerRetainLogsInput, "retainLogs"],
       [els.developerRetainVideoInput, "retainVideo"],

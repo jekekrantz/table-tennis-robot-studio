@@ -1498,8 +1498,8 @@ textarea { font:inherit; color:inherit; }
   position:sticky;
   top:0;
   z-index:120;
-  min-height:64px;
-  padding:10px 16px;
+  min-height:calc(64px + env(safe-area-inset-top));
+  padding:calc(10px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));
   border-bottom:1px solid var(--border);
   background:rgba(13,17,24,.97);
   backdrop-filter:blur(12px);
@@ -1535,6 +1535,19 @@ textarea { font:inherit; color:inherit; }
   font-weight:750;
 }
 .topbar-actions { display:flex; align-items:center; justify-self:end; gap:8px; }
+.global-developer-button {
+  min-height:40px;
+  padding:7px 9px;
+  border:1px solid #6d55a0;
+  border-radius:10px;
+  background:#211b31;
+  color:#d8c8ff;
+  cursor:pointer;
+  font-size:.68rem;
+  font-weight:850;
+  letter-spacing:.06em;
+}
+.global-developer-button:hover,.global-developer-button:focus-visible { border-color:#9c7ed0; background:#302542; outline:none; }
 .fullscreen-button {
   width:40px;
   height:40px;
@@ -1577,7 +1590,7 @@ textarea { font:inherit; color:inherit; }
 .app-layout { display:block; min-height:0; }
 .app-main { min-width:0; }
 .app-screen { min-width:0; padding:22px clamp(16px,3vw,36px) 40px; }
-.library-screen,.run-screen,.robot-screen { max-width:1180px; margin:0 auto; }
+.library-screen,.run-screen,.robot-screen,.developer-screen { max-width:1180px; margin:0 auto; }
 .screen-header {
   display:flex;
   align-items:center;
@@ -2268,9 +2281,14 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .details-fieldset legend { padding:0 5px; color:#cbd4df; font-size:.78rem; font-weight:750; }
 
 /* Developer shot-analysis capture */
-.shot-analysis-dialog { width:min(860px,calc(100vw - 24px)); max-height:calc(100dvh - 24px); border:1px solid #55446f; border-radius:15px; background:var(--panel); color:var(--text); padding:0; }
+.developer-page-grid { display:grid; gap:12px; }
+.developer-tools-card { display:grid; gap:12px; }
+.developer-tools-card h3,.developer-tools-card p { margin:0; }
+.developer-tools-card p { margin-top:5px; color:var(--muted); font-size:.76rem; line-height:1.45; }
+.developer-tools-card .wide { width:100%; min-height:46px; }
+.shot-analysis-dialog { width:calc(100vw - 12px); max-width:1100px; max-height:calc(100dvh - 12px); border:1px solid #55446f; border-radius:15px; background:var(--panel); color:var(--text); padding:0; }
 .shot-analysis-dialog::backdrop { background:rgba(3,5,9,.84); }
-.shot-analysis-frame { max-height:calc(100dvh - 26px); overflow-y:auto; display:grid; gap:14px; }
+.shot-analysis-frame { max-height:calc(100dvh - 14px); overflow-y:auto; display:grid; gap:14px; }
 .shot-analysis-frame > header { position:sticky; top:0; z-index:5; align-items:flex-start; padding-bottom:10px; border-bottom:1px solid var(--border); background:var(--panel); }
 .shot-analysis-frame > header .eyebrow { color:#bda5e5; }
 .shot-analysis-playback { display:grid; grid-template-columns:minmax(150px,220px) minmax(0,1fr); align-items:center; gap:10px; padding:10px; border:1px solid #425066; border-radius:11px; background:#111822; }
@@ -2278,7 +2296,7 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .shot-analysis-playback .play-button.running { background:var(--danger); border-color:var(--danger); color:#21090d; }
 .shot-analysis-playback > span { color:var(--muted); font-size:.72rem; }
 .shot-analysis-camera-card,.shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { margin:0; padding:12px; border:1px solid var(--border); border-radius:12px; background:#111720; }
-.shot-analysis-camera-stage { position:relative; aspect-ratio:16 / 9; overflow:hidden; display:grid; place-items:center; border:1px solid #435068; border-radius:10px; background:#05070a; }
+.shot-analysis-camera-stage { position:relative; min-height:min(64dvh,660px); aspect-ratio:16 / 9; overflow:hidden; display:grid; place-items:center; border:1px solid #435068; border-radius:10px; background:#05070a; }
 .shot-analysis-camera-stage video,.shot-analysis-camera-stage canvas { position:absolute; inset:0; width:100%; height:100%; }
 .shot-analysis-camera-stage video { object-fit:contain; }
 .shot-analysis-camera-stage canvas { z-index:2; pointer-events:none; touch-action:none; }
@@ -2286,6 +2304,11 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .shot-analysis-camera-empty { z-index:3; width:min(80%,420px); display:grid; gap:6px; color:var(--muted); text-align:center; font-size:.72rem; line-height:1.4; pointer-events:none; }
 .shot-analysis-camera-empty strong { color:#dce5ef; font-size:.9rem; }
 .shot-analysis-camera-card > .helper { margin:8px 0; }
+.shot-camera-position-controls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }
+.shot-camera-position-controls label { display:grid; gap:7px; padding:9px; border:1px solid #303949; border-radius:9px; background:#0b1017; color:#cbd5e1; font-size:.7rem; font-weight:750; }
+.shot-camera-position-controls label > span { display:flex; justify-content:space-between; gap:8px; }
+.shot-camera-position-controls output { color:#d8c8ff; white-space:nowrap; }
+.shot-camera-position-controls input { width:100%; accent-color:#9c7ed0; }
 .shot-analysis-primary-actions,.shot-analysis-secondary-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .shot-analysis-primary-actions .button,.shot-analysis-secondary-actions .button { min-height:42px; }
 .shot-analysis-secondary-actions .wide { grid-column:1 / -1; }
@@ -2313,10 +2336,11 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
   .model-default-card { grid-column:auto; }
   html,body { min-height:100%; height:auto; }
   body { display:block !important; height:auto !important; min-height:100dvh; overflow:auto !important; padding-bottom:0 !important; }
-  .app-topbar { min-height:56px; padding:7px 10px; }
+  .app-topbar { min-height:calc(56px + env(safe-area-inset-top)); padding:calc(7px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 7px max(10px,env(safe-area-inset-left)); }
   .compact-brand h1 { font-size:.94rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .compact-brand p { font-size:.62rem; }
   .global-robot-status { min-height:38px; padding:6px 9px; }
+  .global-developer-button { min-height:38px; padding:6px 7px; }
   .fullscreen-button { width:38px; height:38px; }
   .app-screen { padding:14px 12px 24px; }
   .screen-header { align-items:flex-start; margin-bottom:12px; }
@@ -2417,6 +2441,8 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
   .shot-analysis-frame > header p:not(.eyebrow) { display:none; }
   .shot-analysis-playback { grid-template-columns:1fr; gap:6px; padding:8px; }
   .shot-analysis-playback > span { text-align:center; }
+  .shot-analysis-camera-stage { min-height:62dvh; aspect-ratio:auto; }
+  .shot-camera-position-controls { grid-template-columns:1fr; }
   .shot-analysis-camera-card,.shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { padding:9px; }
   .shot-dataset-fields { grid-template-columns:1fr; }
   .add-node-choice-grid { grid-template-columns:1fr; }

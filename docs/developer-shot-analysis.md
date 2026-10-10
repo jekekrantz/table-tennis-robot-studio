@@ -1,17 +1,21 @@
 # Developer shot-analysis capture
 
-The experimental shot-analysis capture is intentionally hidden until **Robot →
-Developer features → Developer mode** is enabled. Developer mode adds an
-**Analyze shot** button to Run. It does not alter drill compilation, Nova commands,
-calibration, or the outcome-to-hardware solver.
+The experimental tools live under the persistent **DEV** button in the top bar.
+Turn on **Development mode** there to enable camera alignment and standalone
+dataset capture. Enabling it also turns on log, video/audio and image retention;
+each artifact type can then be disabled individually. Development mode does not
+alter normal drills, calibration, or the outcome-to-hardware solver.
 
 ## Current vertical slice
 
-The Run capture window provides:
+The shot-analysis window provides:
 
 - the same safe Start/Stop drill path used by the ordinary Run button;
-- rear-camera capture with a 1080p/60 fps preference and an automatic video-only
+- immediate rear-camera capture with a 1080p/60 fps preference and an automatic video-only
   fallback when microphone permission is unavailable;
+- switching among the cameras/lenses reported by Android;
+- approximate camera-distance, height-above-net and downward-pitch guides,
+  initially set to 50 cm, 30 cm and 2°;
 - `MediaRecorder` video/audio capture with a manual download;
 - monotonic timestamps for Nova state, log, active-shot and `0x05` served-ball
   events;
@@ -24,10 +28,9 @@ The Run capture window provides:
 - independent opt-in retention for logs, video/audio and images in browser
   IndexedDB.
 
-All persistent developer retention is off by default. Developer settings and
-camera landmarks use their own local-storage key and are not part of portable
-drill exports. **Clear stored artifacts** deletes retained IndexedDB captures but
-does not delete drills or the saved table landmarks.
+Developer settings and camera landmarks use their own local-storage key and are
+not part of portable drill exports. **Clear stored artifacts** deletes retained
+IndexedDB captures but does not delete drills or the saved table landmarks.
 
 ## Balanced dataset recorder
 
@@ -46,8 +49,8 @@ warm-up, battery state or elapsed time.
 
 1. It checks that the camera is active, microphone audio is present when
    requested, and all six table/net landmarks are saved.
-2. It creates or refreshes an inspectable `Developer dataset · balanced
-   trajectories` drill in My drills.
+2. It creates a temporary `Developer dataset · balanced trajectories` execution
+   plan that is removed when capture ends; it never appears in My drills.
 3. It records a 1.5-second pre-roll and still image, freezes variation and live
    tuning, and runs the exact protocol.
 4. It joins every Nova served-ball event to the expected condition, repetition
@@ -74,11 +77,14 @@ captured pre/post stills.
    net posts, the table surface and useful space above the table visible. Aim
    approximately perpendicular to the long axis and avoid an extreme wide-angle
    lens when the phone offers a normal rear camera.
-2. Enable Developer mode and select which artifacts, if any, should persist.
-3. Open the drill in Run and choose **Analyze shot**.
+2. Open **DEV**, enable Development mode, and adjust retention if needed.
+3. Choose **Open camera alignment** for an individual sequence, or **Set up
+   dataset recording** for the standalone balanced protocol. The camera starts
+   immediately.
 4. Select whether the tripod is on the left or right long side, viewed from the
    robot toward the player. Changing sides resets the viewpoint calibration.
-5. Enable the camera, then use **Mark table**. Tap the robot-end corners nearer
+5. Select the closest camera lens, adjust the distance/height/pitch sliders until
+   the projected table is approximately aligned, then use **Mark table**. Tap the robot-end corners nearer
    and farther from the camera, then the player-end corners farther and nearer
    the camera. Finish with the nearer and farther net-post tops.
 6. With nobody in view, choose **Set empty background**.

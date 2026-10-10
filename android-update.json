@@ -1,0 +1,8 @@
+{
+  "schema": "table-tennis-robot-studio/android-update/v1",
+  "versionCode": 4,
+  "versionName": "2026-10-10.4",
+  "buildId": "2026-10-10.4",
+  "apkUrl": "https://jekekrantz.github.io/table-tennis-robot-studio/downloads/table-tennis-robot-studio-android-preview.apk",
+  "sha256": "61be00e6d6dd0f44b68ee6bd82d1741deaa9f6da0b81715e17e6f8ba9f8708c4"
+}

@@ -18,4 +18,5 @@ fi
 cd "$repo_dir/android"
 ./gradlew assembleDebug
 printf 'APK: %s\n' "$repo_dir/android/app/build/outputs/apk/debug/app-debug.apk"
-
+printf 'Stage for website: cp %s %s\n' "$repo_dir/android/app/build/outputs/apk/debug/app-debug.apk" "$repo_dir/downloads/table-tennis-robot-studio-android-preview.apk"
+printf 'Then refresh update metadata: python3 scripts/android_update_manifest.py --write\n'

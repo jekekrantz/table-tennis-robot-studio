@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Table Tennis Robot Studio</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="styles.css">
@@ -15,6 +15,7 @@
       <p id="topbarContext">Drill library</p>
     </div>
     <div class="topbar-actions">
+      <button id="developerMenuBtn" class="global-developer-button" type="button" aria-label="Open development tools">DEV</button>
       <button id="fullscreenBtn" class="fullscreen-button" type="button" aria-label="Enter full screen" title="Enter full screen">
         <svg class="fullscreen-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
         <svg class="fullscreen-exit-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
@@ -79,7 +80,6 @@
             <section class="run-controls" aria-label="Drill playback controls">
               <button id="playBtn" class="play-button run-play-button" type="button"><span id="playIcon" aria-hidden="true">▶</span><span id="playText">Play</span></button>
               <button id="updateRobotPoseBtn" class="button run-calibrate-button primary" type="button">Calibrate pose</button>
-              <button id="shotAnalysisBtn" class="button run-shot-analysis-button ghost" type="button" hidden>◉ Analyze shot</button>
               <span id="runStatus" class="run-status" aria-live="polite"></span>
             </section>
           </section>
@@ -182,25 +182,6 @@
               <p id="robotIdleStatus" class="helper" aria-live="polite"></p>
             </div>
           </section>
-          <section class="developer-settings-card panel-card">
-            <div><h3>Developer features</h3><p>Experimental tools for collecting synchronized robot, camera and audio evidence. They do not change the shot sent to Nova.</p></div>
-            <div id="androidAppDownloadCard" class="android-app-download-card">
-              <div><strong>Use the Android app for camera capture</strong><small>The local app runs this same interface and gives the capture tools access to Android camera services.</small></div>
-              <a id="androidAppDownloadBtn" class="button primary wide" href="downloads/table-tennis-robot-studio-android-preview.apk" download>Download Android app</a>
-              <small class="helper">Preview build for Android 8 or newer. Android may ask you to allow installation from this browser.</small>
-            </div>
-            <label class="developer-toggle"><input id="developerModeInput" type="checkbox"><span><strong>Developer mode</strong><small>Shows unfinished diagnostic controls in Run.</small></span></label>
-            <div id="developerRetentionOptions" class="developer-retention-options" hidden>
-              <strong>Retain debugging artifacts on this device</strong>
-              <label><input id="developerRetainLogsInput" type="checkbox"> Event and frame-timing logs</label>
-              <label><input id="developerRetainVideoInput" type="checkbox"> Recorded video and audio</label>
-              <label><input id="developerRetainImagesInput" type="checkbox"> Calibration, background and still images</label>
-              <label><input id="developerCaptureAudioInput" type="checkbox" checked> Include audio in new recordings</label>
-              <p class="helper">Retention is off by default. Media is stored locally in this browser and is never included in exported drills.</p>
-              <button id="developerClearArtifactsBtn" class="button compact danger" type="button">Clear stored artifacts</button>
-              <p id="developerStorageStatus" class="helper" aria-live="polite"></p>
-            </div>
-          </section>
           <section class="player-model-card panel-card">
             <div class="section-title-row"><div><h3>Adaptive timing player</h3><p class="helper">The selected player model applies to every Adaptive Auto connection.</p></div><button id="newPlayerModelBtn" class="button compact ghost" type="button">New</button></div>
             <label class="field"><span>Player model</span><select id="playerModelSelect"></select></label>
@@ -226,6 +207,39 @@
             </details>
           </section>
           <section class="model-default-card panel-card"><h3>Current defaults</h3><dl><div><dt>Base → yaw pivot</dt><dd>24.2 cm</dd></div><div><dt>Yaw → pitch → wheels</dt><dd>7.5 + 7.5 cm</dd></div><div><dt>Yaw pivot height</dt><dd>24.0 cm</dd></div><div><dt>Exit speed model</dt><dd>One affine line</dd></div></dl></section>
+        </div>
+      </section>
+
+      <section id="developerScreen" class="app-screen developer-screen" data-screen="developer" hidden>
+        <header class="screen-header compact-screen-header"><button id="developerBackBtn" class="screen-back-button" type="button" aria-label="Back">←</button><div class="screen-title-grow"><p class="eyebrow">Temporary tools</p><h2>Development</h2><p>Camera alignment, synchronized capture and diagnostic datasets.</p></div></header>
+        <div class="developer-page-grid">
+          <section class="developer-settings-card panel-card">
+            <div><h3>Development mode</h3><p>Enable temporary diagnostic tools. New debugging sessions retain all available logs, media and images by default.</p></div>
+            <div id="androidAppDownloadCard" class="android-app-download-card">
+              <div><strong>Use the Android app for camera capture</strong><small>The local app runs this same interface. Native Camera2 metadata will be added here as capture work progresses.</small></div>
+              <a id="androidAppDownloadBtn" class="button primary wide" href="downloads/table-tennis-robot-studio-android-preview.apk" download>Download Android app</a>
+              <small class="helper">Preview build for Android 8 or newer. Android may ask you to allow installation from this browser.</small>
+            </div>
+            <label class="developer-toggle"><input id="developerModeInput" type="checkbox"><span><strong>Enable development mode</strong><small>Enables camera alignment, dataset capture and diagnostic retention.</small></span></label>
+            <div id="developerRetentionOptions" class="developer-retention-options" hidden>
+              <strong>Debugging artifacts</strong>
+              <label><input id="developerRetainLogsInput" type="checkbox"> Event and frame-timing logs</label>
+              <label><input id="developerRetainVideoInput" type="checkbox"> Recorded video and audio</label>
+              <label><input id="developerRetainImagesInput" type="checkbox"> Calibration, background and still images</label>
+              <label><input id="developerCaptureAudioInput" type="checkbox" checked> Include audio in new recordings</label>
+              <p class="helper">These are enabled together when development mode is turned on. Media stays on this device and is never included in exported drills.</p>
+              <button id="developerClearArtifactsBtn" class="button compact danger" type="button">Clear stored artifacts</button>
+              <p id="developerStorageStatus" class="helper" aria-live="polite"></p>
+            </div>
+          </section>
+          <section class="developer-tools-card panel-card">
+            <div><h3>Camera and shot analysis</h3><p>Open the live camera immediately, align the table and record an individual test sequence.</p></div>
+            <button id="developerAnalyzeShotBtn" class="button primary wide" type="button">Open camera alignment</button>
+          </section>
+          <section class="developer-tools-card panel-card">
+            <div><h3>Balanced development dataset</h3><p>A standalone 10-condition robot sequence. It does not appear in My drills or modify the drill you were using.</p></div>
+            <button id="developerDatasetBtn" class="button primary wide" type="button">Set up dataset recording</button>
+          </section>
         </div>
       </section>
     </main>
@@ -532,26 +546,31 @@
         <button id="closeShotAnalysisBtn" class="icon-button" type="button" aria-label="Close">×</button>
       </header>
 
-      <section class="shot-analysis-playback" aria-label="Drill controls">
-        <button id="shotAnalysisPlayBtn" class="play-button" type="button"><span id="shotAnalysisPlayIcon" aria-hidden="true">▶</span><span id="shotAnalysisPlayText">Start drill</span></button>
-        <span id="shotAnalysisPlaybackStatus" aria-live="polite">Drill stopped</span>
-      </section>
-
       <section class="shot-analysis-camera-card">
         <div class="shot-analysis-camera-stage">
           <video id="shotAnalysisVideo" playsinline muted></video>
           <canvas id="shotAnalysisOverlay" aria-label="Camera alignment and table landmark overlay"></canvas>
           <div id="shotAnalysisCameraEmpty" class="shot-analysis-camera-empty"><strong>Camera off</strong><span>Mount the phone in landscape on a tripod beside the net, far enough back to see both end lines and the ball above the table.</span></div>
         </div>
+        <div class="shot-camera-position-controls" aria-label="Approximate camera placement">
+          <label><span>Distance from table edge <output id="shotCameraDistanceOutput">50 cm</output></span><input id="shotCameraDistanceInput" type="range" min="30" max="150" step="10" value="50"></label>
+          <label><span>Height above net <output id="shotCameraHeightOutput">30 cm</output></span><input id="shotCameraHeightInput" type="range" min="0" max="100" step="5" value="30"></label>
+          <label><span>Downward pitch <output id="shotCameraPitchOutput">2°</output></span><input id="shotCameraPitchInput" type="range" min="-15" max="20" step="1" value="2"></label>
+        </div>
         <p id="shotAnalysisCameraStatus" class="helper" aria-live="polite">Enable the rear camera to begin.</p>
         <div class="shot-analysis-primary-actions">
-          <button id="shotAnalysisCameraBtn" class="button primary" type="button">Enable camera</button>
+          <button id="shotAnalysisSwitchCameraBtn" class="button primary" type="button">Switch camera</button>
           <button id="shotAnalysisRecordBtn" class="button danger" type="button" disabled>Start recording</button>
         </div>
         <div class="shot-analysis-secondary-actions">
           <button id="shotAnalysisSnapshotBtn" class="button ghost" type="button" disabled>Save still</button>
           <button id="shotAnalysisBackgroundBtn" class="button ghost" type="button" disabled>Set empty background</button>
         </div>
+      </section>
+
+      <section class="shot-analysis-playback" aria-label="Drill controls">
+        <button id="shotAnalysisPlayBtn" class="play-button" type="button"><span id="shotAnalysisPlayIcon" aria-hidden="true">▶</span><span id="shotAnalysisPlayText">Start drill</span></button>
+        <span id="shotAnalysisPlaybackStatus" aria-live="polite">Drill stopped</span>
       </section>
 
       <details class="shot-analysis-calibration" open>
@@ -565,7 +584,7 @@
         </div>
       </details>
 
-      <section class="shot-analysis-dataset" aria-labelledby="shotDatasetTitle">
+      <section id="shotAnalysisDataset" class="shot-analysis-dataset" aria-labelledby="shotDatasetTitle">
         <div class="section-title-row"><h3 id="shotDatasetTitle">Balanced dataset run</h3><span id="shotDatasetBadge" class="status-badge neutral">100 balls</span></div>
         <p>Ten fixed trajectory conditions spanning speed, spin, depth and left/right placement. Their order rotates between repetitions to reduce time-drift bias.</p>
         <div class="shot-dataset-fields">
@@ -627,7 +646,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-10-10.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-10-10.4" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

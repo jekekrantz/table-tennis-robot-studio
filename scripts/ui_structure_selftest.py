@@ -472,6 +472,8 @@ for token in ('desktop-primary-nav', 'desktopBuiltInLayoutMap', 'mobileGraphLayo
         raise SystemExit(f"Desktop-only editor implementation must not return: {token}")
 if '.app-topbar,.app-layout { width:min(100%,430px); margin-inline:auto; }' not in css:
     raise SystemExit("The single product layout must remain phone-width on wide displays")
+if 'viewport-fit=cover' not in html or 'env(safe-area-inset-top)' not in css:
+    raise SystemExit("The app shell must reserve browser/installed-app display safe areas")
 for fixture in ("library", "run", "run-ball", "editor-graph", "add-node", "add-random", "add-repeat",
                 "add-subdrill", "shot-intuitive", "shot-manual", "serve-intuitive",
                 "pose-calibration", "robot", "calibration"):
@@ -482,12 +484,15 @@ for fixture in ("library", "run", "run-ball", "editor-graph", "add-node", "add-r
         raise SystemExit(f"Missing independently saved mobile fixture: {artifact.name}")
 if "mobile-primary-nav" in html or "mobile-primary-nav" in css:
     raise SystemExit("Obsolete persistent mobile navigation remains")
-for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"',
+for token in ('navigateApp("library"', 'navigateApp("run"', 'navigateApp("editor"', 'navigateApp("robot"', 'navigateApp("developer"',
               'openAddNodeMenu', 'openAddNodeConfig', 'openDrillDetails'):
     if token not in app:
         raise SystemExit(f"Missing app navigation/create flow: {token}")
-for token in ('id="developerModeInput"', 'id="shotAnalysisBtn"', 'id="shotAnalysisDialog"',
+for token in ('id="developerMenuBtn"', 'id="developerScreen"', 'id="developerModeInput"',
+              'id="developerAnalyzeShotBtn"', 'id="developerDatasetBtn"', 'id="shotAnalysisDialog"',
               'id="shotAnalysisPlayBtn"', 'id="shotAnalysisVideo"', 'id="shotAnalysisOverlay"',
+              'id="shotAnalysisSwitchCameraBtn"', 'id="shotCameraDistanceInput"',
+              'id="shotCameraHeightInput"', 'id="shotCameraPitchInput"',
               'id="shotAnalysisCameraSide"',
               'id="shotDatasetStartBtn"', 'id="shotDatasetRepetitions"', 'id="shotDatasetInterval"',
               'id="shotDatasetDownloadBtn"',
@@ -495,17 +500,32 @@ for token in ('id="developerModeInput"', 'id="shotAnalysisBtn"', 'id="shotAnalys
     if token not in html:
         raise SystemExit(f"Missing developer shot-analysis UI: {token}")
 for token in ('DEVELOPER_SETTINGS_STORAGE_KEY', 'function renderDeveloperSettings()',
-              'function analysisShotSnapshot(', 'function startShotAnalysisCamera()',
+              'function analysisShotSnapshot(', 'async function startShotAnalysisCamera(deviceId = "")',
+              'async function switchShotAnalysisCamera()', 'async function openShotAnalysis({ focusDataset = false } = {})',
               'function persistShotAnalysisSession(', 'function buildDatasetProtocolDrill(',
-              'function startShotDatasetCapture()', 'balancedDatasetSchedule',
+              'function cleanupTransientDatasetDrill()', 'function startShotDatasetCapture()', 'balancedDatasetSchedule',
               'robot.addEventListener("ball", noteRobotShot)'):
     if token not in app:
         raise SystemExit(f"Missing developer shot-analysis runtime integration: {token}")
-if 'els.shotAnalysisBtn.hidden = !developerSettings.enabled;' not in app:
-    raise SystemExit("Analyze shot must remain hidden unless developer mode is enabled")
-for token in ('.shot-analysis-dialog', '.shot-analysis-camera-stage', '.shot-analysis-dataset', '.developer-settings-card'):
+for token in ('developerSettings.retainLogs = true;', 'developerSettings.retainVideo = true;',
+              'developerSettings.retainImages = true;', 'developerSettings.captureAudio = true;'):
+    if token not in app:
+        raise SystemExit(f"Development mode must enable all debugging capture options: {token}")
+for token in ('.global-developer-button', '.developer-page-grid', '.shot-analysis-dialog',
+              '.shot-analysis-camera-stage', '.shot-camera-position-controls',
+              '.shot-analysis-dataset', '.developer-settings-card'):
     if token not in css:
         raise SystemExit(f"Missing developer shot-analysis responsive styling: {token}")
+android_main = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'MainActivity.java').read_text()
+for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
+              'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)'):
+    if token not in android_main:
+        raise SystemExit(f"Android system-bar safe-area handling missing: {token}")
+for token in ('UPDATE_MANIFEST_URL', 'checkForAppUpdate()', 'BuildConfig.VERSION_CODE',
+              'expectedSha256.equals(actualSha256)', 'openPackageInstaller(verified)',
+              'FileProvider.getUriForFile'):
+    if token not in android_main:
+        raise SystemExit(f"Android startup update flow missing: {token}")
 if 'navigateApp("library", { push: false })' not in app:
     raise SystemExit("App must start on the drill library")
 if 'function graphLayoutMap(' not in app or 'const GRAPH_CENTER_X = SURFACE_WIDTH / 2;' not in app:

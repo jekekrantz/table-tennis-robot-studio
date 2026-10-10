@@ -29,6 +29,17 @@ After validating a new debug APK, replace that staged preview copy before
 publishing the website. It is intentionally labelled as a preview until a
 persistent release-signing key is configured.
 
+Then generate the descriptor used by the native startup update check:
+
+```bash
+python3 scripts/android_update_manifest.py --write
+```
+
+Publish the APK and `android-update.json` together. On startup the installed app
+checks the descriptor, compares `versionCode`, verifies the downloaded APK's
+SHA-256, and opens Android's package installer. Android always requires the user
+to approve installation; it cannot be completed silently by an ordinary app.
+
 Install it on a connected Android phone with:
 
 ```bash

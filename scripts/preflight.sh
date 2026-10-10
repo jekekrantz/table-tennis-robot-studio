@@ -48,7 +48,7 @@ node continuous-runtime-selftest.js
 node ux-responsiveness-selftest.js
 
 echo "[9/13] Python/shell/UI/Android wrapper structure"
-python3 -m py_compile scripts/serve.py scripts/render_mobile_fixtures.py scripts/ui_structure_selftest.py scripts/default_library_trajectory_selftest.py scripts/nova_firmware_workbench_selftest.py scripts/build_runtime_bundle.py scripts/release_manifest.py tools/nova_firmware_workbench.py
+python3 -m py_compile scripts/serve.py scripts/render_mobile_fixtures.py scripts/ui_structure_selftest.py scripts/default_library_trajectory_selftest.py scripts/nova_firmware_workbench_selftest.py scripts/build_runtime_bundle.py scripts/release_manifest.py scripts/android_update_manifest.py tools/nova_firmware_workbench.py
 python3 scripts/ui_structure_selftest.py
 python3 scripts/render_mobile_fixtures.py --list >/dev/null
 python3 scripts/nova_firmware_workbench_selftest.py
@@ -63,6 +63,7 @@ grep -q 'WebViewAssetLoader' android/app/src/main/java/studio/tabletennis/robot/
 grep -q 'camera2Capture.*, false' android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
 test -f downloads/table-tennis-robot-studio-android-preview.apk
 grep -q 'downloads/table-tennis-robot-studio-android-preview.apk' index.html
+python3 scripts/android_update_manifest.py
 
 echo "[10/13] Default training-library trajectory self-test"
 python3 scripts/default_library_trajectory_selftest.py
