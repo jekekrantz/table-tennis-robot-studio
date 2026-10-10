@@ -2298,7 +2298,7 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .shot-analysis-camera-card,.shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { margin:0; padding:12px; border:1px solid var(--border); border-radius:12px; background:#111720; }
 .shot-analysis-camera-stage { position:relative; min-height:min(64dvh,660px); aspect-ratio:16 / 9; overflow:hidden; display:grid; place-items:center; border:1px solid #435068; border-radius:10px; background:#05070a; }
 .shot-analysis-camera-stage video,.shot-analysis-camera-stage canvas { position:absolute; inset:0; width:100%; height:100%; }
-.shot-analysis-camera-stage video { object-fit:contain; }
+.shot-analysis-camera-stage video { object-fit:cover; }
 .shot-analysis-camera-stage canvas { z-index:2; pointer-events:none; touch-action:none; }
 .shot-analysis-camera-stage canvas.marking { pointer-events:auto; cursor:crosshair; }
 .shot-analysis-camera-empty { z-index:3; width:min(80%,420px); display:grid; gap:6px; color:var(--muted); text-align:center; font-size:.72rem; line-height:1.4; pointer-events:none; }

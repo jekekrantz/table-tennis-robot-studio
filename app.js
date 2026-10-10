@@ -2846,12 +2846,16 @@
     const videoHeight = els.shotAnalysisVideo?.videoHeight || 9;
     const videoAspect = videoWidth / videoHeight;
     const stageAspect = width / height;
+    // The video uses object-fit: cover so the preview has no black bars. Keep
+    // the crop in the overlay coordinate system: the image can extend beyond
+    // the stage on its cropped axis, and normalized landmark/projection points
+    // remain aligned with the visible pixels.
     if (stageAspect > videoAspect) {
-      const contentWidth = height * videoAspect;
-      return { x:(width - contentWidth) / 2, y:0, width:contentWidth, height };
+      const contentHeight = width / videoAspect;
+      return { x:0, y:(height - contentHeight) / 2, width, height:contentHeight };
     }
-    const contentHeight = width / videoAspect;
-    return { x:0, y:(height - contentHeight) / 2, width, height:contentHeight };
+    const contentWidth = height * videoAspect;
+    return { x:(width - contentWidth) / 2, y:0, width:contentWidth, height };
   }
 
   function shotAnalysisProjectedTable(content) {
