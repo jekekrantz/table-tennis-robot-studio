@@ -526,6 +526,13 @@ for token in ('UPDATE_MANIFEST_URL', 'checkForAppUpdate()', 'BuildConfig.VERSION
               'FileProvider.getUriForFile'):
     if token not in android_main:
         raise SystemExit(f"Android startup update flow missing: {token}")
+for token in ('enterShotAnalysisLandscape', 'exitShotAnalysisLandscape'):
+    if token not in android_main and token not in (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeAppBridge.java').read_text():
+        raise SystemExit(f"Android landscape camera orientation missing: {token}")
+for token in ('shotAnalysisProjectedTable', 'PROJECTED TABLE · NET + CENTRE LINE',
+              'enterShotAnalysisLandscape', 'exitShotAnalysisLandscape'):
+    if token not in app:
+        raise SystemExit(f"Shot-analysis landscape projection flow missing: {token}")
 if 'navigateApp("library", { push: false })' not in app:
     raise SystemExit("App must start on the drill library")
 if 'function graphLayoutMap(' not in app or 'const GRAPH_CENTER_X = SURFACE_WIDTH / 2;' not in app:

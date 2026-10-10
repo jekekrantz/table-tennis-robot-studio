@@ -116,7 +116,7 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
-        webView.addJavascriptInterface(new NativeAppBridge(), "NativeApp");
+        webView.addJavascriptInterface(new NativeAppBridge(this), "NativeApp");
         webView.setWebViewClient(new LocalOnlyWebViewClient(assetLoader));
         webView.setWebChromeClient(new LocalWebChromeClient());
         webView.loadUrl(START_URL);

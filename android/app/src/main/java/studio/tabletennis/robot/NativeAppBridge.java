@@ -1,15 +1,33 @@
 package studio.tabletennis.robot;
 
 import android.os.Build;
+import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.webkit.JavascriptInterface;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
 final class NativeAppBridge {
+    private final Activity activity;
+
+    NativeAppBridge(Activity activity) {
+        this.activity = activity;
+    }
+
     @JavascriptInterface
     public boolean isNativeHost() {
         return true;
+    }
+
+    @JavascriptInterface
+    public void enterShotAnalysisLandscape() {
+        activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+    }
+
+    @JavascriptInterface
+    public void exitShotAnalysisLandscape() {
+        activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED));
     }
 
     @JavascriptInterface
@@ -31,4 +49,3 @@ final class NativeAppBridge {
         return info.toString();
     }
 }
-

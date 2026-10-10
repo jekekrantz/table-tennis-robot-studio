@@ -2676,3 +2676,54 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
   .ai-prompt-actions .button { min-height:46px; }
   .measurement-title-actions { justify-content:flex-start; }
 }
+
+/* Analyze Shot is deliberately landscape on phones: the camera preview gets
+   the wide left pane and the controls remain reachable in a narrow right pane. */
+@media (orientation: landscape) and (max-width: 900px) {
+  .shot-analysis-dialog {
+    width:100vw !important;
+    max-width:none !important;
+    height:100dvh;
+    max-height:100dvh !important;
+    margin:0;
+    border:0;
+    border-radius:0;
+  }
+  .shot-analysis-frame {
+    height:100%;
+    max-height:100%;
+    overflow:hidden;
+    grid-template-columns:minmax(0,1fr) minmax(260px,32vw);
+    grid-template-rows:auto minmax(0,1fr) auto auto auto;
+    gap:8px;
+    padding:8px;
+  }
+  .shot-analysis-frame > header { grid-column:1 / -1; }
+  .shot-analysis-camera-card {
+    grid-column:1;
+    grid-row:2 / -1;
+    min-height:0;
+    height:100%;
+    display:grid;
+    grid-template-rows:minmax(0,1fr) auto auto auto;
+    gap:6px;
+    overflow:hidden;
+  }
+  .shot-analysis-camera-stage { min-height:0; height:auto; aspect-ratio:auto; }
+  .shot-camera-position-controls { grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:0; gap:5px; }
+  .shot-camera-position-controls label { padding:5px; gap:3px; font-size:.62rem; }
+  .shot-analysis-camera-card > .helper { margin:0; font-size:.62rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .shot-analysis-primary-actions,.shot-analysis-secondary-actions { gap:5px; }
+  .shot-analysis-primary-actions .button,.shot-analysis-secondary-actions .button { min-height:36px; padding:5px 7px; font-size:.65rem; }
+  .shot-analysis-playback,.shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { grid-column:2; }
+  .shot-analysis-playback { grid-row:2; grid-template-columns:1fr; gap:4px; padding:7px; }
+  .shot-analysis-playback .play-button { min-height:38px; }
+  .shot-analysis-playback > span { text-align:center; }
+  .shot-analysis-calibration,.shot-analysis-dataset,.shot-analysis-diagnostics { padding:7px; overflow:auto; min-height:0; }
+  .shot-analysis-calibration { grid-row:3; }
+  .shot-analysis-dataset { grid-row:4; }
+  .shot-analysis-diagnostics { grid-row:5; }
+  .shot-analysis-dataset > p,.shot-analysis-calibration > p,.shot-analysis-warning { font-size:.62rem; }
+  .shot-dataset-fields { grid-template-columns:1fr 1fr; gap:5px; }
+  .shot-analysis-frame > .shot-analysis-warning { grid-column:2; grid-row:6; margin:0; padding:7px; }
+}
