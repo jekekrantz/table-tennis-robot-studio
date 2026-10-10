@@ -2727,3 +2727,40 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
   .shot-dataset-fields { grid-template-columns:1fr 1fr; gap:5px; }
   .shot-analysis-frame > .shot-analysis-warning { grid-column:2; grid-row:6; margin:0; padding:7px; }
 }
+
+/* Keep the live preview measurable in short landscape viewports. The controls
+   follow it in the normal scroll flow; an unconstrained spanning grid can make
+   the camera row collapse to a few pixels on Android WebView. */
+@media (orientation: landscape) and (max-width: 900px) {
+  .shot-analysis-frame {
+    display:block;
+    height:auto;
+    max-height:none;
+    min-height:100%;
+    overflow-y:auto;
+    overflow-x:hidden;
+  }
+  .shot-analysis-frame > header { position:sticky; top:0; margin-bottom:8px; }
+  .shot-analysis-camera-card {
+    display:grid;
+    height:auto;
+    min-height:0;
+    overflow:visible;
+    margin-bottom:8px;
+  }
+  .shot-analysis-camera-stage {
+    width:100%;
+    height:calc(100dvh - 128px);
+    min-height:220px;
+    max-height:520px;
+    aspect-ratio:auto;
+  }
+  .shot-analysis-playback,
+  .shot-analysis-calibration,
+  .shot-analysis-dataset,
+  .shot-analysis-diagnostics,
+  .shot-analysis-frame > .shot-analysis-warning { margin-bottom:8px; }
+  .shot-analysis-calibration,
+  .shot-analysis-dataset,
+  .shot-analysis-diagnostics { max-height:none; overflow:visible; }
+}
