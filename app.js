@@ -2892,7 +2892,11 @@
     const point = (x, y, z = tableSurface) => project({ x, y, z });
     return {
       corners:[point(0,side*table.width/2), point(0,-side*table.width/2), point(table.length,-side*table.width/2), point(table.length,side*table.width/2)],
-      net:[point(table.length/2,-side*table.width/2,tableSurface + table.netHeight), point(table.length/2,side*table.width/2,tableSurface + table.netHeight)],
+      netTop:[point(table.length/2,-side*table.width/2,tableSurface + table.netHeight), point(table.length/2,side*table.width/2,tableSurface + table.netHeight)],
+      netPosts:[
+        [point(table.length/2,-side*table.width/2,tableSurface), point(table.length/2,-side*table.width/2,tableSurface + table.netHeight)],
+        [point(table.length/2,side*table.width/2,tableSurface), point(table.length/2,side*table.width/2,tableSurface + table.netHeight)],
+      ],
       centre:[point(0,0), point(table.length,0)],
       camera:{ distanceCm:developerSettings.cameraDistanceCm, heightCm:developerSettings.cameraHeightAboveNetCm, pitchDeg:developerSettings.cameraPitchDeg },
     };
@@ -2940,9 +2944,12 @@
       context.strokeStyle = "rgba(88,214,178,.95)";
       context.lineWidth = Math.max(1, projectedWidth * .003 / tableWidth);
       context.beginPath();
-      context.moveTo(projected.net[0].x, projected.net[0].y);
-      context.lineTo(projected.net[1].x, projected.net[1].y);
-      context.lineWidth = Math.max(1, projectedWidth * .003 / tableWidth);
+      context.moveTo(projected.netTop[0].x, projected.netTop[0].y);
+      context.lineTo(projected.netTop[1].x, projected.netTop[1].y);
+      projected.netPosts.forEach(post => {
+        context.moveTo(post[0].x, post[0].y);
+        context.lineTo(post[1].x, post[1].y);
+      });
       context.moveTo(projected.centre[0].x, projected.centre[0].y);
       context.lineTo(projected.centre[1].x, projected.centre[1].y);
       context.stroke();
@@ -2960,8 +2967,18 @@
     context.stroke();
     if (screenPoints.length >= 6) {
       context.strokeStyle = "rgba(88,214,178,.95)";
+      context.lineWidth = 2;
       context.beginPath();
       context.moveTo(screenPoints[4].x, screenPoints[4].y);
+      context.lineTo(screenPoints[5].x, screenPoints[5].y);
+      // The two side posts are the midpoints of the table's corresponding
+      // long edges. This keeps the calibrated net visibly attached to the
+      // tabletop rather than floating above it.
+      const postLeft = { x:(screenPoints[0].x + screenPoints[3].x) / 2, y:(screenPoints[0].y + screenPoints[3].y) / 2 };
+      const postRight = { x:(screenPoints[1].x + screenPoints[2].x) / 2, y:(screenPoints[1].y + screenPoints[2].y) / 2 };
+      context.moveTo(postLeft.x, postLeft.y);
+      context.lineTo(screenPoints[4].x, screenPoints[4].y);
+      context.moveTo(postRight.x, postRight.y);
       context.lineTo(screenPoints[5].x, screenPoints[5].y);
       context.stroke();
     }
