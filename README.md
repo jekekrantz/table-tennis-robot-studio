@@ -118,6 +118,34 @@ With Android Platform Tools installed and USB debugging enabled:
 
 Then open `http://localhost:8080` in Chrome on the Android device.
 
+### Local Android app
+
+The `android/` project is a minimal native wrapper for the same web interface.
+It bundles the generated site into an offline WebView, restricts navigation to
+the bundled app origin, forwards camera/microphone permission requests, and
+exposes a small read-only `NativeApp` bridge. Native Camera2 recording is not
+implemented yet.
+
+Build a development APK with:
+
+```bash
+./scripts/build_android_debug.sh
+```
+
+Then install it on a connected phone:
+
+```bash
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+See [`android/README.md`](android/README.md) for the wrapper boundary and release
+signing notes. Debug APKs are for local development; website distribution will
+use a separately signed release APK.
+
+The web app shows a **Download Android app** action under Robot → Developer
+features. Browser users who open camera capture are directed to that local app;
+normal drill editing and robot controls remain usable in the browser.
+
 ## GitHub Pages
 
 The app is static and can be served directly from the repository root. `.nojekyll`
@@ -353,6 +381,7 @@ docs/                      Feature and interchange-format documentation
 vendor/                    Small vendored browser dependencies with licenses
 tools/                     Optional local development companions
 scripts/                   Local serving, tests and preflight helpers
+android/                   Offline WebView Android wrapper
 PROTOCOL.md                Packet-level protocol notes and provenance
 MODEL_SOURCES.md           Trajectory-model sources and assumptions
 TRAINING_LIBRARY.md         Default shot/drill presets and coaching references

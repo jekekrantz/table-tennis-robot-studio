@@ -42,6 +42,7 @@ for expected in [
     "robotDialogConnectBtn",
     "fullscreenBtn", "aiGlobalBtn", "robotIdleStopInput", "robotIdleStopStatus",
     "robotIdleDisconnectInput", "robotIdleStatus",
+    "androidAppDownloadCard", "androidAppDownloadBtn",
     "playerModelSelect", "playerTimingSpeed", "newPlayerModelBtn",
     "duplicatePlayerModelBtn", "deletePlayerModelBtn",
     "inspectorBackBtn", "inspectorDeleteBtn", "inspectorNameField", "inspectorAiMount",
@@ -53,6 +54,15 @@ for token in ('function toggleFullscreen()', 'requestFullscreen || root.webkitRe
               'document.addEventListener("fullscreenchange", updateFullscreenButton)'):
     if token not in app:
         raise SystemExit(f"Missing full-screen behavior: {token}")
+
+for token in (
+    'function isNativeAndroidHost()',
+    'function offerAndroidAppForCamera()',
+    'Use the Android app for camera capture',
+    'downloads/table-tennis-robot-studio-android-preview.apk',
+):
+    if token not in app and token not in html:
+        raise SystemExit(f"Missing browser-to-Android camera routing: {token}")
 
 if 'data-player-model-field="spinChangeRecognitionSeconds"' not in html:
     raise SystemExit("Missing advanced spin-change recognition setting")

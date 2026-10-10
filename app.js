@@ -291,6 +291,8 @@
     robotIdleDisconnectInput: $("robotIdleDisconnectInput"),
     robotIdleStatus: $("robotIdleStatus"),
     developerModeInput: $("developerModeInput"),
+    androidAppDownloadCard: $("androidAppDownloadCard"),
+    androidAppDownloadBtn: $("androidAppDownloadBtn"),
     developerRetentionOptions: $("developerRetentionOptions"),
     developerRetainLogsInput: $("developerRetainLogsInput"),
     developerRetainVideoInput: $("developerRetainVideoInput"),
@@ -2778,8 +2780,37 @@
     if (els.shotDatasetRepetitions && document.activeElement !== els.shotDatasetRepetitions) els.shotDatasetRepetitions.value = String(developerSettings.datasetRepetitions);
     if (els.shotDatasetInterval && document.activeElement !== els.shotDatasetInterval) els.shotDatasetInterval.value = String(developerSettings.datasetIntervalSeconds);
     els.shotAnalysisBtn.hidden = !developerSettings.enabled;
+    if (els.androidAppDownloadCard) els.androidAppDownloadCard.hidden = isNativeAndroidHost();
     if (!developerSettings.enabled) els.developerStorageStatus.textContent = "";
     renderShotAnalysisControls();
+  }
+
+  function isNativeAndroidHost() {
+    try {
+      return globalThis.NativeApp?.isNativeHost?.() === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function downloadAndroidApp() {
+    const link = els.androidAppDownloadBtn;
+    if (!link) return;
+    const download = document.createElement("a");
+    download.href = link.href;
+    download.download = link.getAttribute("download") || "table-tennis-robot-studio-android-preview.apk";
+    document.body.appendChild(download);
+    download.click();
+    download.remove();
+  }
+
+  function offerAndroidAppForCamera() {
+    askConfirm(
+      "Use the Android app for camera capture",
+      "The browser version remains available for drills and robot control. Install the local Android app to use camera and audio dataset features with native camera access.",
+      downloadAndroidApp,
+      { actionLabel:"Download Android app", actionClass:"primary" },
+    );
   }
 
   function shotAnalysisVideoContentRect() {
@@ -2970,6 +3001,10 @@
 
   async function startShotAnalysisCamera() {
     if (shotAnalysisStream) return shotAnalysisStream;
+    if (!isNativeAndroidHost()) {
+      offerAndroidAppForCamera();
+      throw new Error("Install the Android app to use camera capture.");
+    }
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera capture is unavailable in this browser.");
     const video = { facingMode:{ ideal:"environment" }, width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:60, min:30 } };
     let stream;
@@ -3196,6 +3231,10 @@
 
   async function openShotAnalysis() {
     if (!developerSettings.enabled) return;
+    if (!isNativeAndroidHost()) {
+      offerAndroidAppForCamera();
+      return;
+    }
     ensureShotAnalysisSession();
     renderShotAnalysisControls();
     els.shotAnalysisDialog.showModal();

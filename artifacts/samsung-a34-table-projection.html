@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Samsung A34 table projection</title>
+<style>
+  :root{color-scheme:dark;--bg:#11151a;--panel:#1a2027;--line:#eef3f7;--muted:#9eabb7;--net:#59c78d;--a:#4ec9e8;--b:#ea7bb2;--ok:#51bd7a;--bad:#e06c75;--border:#39434d}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--line);font:15px system-ui,sans-serif}.app{max-width:1280px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 6px}h2{font-size:18px;margin:28px 0 8px}p{color:var(--muted);margin:6px 0 16px}.controls{display:flex;gap:16px;flex-wrap:wrap;margin:20px 0}.control{display:grid;gap:5px}select{background:var(--panel);color:var(--line);border:1px solid var(--border);border-radius:7px;padding:8px 12px}.hero{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px}.hero svg{display:block;width:100%;aspect-ratio:16/9;background:#0c0f13}.facts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.pill{border:1px solid var(--border);border-radius:99px;padding:4px 9px;color:var(--muted)}.grid-wrap{overflow:auto}.grid{min-width:980px;display:grid;grid-template-columns:58px repeat(11,1fr);gap:5px}.cell{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:2px;cursor:pointer;color:inherit}.cell.active{outline:2px solid var(--a)}.cell svg{width:100%;display:block;aspect-ratio:16/9;background:#0c0f13}.bar{height:5px;border-radius:3px;margin-top:2px}.label{display:grid;place-items:center;color:var(--muted);font-size:12px}.legend{font-size:13px;color:var(--muted)}
+</style>
+<main class="app">
+  <h1>Samsung A34 side-camera projection</h1>
+  <p>Table edges and two default-topspin trajectories across the requested 10 cm tripod-position grid.</p>
+  <div class="controls"><label class="control">Lens<select id="lens"><option value="main">Main · 80° assumed</option><option value="ultrawide" selected>Ultra-wide · 123° Samsung</option></select></label><label class="control">Tripod side<select id="side"><option value="left">Left long side</option><option value="right">Right long side</option></select></label></div>
+  <section class="hero"><div id="hero"></div><div class="facts"><span class="pill" id="position"></span><span class="pill">Cyan/pink: left/right-half targets</span><span class="pill">Net clearance 4.87 cm</span><span class="pill">Landing x 2.055 m · y ±0.381 m</span></div></section>
+  <h2>Camera-position grid</h2><p>Columns are distance from the table edge; rows are height above the net. Click a cell to enlarge it. Green means the full table and both flights fit; red means a table edge clips.</p>
+  <div class="grid-wrap"><div class="grid" id="grid"></div></div>
+  <h2>Assumptions</h2><p class="legend">16:9 landscape, camera beside the net and aimed at table centre. Ultra-wide uses Samsung's published 123° diagonal field of view. Main uses an 80° engineering assumption because Samsung does not publish its field of view. Rectilinear projection; stabilization crop and barrel distortion are not modeled.</p>
+</main>
+<script>
+const T={l:2.74,w:1.525,n:.1525},A=16/9,dist=[...Array(11)].map((_,i)=>.5+i*.1),heights=[.5,.4,.3,.2,.1,0];
+const traj=[.388,.533,.675,.814,.951,1.085,1.216,1.344,1.470,1.594,1.715,1.833,1.949,2.055].map((x,i)=>({x,y:[.0308,.0612,.0911,.1203,.149,.1772,.2048,.2318,.2583,.2843,.3097,.3346,.359,.3813][i],z:[.248,.261,.2684,.2702,.2667,.258,.2443,.2256,.2021,.174,.1412,.104,.0625,.02][i]}));
+const lines=[[[0,-T.w/2,0],[T.l,-T.w/2,0]],[[T.l,-T.w/2,0],[T.l,T.w/2,0]],[[T.l,T.w/2,0],[0,T.w/2,0]],[[0,T.w/2,0],[0,-T.w/2,0]],[[0,0,.002],[T.l,0,.002]]],nets=[[[T.l/2,-T.w/2,0],[T.l/2,-T.w/2,T.n]],[[T.l/2,T.w/2,0],[T.l/2,T.w/2,T.n]],[[T.l/2,-T.w/2,T.n],[T.l/2,T.w/2,T.n]]];
+let selD=1,selH=.3; const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z}),dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z,cross=(a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x}),norm=a=>{let n=Math.hypot(a.x,a.y,a.z);return{x:a.x/n,y:a.y/n,z:a.z/n}};
+function projector(d,h,w,H){let side=document.querySelector('#side').value==='left'?1:-1,cam={x:T.l/2,y:side*(T.w/2+d),z:T.n+h},f=norm(sub({x:T.l/2,y:0,z:.1},cam)),r=norm(cross(f,{x:0,y:0,z:1})),u=norm(cross(r,f)),deg=document.querySelector('#lens').value==='main'?80:123,td=Math.tan(deg*Math.PI/360),th=td*A/Math.sqrt(A*A+1),tv=td/Math.sqrt(A*A+1);return p=>{let q=sub(p,cam),dep=dot(q,f),nx=dot(q,r)/(dep*th),ny=dot(q,u)/(dep*tv);return{x:(nx+1)*w/2,y:(1-ny)*H/2,v:dep>0&&Math.abs(nx)<=1&&Math.abs(ny)<=1}}}
+function svg(d,h,w=960,H=540){let p=projector(d,h,w,H),seg=(q,c,sw)=>q.map(([a,b])=>{a=p({x:a[0],y:a[1],z:a[2]});b=p({x:b[0],y:b[1],z:b[2]});return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${c}" stroke-width="${sw}"/>`}).join(''),path=(sgn,c)=>`<path d="${traj.map((q,i)=>{q=p({...q,y:q.y*sgn});return `${i?'L':'M'}${q.x},${q.y}`}).join(' ')}" fill="none" stroke="${c}" stroke-width="${w<300?2:5}" stroke-linecap="round"/>`;return `<svg viewBox="0 0 ${w} ${H}">${seg(lines,'#eef3f7',w<300?1.5:3)}${seg(nets,'#59c78d',w<300?1.5:3)}${path(1,'#4ec9e8')}${path(-1,'#ea7bb2')}</svg>`}
+function fits(d,h){let p=projector(d,h,160,90),table=lines.flat(2).map((q,i,a)=>i%3===0?p({x:q,y:a[i+1],z:a[i+2]}):null).filter(Boolean);return table.every(q=>q.v)}
+function render(){hero.innerHTML=svg(selD,selH);position.textContent=`${selD.toFixed(1)} m from edge · net + ${Math.round(selH*100)} cm`;let out='<div></div>'+dist.map(d=>`<div class="label">${d.toFixed(1)} m</div>`).join('');for(let h of heights){out+=`<div class="label">+${Math.round(h*100)} cm</div>`;for(let d of dist){let ok=fits(d,h),active=Math.abs(d-selD)<.001&&Math.abs(h-selH)<.001;out+=`<button class="cell ${active?'active':''}" data-d="${d}" data-h="${h}">${svg(d,h,160,90)}<div class="bar" style="background:${ok?'#51bd7a':'#e06c75'}"></div></button>`}}grid.innerHTML=out;document.querySelectorAll('.cell').forEach(b=>b.onclick=()=>{selD=+b.dataset.d;selH=+b.dataset.h;render()})}
+lens.onchange=side.onchange=render;render();
+</script>
+</html>

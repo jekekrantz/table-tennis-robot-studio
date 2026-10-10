@@ -2225,6 +2225,11 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .developer-settings-card { display:grid; gap:12px; align-content:start; }
 .developer-settings-card h3,.developer-settings-card p { margin:0; }
 .developer-settings-card > div:first-child p { margin-top:5px; color:var(--muted); font-size:.72rem; line-height:1.45; }
+.android-app-download-card { display:grid; gap:9px; padding:11px; border:1px solid #435068; border-radius:10px; background:#111720; }
+.android-app-download-card > div { display:grid; gap:4px; }
+.android-app-download-card strong { color:#edf3fb; font-size:.8rem; }
+.android-app-download-card small { color:var(--muted); font-size:.68rem; line-height:1.4; }
+.android-app-download-card .helper { margin:0; }
 .developer-toggle { display:flex; align-items:flex-start; gap:10px; border-top:1px solid var(--border); padding-top:12px; cursor:pointer; }
 .developer-toggle input { margin-top:3px; }
 .developer-toggle strong,.developer-toggle small { display:block; }
