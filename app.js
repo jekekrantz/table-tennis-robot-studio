@@ -428,6 +428,7 @@
   let shotAnalysisWorkingLandmarks = [];
   let shotAnalysisMarking = false;
   let shotAnalysisFrameCallbackId = null;
+  let shotAnalysisRecoveryPromise = null;
   let shotDatasetCaptureRunning = false;
   let shotDatasetDelivered = 0;
   let shotAnalysisExpectedShot = null;
@@ -3132,6 +3133,30 @@
     startShotAnalysisFrameLoop();
     renderShotAnalysisControls();
     return stream;
+  }
+
+  async function recoverShotAnalysisCamera(reason = "resume") {
+    if (!els.shotAnalysisDialog?.open || !isNativeAndroidHost() || shotAnalysisRecoveryPromise) return;
+    const track = shotAnalysisStream?.getVideoTracks?.()[0];
+    const needsRestart = !shotAnalysisStream || !track || track.readyState === "ended" || track.muted || !els.shotAnalysisVideo?.videoWidth;
+    if (!needsRestart) {
+      try { await els.shotAnalysisVideo.play(); } catch (_) {}
+      return;
+    }
+    shotAnalysisRecoveryPromise = (async () => {
+      const selectedDeviceId = track?.getSettings?.().deviceId || "";
+      analysisLog("camera-recover", { reason, previousState:track?.readyState || "missing", muted:Boolean(track?.muted) });
+      if (shotAnalysisRecorder?.state === "recording") await stopShotAnalysisRecording();
+      await stopShotAnalysisCamera();
+      try {
+        await startShotAnalysisCamera(selectedDeviceId);
+        els.shotAnalysisCameraStatus.textContent = "Camera resumed.";
+      } catch (error) {
+        analysisLog("camera-recover-error", { message:error.message });
+        els.shotAnalysisCameraStatus.textContent = `Camera unavailable after resume: ${error.message}`;
+      }
+    })().finally(() => { shotAnalysisRecoveryPromise = null; });
+    await shotAnalysisRecoveryPromise;
   }
 
   async function stopShotAnalysisCamera() {
@@ -11976,6 +12001,10 @@
     window.addEventListener("resize", () => { syncVisualViewportHeight(); renderGraph(); drawShotAnalysisOverlay(); });
     window.visualViewport?.addEventListener("resize", syncVisualViewportHeight);
     window.visualViewport?.addEventListener("scroll", syncVisualViewportHeight);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") setTimeout(() => { void recoverShotAnalysisCamera("visibility-resume"); }, 150);
+    });
+    window.addEventListener("pageshow", () => { setTimeout(() => { void recoverShotAnalysisCamera("pageshow"); }, 150); });
     const emergencyPageExit = () => {
       clearRobotIdleTimer();
       clearRobotIdleStopTimer();
