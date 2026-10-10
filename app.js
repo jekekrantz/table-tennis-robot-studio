@@ -2866,7 +2866,11 @@
     const cosDown = Math.cos(downAngle), sinDown = Math.sin(downAngle);
     const forward = { x:0, y:-side * cosDown, z:-sinDown };
     const right = { x:1, y:0, z:0 };
-    const up = { x:0, y:side * sinDown, z:cosDown };
+    // The image-up basis must point toward the tabletop's positive vertical
+    // direction for either side of the table. The side sign is opposite the
+    // forward lateral direction; using the same sign mirrors the basis and
+    // projects the whole table below the camera frame.
+    const up = { x:0, y:-side * sinDown, z:cosDown };
     const camera = { x:table.length / 2, y:side * (table.width / 2 + distanceM), z:cameraHeight };
     const fovX = 78 * Math.PI / 180;
     const fovY = 2 * Math.atan(Math.tan(fovX / 2) * content.height / content.width);
@@ -2911,7 +2915,12 @@
     if (!screenPoints.length) {
       const projected = shotAnalysisProjectedTable(content);
       const guide = projected.corners;
-      if (guide.some(point => !point)) return;
+      if (guide.some(point => !point)) {
+        context.setLineDash([8, 7]);
+        context.strokeRect(content.x + content.width * .08, content.y + content.height * .12, content.width * .84, content.height * .76);
+        context.setLineDash([]);
+        return;
+      }
       context.setLineDash([8, 7]);
       context.beginPath();
       guide.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
