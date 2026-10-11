@@ -596,8 +596,8 @@
         <p id="shotDatasetStatus" class="helper" aria-live="polite">Ready when the native camera and microphone are available. Table landmarks are optional.</p>
       </section>
 
-      <section class="shot-analysis-diagnostics">
-        <div class="section-title-row"><h3>Capture session</h3><span id="shotAnalysisCaptureBadge" class="status-badge neutral">Idle</span></div>
+      <details class="shot-analysis-diagnostics">
+        <summary class="section-title-row"><span role="heading" aria-level="3">Capture session</span><span id="shotAnalysisCaptureBadge" class="status-badge neutral">Idle</span></summary>
         <p id="shotAnalysisRetentionSummary" class="helper"></p>
         <pre id="shotAnalysisEventSummary" aria-live="polite">No events captured.</pre>
         <div class="shot-analysis-secondary-actions">
@@ -606,7 +606,7 @@
           <button id="shotDatasetDownloadBtn" class="button ghost wide" type="button" disabled>Download dataset files</button>
           <button id="shotAnalysisNewSessionBtn" class="button ghost wide" type="button">New session</button>
         </div>
-      </section>
+      </details>
 
       <p class="shot-analysis-warning"><strong>Experimental:</strong> captures and calibration are diagnostic only. They are not yet used to estimate or command a return shot.</p>
     </div>
@@ -646,7 +646,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-10-11.9" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-10-11.10" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

@@ -3242,8 +3242,11 @@
       els.shotAnalysisDownloadLogBtn.disabled = true;
       return;
     }
+    const nativeFrameRecords = (session.nativeFrameMetadata?.batches || [])
+      .reduce((count, batch) => count + (Array.isArray(batch.frames) ? batch.frames.length : 0), 0);
+    const recordedFrameRecords = Math.max(session.frames.length, nativeFrameRecords);
     const recent = session.events.slice(-6).map(event => `${(event.monotonicMs / 1000).toFixed(3)}s  ${event.type}`).join("\n");
-    els.shotAnalysisEventSummary.textContent = `${session.events.length} events · ${session.frames.length} video frames · ${session.imageCount} images\n${recent || "Waiting for events…"}`;
+    els.shotAnalysisEventSummary.textContent = `${session.events.length} events · ${recordedFrameRecords} recorded frame records · ${session.imageCount} stills\n${recent || "Waiting for events…"}`;
     els.shotAnalysisDownloadLogBtn.disabled = false;
   }
 

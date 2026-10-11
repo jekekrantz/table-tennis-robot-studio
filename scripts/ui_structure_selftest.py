@@ -499,6 +499,8 @@ for token in ('id="developerMenuBtn"', 'id="developerScreen"', 'id="developerMod
               'id="developerRetainLogsInput"', 'id="developerRetainVideoInput"', 'id="developerRetainImagesInput"'):
     if token not in html:
         raise SystemExit(f"Missing developer shot-analysis UI: {token}")
+if '<details class="shot-analysis-diagnostics">' not in html or '<span role="heading" aria-level="3">Capture session</span>' not in html:
+    raise SystemExit("Capture-session diagnostics must use compact progressive disclosure")
 for token in ('DEVELOPER_SETTINGS_STORAGE_KEY', 'function renderDeveloperSettings()',
               'function analysisShotSnapshot(', 'async function startShotAnalysisCamera(deviceId = "")',
               'async function switchShotAnalysisCamera()', 'async function openShotAnalysis({ focusDataset = false } = {})',
@@ -507,6 +509,9 @@ for token in ('DEVELOPER_SETTINGS_STORAGE_KEY', 'function renderDeveloperSetting
               'robot.addEventListener("ball", noteRobotShot)'):
     if token not in app:
         raise SystemExit(f"Missing developer shot-analysis runtime integration: {token}")
+for token in ('recordedFrameRecords', 'recorded frame records', 'stills'):
+    if token not in app:
+        raise SystemExit(f"Capture-session counters must describe stored evidence: {token}")
 for token in ('developerSettings.retainLogs = true;', 'developerSettings.retainVideo = true;',
               'developerSettings.retainImages = true;', 'developerSettings.captureAudio = true;'):
     if token not in app:

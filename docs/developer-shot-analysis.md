@@ -39,6 +39,9 @@ The shot-analysis window provides:
 Developer settings and camera landmarks use their own local-storage key and are
 not part of portable drill exports. **Clear stored artifacts** deletes retained
 IndexedDB captures but does not delete drills or the saved table landmarks.
+The compact **Capture session** disclosure contains raw recent events and file
+downloads; its frame counter refers to recorded frame metadata, not live preview
+frames.
 
 ## Balanced dataset recorder
 
