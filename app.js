@@ -3457,25 +3457,29 @@
       session.drillDefinition = safeAnalysisValue(drill);
       analysisLog("dataset-prepared", session.dataset);
       els.shotDatasetStatus.textContent = landmarkCount >= 6
-        ? "Dataset prepared. Complete any Nova safety prompts; recording starts only when playback is ready."
-        : "Dataset prepared without full table calibration. Recording will continue; add landmarks later to improve trajectory alignment.";
+        ? "Dataset prepared. Recording starts now; complete any Nova safety prompts while the robot becomes ready."
+        : "Dataset prepared without full table calibration. Recording starts now; add landmarks later to improve trajectory alignment.";
       renderShotAnalysisControls();
 
       const previousTuning = { ...liveTuning };
+      // Capture the complete interaction from the user's button press. This
+      // includes robot connection/safety latency before the first ball, rather
+      // than starting only once Nova reports Ready.
+      shotDatasetCaptureRunning = true;
+      shotDatasetFinalizePromise = new Promise(resolve => { resolveShotDatasetFinalize = resolve; });
+      shotDatasetDelivered = 0;
+      session.dataset.status = "recording";
+      session.dataset.startedAt = new Date().toISOString();
+      await startShotAnalysisRecording();
+      await captureShotAnalysisImage("pre-sequence");
+      analysisLog("dataset-recording-start", { sampleCount:manifest.sampleCount, trigger:"dataset-button", preRollSeconds:1.5 });
+      renderShotAnalysisControls();
       await startPlayback({
         finiteSets:1,
         purpose:"balanced-dataset",
         onReady:async () => {
           liveTuning = { ...DrillAdjustments.DEFAULT_TUNING };
           liveTuningRevision += 1;
-          shotDatasetCaptureRunning = true;
-          shotDatasetFinalizePromise = new Promise(resolve => { resolveShotDatasetFinalize = resolve; });
-          shotDatasetDelivered = 0;
-          session.dataset.status = "recording";
-          session.dataset.startedAt = new Date().toISOString();
-          await startShotAnalysisRecording();
-          await captureShotAnalysisImage("pre-sequence");
-          analysisLog("dataset-recording-start", { sampleCount:manifest.sampleCount, preRollSeconds:1.5 });
           renderShotAnalysisControls();
           await new Promise(resolve => setTimeout(resolve, 1500));
         },
@@ -3508,6 +3512,7 @@
         },
       });
     } catch (error) {
+      if (shotAnalysisRecorder?.state === "recording") await stopShotAnalysisRecording();
       shotDatasetCaptureRunning = false;
       cleanupTransientDatasetDrill();
       els.shotDatasetStatus.textContent = `Dataset capture could not start: ${error.message}`;
