@@ -67,6 +67,10 @@ final class NativeCameraManager {
     private boolean captureAudio;
     private boolean recording;
     private long droppedFrameMetadata;
+    private int viewportLeft = Integer.MIN_VALUE;
+    private int viewportTop = Integer.MIN_VALUE;
+    private int viewportWidth = -1;
+    private int viewportHeight = -1;
 
     NativeCameraManager(Activity activity, FrameLayout previewContainer, SurfaceView previewView, WebView webView) {
         this.activity = activity;
@@ -303,12 +307,21 @@ final class NativeCameraManager {
         activity.runOnUiThread(() -> {
             int viewWidth = Math.max(1, webView.getWidth());
             int viewHeight = Math.max(1, webView.getHeight());
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(Math.max(1, (int) Math.round(width * viewWidth)), Math.max(1, (int) Math.round(height * viewHeight)));
-            params.leftMargin = webView.getLeft() + (int) Math.round(left * viewWidth);
-            params.topMargin = webView.getTop() + (int) Math.round(top * viewHeight);
-            previewContainer.setLayoutParams(params);
+            int pixelLeft = webView.getLeft() + (int) Math.round(left * viewWidth);
+            int pixelTop = webView.getTop() + (int) Math.round(top * viewHeight);
+            int pixelWidth = Math.max(1, (int) Math.round(width * viewWidth));
+            int pixelHeight = Math.max(1, (int) Math.round(height * viewHeight));
+            if (pixelLeft == viewportLeft && pixelTop == viewportTop && pixelWidth == viewportWidth && pixelHeight == viewportHeight) return;
+            boolean resized = pixelWidth != viewportWidth || pixelHeight != viewportHeight;
+            viewportLeft = pixelLeft;
+            viewportTop = pixelTop;
+            viewportWidth = pixelWidth;
+            viewportHeight = pixelHeight;
+            if (resized) previewContainer.setLayoutParams(new FrameLayout.LayoutParams(pixelWidth, pixelHeight));
+            previewContainer.setX(pixelLeft);
+            previewContainer.setY(pixelTop);
             previewContainer.setVisibility(android.view.View.VISIBLE);
-            updatePreviewLayout();
+            if (resized) updatePreviewLayout();
         });
     }
 

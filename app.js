@@ -428,6 +428,8 @@
   let shotAnalysisNativeFrameRate = 30;
   let nativeCameraRequestCounter = 0;
   const nativeCameraRequests = new Map();
+  let nativeCameraViewportFrameId = null;
+  let nativeCameraViewportSignature = "";
   let shotAnalysisRecorderChunks = [];
   let shotAnalysisVideoBlob = null;
   let shotAnalysisSession = null;
@@ -464,6 +466,7 @@
     if (detail?.type === "camera-disconnected") {
       shotAnalysisNativeCameraActive = false;
       shotAnalysisNativeRecording = false;
+      setNativeCameraPreviewMode(false);
       renderShotAnalysisControls();
     }
   };
@@ -2702,6 +2705,7 @@
     document.documentElement.classList.toggle("native-camera-preview", active);
     document.body.classList.toggle("native-camera-preview", active);
     els.shotAnalysisDialog?.classList.toggle("native-camera-active", active);
+    if (!active) stopNativeCameraViewportSync();
   }
 
   function updateNativeCameraViewport() {
@@ -2709,7 +2713,28 @@
     const stage = els.shotAnalysisOverlay?.parentElement;
     if (!stage || innerWidth <= 0 || innerHeight <= 0) return;
     const rect = stage.getBoundingClientRect();
+    const signature = [rect.left, rect.top, rect.width, rect.height, innerWidth, innerHeight]
+      .map(value => Number(value).toFixed(1)).join(":");
+    if (signature === nativeCameraViewportSignature) return;
+    nativeCameraViewportSignature = signature;
     globalThis.NativeApp.setNativeCameraViewport(rect.left / innerWidth, rect.top / innerHeight, rect.width / innerWidth, rect.height / innerHeight);
+  }
+
+  function startNativeCameraViewportSync() {
+    stopNativeCameraViewportSync();
+    nativeCameraViewportSignature = "";
+    const sync = () => {
+      if (!shotAnalysisNativeCameraActive) { nativeCameraViewportFrameId = null; return; }
+      updateNativeCameraViewport();
+      nativeCameraViewportFrameId = requestAnimationFrame(sync);
+    };
+    nativeCameraViewportFrameId = requestAnimationFrame(sync);
+  }
+
+  function stopNativeCameraViewportSync() {
+    if (nativeCameraViewportFrameId != null) cancelAnimationFrame(nativeCameraViewportFrameId);
+    nativeCameraViewportFrameId = null;
+    nativeCameraViewportSignature = "";
   }
 
   function appendNativeFrameMetadata(batch) {
@@ -3284,12 +3309,12 @@
       shotAnalysisNativeCameraId = String(detail.cameraId || selected);
       shotAnalysisNativeVideoSize = { width:finite(detail.width, 1920), height:finite(detail.height, 1080) };
       shotAnalysisNativeFrameRate = finite(detail.frameRate, 30);
+      startNativeCameraViewportSync();
       ensureShotAnalysisSession().camera = cameraSettingsForAnalysis();
       ensureShotAnalysisSession().cameraTracks = cameraTrackDetailsForAnalysis();
       analysisLog("camera-start", { settings:cameraSettingsForAnalysis(), transport:"android-camera2", audio:developerSettings.captureAudio });
       els.shotAnalysisCameraStatus.textContent = `Native Camera2 · ${shotAnalysisNativeCameraId} · ${shotAnalysisNativeVideoSize.width}×${shotAnalysisNativeVideoSize.height} · ${developerSettings.captureAudio ? "audio on" : "no audio"}`;
       renderShotAnalysisControls();
-      requestAnimationFrame(updateNativeCameraViewport);
       return { native:true };
     }
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera capture is unavailable in this browser.");

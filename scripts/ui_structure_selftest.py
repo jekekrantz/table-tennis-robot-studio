@@ -554,9 +554,14 @@ for token in ('SurfaceView nativeCameraPreview', 'nativeCameraPreviewContainer.s
     if token not in android_main:
         raise SystemExit(f"Android composited camera preview missing: {token}")
 for token in ('function setNativeCameraPreviewMode(active)',
-              'document.documentElement.classList.toggle("native-camera-preview", active)'):
+              'document.documentElement.classList.toggle("native-camera-preview", active)',
+              'function startNativeCameraViewportSync()', 'nativeCameraViewportSignature'):
     if token not in app:
         raise SystemExit(f"Native camera transparency lifecycle missing: {token}")
+for token in ('previewContainer.setX(pixelLeft)', 'previewContainer.setY(pixelTop)',
+              'pixelLeft == viewportLeft && pixelTop == viewportTop'):
+    if token not in android_camera:
+        raise SystemExit(f"Android camera viewport synchronization missing: {token}")
 for token in ('LENS_INTRINSIC_CALIBRATION', 'SENSOR_INFO_EXPOSURE_TIME_RANGE', 'Sensor.TYPE_ACCELEROMETER',
               'Sensor.TYPE_GYROSCOPE', 'Sensor.TYPE_ROTATION_VECTOR', 'event.timestamp'):
     if token not in android_capture:
