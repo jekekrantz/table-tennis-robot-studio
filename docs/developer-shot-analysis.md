@@ -14,6 +14,9 @@ The shot-analysis window provides:
 - immediate rear-camera capture with a 1080p/60 fps preference and an automatic video-only
   fallback when microphone permission is unavailable;
 - switching among the cameras/lenses reported by Android;
+- lens-specific projected-table geometry derived from Camera2 sensor size and
+  the focal length reported by the first completed frame, with a 78° fallback
+  only when the device omits optical metadata;
 - approximate camera-distance, height-above-net and downward-pitch guides,
   initially set to 50 cm, 30 cm and 2°;
 - `MediaRecorder` video/audio capture with a manual download;
@@ -64,6 +67,10 @@ warm-up, battery state or elapsed time.
 5. It records one second of post-roll and a final still, then stops recording
    automatically and marks the run complete or stopped early.
 
+Canceling the Nova connection prompt, closing the analysis window, locking the
+phone, or pressing the dataset button again now finalizes the partial recording
+and resolves the dataset run instead of leaving it waiting indefinitely.
+
 The repetition count is adjustable from 1–20 and the fixed interval from
 0.70–2.00 seconds. Stop remains available during the run, and closing the
 analysis window stops an active dataset run before closing the camera.
@@ -94,6 +101,13 @@ focus distance, focal length, aperture, AE/AWB/AF state, crop region and colour
 gains. These rows are drained into the JSON manifest once per second alongside
 the motion sensors. The browser-hosted web app keeps its existing browser APIs;
 camera dataset capture remains routed to the Android app.
+
+Camera permission remains mandatory. If microphone permission is declined,
+alignment and silent ad-hoc video remain available and the UI reports that
+audio is off; a balanced dataset still refuses to start while its **Capture
+microphone audio** option is enabled. Activity pause/lock closes Camera2 and
+finalizes an active MP4, and the visible-page recovery path reopens the selected
+lens rather than trusting stale JavaScript state.
 
 ## Capture workflow
 

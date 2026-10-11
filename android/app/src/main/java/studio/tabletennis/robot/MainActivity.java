@@ -150,6 +150,12 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        if (nativeCamera != null) nativeCamera.onHostPause();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         if (nativeBluetooth != null) nativeBluetooth.destroy();
         if (nativeCaptureMetadata != null) nativeCaptureMetadata.destroy();

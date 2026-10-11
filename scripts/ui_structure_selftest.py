@@ -524,7 +524,8 @@ android_capture = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio'
 android_camera = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraManager.java').read_text()
 android_manifest = (root / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml').read_text()
 for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
-              'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)'):
+              'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)',
+              'protected void onPause()', 'nativeCamera.onHostPause()'):
     if token not in android_main:
         raise SystemExit(f"Android system-bar safe-area handling missing: {token}")
 for token in ('UPDATE_MANIFEST_URL', 'checkForAppUpdate()', 'BuildConfig.VERSION_CODE',
@@ -542,12 +543,15 @@ for token in ('getCameraMetadata', 'getSensorCatalog', 'startMotionCapture', 'dr
     if token not in android_bridge:
         raise SystemExit(f"Android capture metadata bridge missing: {token}")
 for token in ('startNativeCamera', 'stopNativeCamera', 'startNativeRecording', 'stopNativeRecording',
-              'captureNativeStill', 'drainNativeFrameMetadata', 'setNativeCameraViewport'):
+              'captureNativeStill', 'drainNativeFrameMetadata', 'getNativeCameraState', 'setNativeCameraViewport'):
     if token not in android_bridge:
         raise SystemExit(f"Android native Camera2 bridge missing: {token}")
 for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE', 'SENSOR_EXPOSURE_TIME',
               'SENSOR_SENSITIVITY', 'SENSOR_ROLLING_SHUTTER_SKEW', 'COLOR_CORRECTION_GAINS',
-              'SurfaceHolder.Callback', 'PixelCopy.request', 'pendingPreviewRequestId'):
+              'SurfaceHolder.Callback', 'PixelCopy.request', 'pendingPreviewRequestId',
+              'void onHostPause()', 'camera-suspended', 'cameraRequested = false',
+              'captureAudio = captureAudioRequested && hasMicrophonePermission()',
+              'if (recordingFile != null) recordingFile.delete();'):
     if token not in android_camera:
         raise SystemExit(f"Android native Camera2 capture missing: {token}")
 for token in ('SurfaceView nativeCameraPreview', 'nativeCameraPreviewContainer.setClipChildren(true)'):
@@ -555,7 +559,12 @@ for token in ('SurfaceView nativeCameraPreview', 'nativeCameraPreviewContainer.s
         raise SystemExit(f"Android composited camera preview missing: {token}")
 for token in ('function setNativeCameraPreviewMode(active)',
               'document.documentElement.classList.toggle("native-camera-preview", active)',
-              'function startNativeCameraViewportSync()', 'nativeCameraViewportSignature'):
+              'function startNativeCameraViewportSync()', 'nativeCameraViewportSignature',
+              'function acceptNativeRecording(detail, reason = "recording-stop")',
+              'getNativeCameraState', 'shotDatasetFinalizeAction',
+              'DeveloperShotAnalysis.cameraHorizontalFovDeg',
+              'onCancel:options.purpose === "balanced-dataset"',
+              'playback-did-not-start'):
     if token not in app:
         raise SystemExit(f"Native camera transparency lifecycle missing: {token}")
 for token in ('previewContainer.setX(pixelLeft)', 'previewContainer.setY(pixelTop)',

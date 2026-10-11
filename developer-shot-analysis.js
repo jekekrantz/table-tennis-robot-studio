@@ -178,6 +178,23 @@
     return candidates.find(type => !MediaRecorderClass.isTypeSupported || MediaRecorderClass.isTypeSupported(type)) || "";
   }
 
+  function cameraHorizontalFovDeg(camera, fallback = 78) {
+    const sensorWidthMm = finite(camera?.physicalSizeMm?.width, 0);
+    const activeFocalLengthMm = finite(camera?.activeFocalLengthMm, 0);
+    const focalLengthMm = activeFocalLengthMm > 0 ? activeFocalLengthMm : Array.isArray(camera?.focalLengthsMm)
+      ? camera.focalLengthsMm.map(value => finite(value, 0)).find(value => value > 0)
+      : 0;
+    if (!(sensorWidthMm > 0) || !(focalLengthMm > 0)) return clamp(finite(fallback, 78), 20, 160);
+    return clamp(2 * Math.atan(sensorWidthMm / (2 * focalLengthMm)) * 180 / Math.PI, 20, 160);
+  }
+
+  function calibrationMatchesCamera(calibration, cameraId) {
+    if (!calibration) return false;
+    const calibratedId = calibration.camera?.cameraId;
+    if (calibratedId == null || calibratedId === "" || cameraId == null || cameraId === "") return true;
+    return String(calibratedId) === String(cameraId);
+  }
+
   function openArtifactDatabase(indexedDb = typeof indexedDB === "undefined" ? null : indexedDB) {
     if (!indexedDb) return Promise.reject(new Error("IndexedDB is unavailable."));
     return new Promise((resolve, reject) => {
@@ -259,6 +276,8 @@
     projectToTable,
     balancedDatasetSchedule,
     preferredRecorderMimeType,
+    cameraHorizontalFovDeg,
+    calibrationMatchesCamera,
     putSession,
     putArtifact,
     listSessions,

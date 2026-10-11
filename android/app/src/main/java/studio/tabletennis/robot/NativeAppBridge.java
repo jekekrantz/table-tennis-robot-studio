@@ -102,6 +102,11 @@ final class NativeAppBridge {
     }
 
     @JavascriptInterface
+    public String getNativeCameraState() {
+        return camera.stateJson();
+    }
+
+    @JavascriptInterface
     public void setNativeCameraViewport(double left, double top, double width, double height) {
         camera.setViewport(left, top, width, height);
     }

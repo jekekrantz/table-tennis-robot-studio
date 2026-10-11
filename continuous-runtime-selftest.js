@@ -38,7 +38,7 @@ assert(app.includes('No valid shot exists inside the requested position, clearan
 assert(app.includes('feasibleSamples: variationFeasibleSamples'));
 assert(app.includes('ShotVariation.sample'));
 assert(app.includes('the next ball is loaded into one running Nova slot after each ball event'));
-assert(app.includes('requestRobotConnection("Play drill"'));
+assert(app.includes('options.purpose === "balanced-dataset" ? "Record dataset" : "Play drill"'));
 assert(app.includes('exportGuidedMeasurements'));
 assert(app.includes('Copy this drill to edit it?'));
 assert(ble.includes('emergencyShutdown()'));

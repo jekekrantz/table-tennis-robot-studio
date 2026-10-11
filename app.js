@@ -365,6 +365,7 @@
   let suppressClickUntil = 0;
   let toastTimer = null;
   let confirmCallback = null;
+  let confirmCancelCallback = null;
   let appView = "library";
   let appHistory = [];
   const acknowledgedTrajectoryWarnings = new Set();
@@ -426,6 +427,8 @@
   let shotAnalysisNativeCameraId = "";
   let shotAnalysisNativeVideoSize = { width:1920, height:1080 };
   let shotAnalysisNativeFrameRate = 30;
+  let shotAnalysisNativeAudioEnabled = false;
+  let shotAnalysisNativeCameraInfo = null;
   let nativeCameraRequestCounter = 0;
   const nativeCameraRequests = new Map();
   let nativeCameraViewportFrameId = null;
@@ -445,6 +448,7 @@
   let shotAnalysisExpectedShot = null;
   let shotDatasetFinalizePromise = null;
   let resolveShotDatasetFinalize = null;
+  let shotDatasetFinalizeAction = null;
   let shotAnalysisVideoDevices = [];
   let shotDatasetTransient = null;
 
@@ -463,10 +467,25 @@
       if (detail.type === "error") pending.reject(new Error(detail.message || "Native camera error"));
       else pending.resolve(detail);
     }
-    if (detail?.type === "camera-disconnected") {
+    if (detail?.type === "camera-disconnected" || detail?.type === "camera-suspended") {
+      const interruptedRecording = shotAnalysisNativeRecording || Boolean(detail.recordingInterrupted);
       shotAnalysisNativeCameraActive = false;
       shotAnalysisNativeRecording = false;
+      shotAnalysisNativeAudioEnabled = false;
+      if (interruptedRecording) stopNativeMotionCapture();
       setNativeCameraPreviewMode(false);
+      if (detail.url) {
+        void acceptNativeRecording(detail, "recording-interrupted").catch(error => {
+          analysisLog("recording-error", { message:error.message, reason:detail.type });
+        });
+      }
+      if (els.shotAnalysisCameraStatus) els.shotAnalysisCameraStatus.textContent = detail.type === "camera-suspended" ? "Camera paused; resuming when the app becomes visible." : "Camera disconnected.";
+      if (shotDatasetCaptureRunning) {
+        void (async () => {
+          await stopPlayback();
+          await shotDatasetFinalizeAction?.("camera-interrupted");
+        })();
+      }
       renderShotAnalysisControls();
     }
   };
@@ -2679,10 +2698,11 @@
     if (typeof globalThis.NativeApp?.[method] !== "function") return Promise.reject(new Error("Native Camera2 bridge is unavailable."));
     const requestId = `camera-${Date.now()}-${++nativeCameraRequestCounter}`;
     return new Promise((resolve, reject) => {
+      const timeoutMs = method === "startNativeCamera" ? 120000 : 20000;
       const timer = setTimeout(() => {
         nativeCameraRequests.delete(requestId);
         reject(new Error(`${method} timed out.`));
-      }, 15000);
+      }, timeoutMs);
       nativeCameraRequests.set(requestId, {
         types:Array.isArray(types) ? types : [types],
         resolve:value => { clearTimeout(timer); resolve(value); },
@@ -2806,6 +2826,9 @@
       facingMode:"environment",
       resizeMode:"crop-and-scale",
       cameraId:shotAnalysisNativeCameraId,
+      horizontalFovDeg:DeveloperShotAnalysis.cameraHorizontalFovDeg(shotAnalysisNativeCameraInfo, 78),
+      focalLengthsMm:safeAnalysisValue(shotAnalysisNativeCameraInfo?.focalLengthsMm || []),
+      physicalSizeMm:safeAnalysisValue(shotAnalysisNativeCameraInfo?.physicalSizeMm || null),
       transport:"android-camera2",
     };
     const raw = shotAnalysisStream?.getVideoTracks?.()[0]?.getSettings?.() || {};
@@ -2820,7 +2843,7 @@
   }
 
   function cameraTrackDetailsForAnalysis() {
-    if (shotAnalysisNativeCameraActive) return { video:{ label:`Camera2 ${shotAnalysisNativeCameraId}`, settings:cameraSettingsForAnalysis(), constraints:{}, capabilities:{} }, audio:developerSettings.captureAudio ? { label:"Android microphone", settings:{ sampleRate:48000 }, constraints:{}, capabilities:{} } : null };
+    if (shotAnalysisNativeCameraActive) return { video:{ label:`Camera2 ${shotAnalysisNativeCameraId}`, settings:cameraSettingsForAnalysis(), constraints:{}, capabilities:{} }, audio:shotAnalysisNativeAudioEnabled ? { label:"Android microphone", settings:{ sampleRate:48000 }, constraints:{}, capabilities:{} } : null };
     const videoTrack = shotAnalysisStream?.getVideoTracks?.()[0];
     const audioTrack = shotAnalysisStream?.getAudioTracks?.()[0];
     const describe = track => track ? {
@@ -3061,7 +3084,7 @@
     // projects the whole table below the camera frame.
     const up = { x:0, y:-side * sinDown, z:cosDown };
     const camera = { x:table.length / 2, y:side * (table.width / 2 + distanceM), z:cameraHeight };
-    const fovX = 78 * Math.PI / 180;
+    const fovX = DeveloperShotAnalysis.cameraHorizontalFovDeg(shotAnalysisNativeCameraInfo, 78) * Math.PI / 180;
     const fovY = 2 * Math.atan(Math.tan(fovX / 2) * content.height / content.width);
     const project = point => {
       const delta = { x:point.x-camera.x, y:point.y-camera.y, z:point.z-camera.z };
@@ -3100,7 +3123,9 @@
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
     const content = shotAnalysisVideoContentRect();
-    const points = shotAnalysisMarking ? shotAnalysisWorkingLandmarks : (developerSettings.calibration?.landmarks || []);
+    const savedCalibration = DeveloperShotAnalysis.calibrationMatchesCamera(developerSettings.calibration, shotAnalysisNativeCameraId)
+      ? developerSettings.calibration : null;
+    const points = shotAnalysisMarking ? shotAnalysisWorkingLandmarks : (savedCalibration?.landmarks || []);
     const screenPoints = points.map(point => ({ x:content.x + point.x * content.width, y:content.y + point.y * content.height }));
     context.lineWidth = 2;
     context.strokeStyle = "rgba(198,168,255,.95)";
@@ -3295,25 +3320,42 @@
     if (typeof globalThis.NativeApp?.startNativeCamera === "function") {
       const metadata = nativeJson("getCameraMetadata") || {};
       const cameras = Array.isArray(metadata.cameras) ? metadata.cameras.filter(camera => camera.lensFacing === "back") : [];
-      shotAnalysisVideoDevices = cameras.map((camera, index) => ({ deviceId:String(camera.cameraId), label:`${camera.lensFacing || "camera"} lens ${index + 1}` }));
+      shotAnalysisVideoDevices = cameras.map((camera, index) => {
+        const focal = finite(camera.focalLengthsMm?.[0], 0);
+        const fov = DeveloperShotAnalysis.cameraHorizontalFovDeg(camera, 78);
+        return {
+          deviceId:String(camera.cameraId),
+          label:`${camera.lensFacing || "camera"} lens ${index + 1}${focal > 0 ? ` · ${fmt(focal,1)} mm` : ""} · ${fmt(fov,0)}°`,
+          metadata:camera,
+        };
+      });
       const selected = deviceId || shotAnalysisNativeCameraId || shotAnalysisVideoDevices[0]?.deviceId || "";
       setNativeCameraPreviewMode(true);
       let detail;
       try {
         detail = await nativeCameraCommand("startNativeCamera", "camera-started", selected, developerSettings.captureAudio);
       } catch (error) {
+        try { globalThis.NativeApp?.stopNativeCamera?.(`camera-cleanup-${Date.now()}`); } catch (_) {}
         setNativeCameraPreviewMode(false);
         throw error;
       }
       shotAnalysisNativeCameraActive = true;
       shotAnalysisNativeCameraId = String(detail.cameraId || selected);
+      const selectedCameraMetadata = shotAnalysisVideoDevices.find(device => device.deviceId === shotAnalysisNativeCameraId)?.metadata || null;
+      shotAnalysisNativeCameraInfo = selectedCameraMetadata ? { ...selectedCameraMetadata, activeFocalLengthMm:finite(detail.focalLengthMm, 0) } : null;
       shotAnalysisNativeVideoSize = { width:finite(detail.width, 1920), height:finite(detail.height, 1080) };
       shotAnalysisNativeFrameRate = finite(detail.frameRate, 30);
+      shotAnalysisNativeAudioEnabled = Boolean(detail.audioEnabled);
       startNativeCameraViewportSync();
       ensureShotAnalysisSession().camera = cameraSettingsForAnalysis();
       ensureShotAnalysisSession().cameraTracks = cameraTrackDetailsForAnalysis();
       analysisLog("camera-start", { settings:cameraSettingsForAnalysis(), transport:"android-camera2", audio:developerSettings.captureAudio });
-      els.shotAnalysisCameraStatus.textContent = `Native Camera2 · ${shotAnalysisNativeCameraId} · ${shotAnalysisNativeVideoSize.width}×${shotAnalysisNativeVideoSize.height} · ${developerSettings.captureAudio ? "audio on" : "no audio"}`;
+      const fov = DeveloperShotAnalysis.cameraHorizontalFovDeg(shotAnalysisNativeCameraInfo, 78);
+      els.shotAnalysisCameraStatus.textContent = `Native Camera2 · ${shotAnalysisNativeCameraId} · ${shotAnalysisNativeVideoSize.width}×${shotAnalysisNativeVideoSize.height} · ${fmt(fov,0)}° · ${shotAnalysisNativeAudioEnabled ? "audio on" : "no audio"}`;
+      if (developerSettings.calibration && !DeveloperShotAnalysis.calibrationMatchesCamera(developerSettings.calibration, shotAnalysisNativeCameraId)) {
+        toast("Saved table marks belong to another lens. Mark the table again for this camera.");
+      }
+      if (developerSettings.captureAudio && !shotAnalysisNativeAudioEnabled) toast("Camera started without audio; microphone permission is unavailable.");
       renderShotAnalysisControls();
       return { native:true };
     }
@@ -3347,6 +3389,13 @@
 
   async function recoverShotAnalysisCamera(reason = "resume") {
     if (!els.shotAnalysisDialog?.open || !isNativeAndroidHost() || shotAnalysisRecoveryPromise) return;
+    const nativeState = nativeJson("getNativeCameraState");
+    if (shotAnalysisNativeCameraActive && nativeState && !nativeState.cameraOpen) {
+      shotAnalysisNativeCameraActive = false;
+      shotAnalysisNativeRecording = false;
+      shotAnalysisNativeAudioEnabled = false;
+      setNativeCameraPreviewMode(false);
+    }
     if (shotAnalysisNativeCameraActive) {
       updateNativeCameraViewport();
       return;
@@ -3358,7 +3407,7 @@
       return;
     }
     shotAnalysisRecoveryPromise = (async () => {
-      const selectedDeviceId = track?.getSettings?.().deviceId || "";
+      const selectedDeviceId = shotAnalysisNativeCameraId || track?.getSettings?.().deviceId || "";
       analysisLog("camera-recover", { reason, previousState:track?.readyState || "missing", muted:Boolean(track?.muted) });
       if (shotAnalysisRecorder?.state === "recording") await stopShotAnalysisRecording();
       await stopShotAnalysisCamera();
@@ -3379,7 +3428,7 @@
       analysisLog("camera-stop", { settings:cameraSettingsForAnalysis(), transport:"android-camera2" });
       await nativeCameraCommand("stopNativeCamera", "camera-stopped");
       shotAnalysisNativeCameraActive = false;
-      shotAnalysisNativeCameraId = "";
+      shotAnalysisNativeAudioEnabled = false;
       setNativeCameraPreviewMode(false);
       els.shotAnalysisCameraStatus.textContent = "Camera off.";
       shotAnalysisMarking = false;
@@ -3433,6 +3482,7 @@
       shotAnalysisVideoBlob = null;
       const detail = await nativeCameraCommand("startNativeRecording", "recording-started", shotAnalysisSession.id);
       shotAnalysisNativeRecording = true;
+      shotAnalysisNativeAudioEnabled = Boolean(detail.audioEnabled);
       shotAnalysisNativeVideoSize = { width:finite(detail.width, shotAnalysisNativeVideoSize.width), height:finite(detail.height, shotAnalysisNativeVideoSize.height) };
       shotAnalysisNativeFrameRate = finite(detail.frameRate, shotAnalysisNativeFrameRate);
       startNativeMotionCapture();
@@ -3455,25 +3505,34 @@
     renderShotAnalysisControls();
   }
 
+  async function acceptNativeRecording(detail, reason = "recording-stop") {
+    if (!detail?.url) throw new Error("Native recording did not produce a media file.");
+    const response = await fetch(detail.url);
+    if (!response.ok) throw new Error(`Could not read native recording (${response.status}).`);
+    shotAnalysisVideoBlob = await response.blob();
+    if (shotAnalysisSession) shotAnalysisSession.video = {
+      mimeType:shotAnalysisVideoBlob.type || detail.mimeType || "video/mp4",
+      bytes:shotAnalysisVideoBlob.size,
+      transport:"android-camera2",
+      interrupted:reason !== "recording-stop",
+    };
+    analysisLog(reason, { mimeType:shotAnalysisVideoBlob.type, bytes:shotAnalysisVideoBlob.size, transport:"android-camera2" });
+    if (developerSettings.retainVideo && shotAnalysisSession && shotAnalysisVideoBlob.size) {
+      try {
+        await DeveloperShotAnalysis.putArtifact({ id:`${shotAnalysisSession.id}-video`, sessionId:shotAnalysisSession.id, kind:"video", createdAt:new Date().toISOString(), mimeType:shotAnalysisVideoBlob.type, bytes:shotAnalysisVideoBlob.size, blob:shotAnalysisVideoBlob });
+      } catch (error) { analysisLog("storage-error", { message:error.message, artifact:"video" }); }
+    }
+    await persistShotAnalysisSession(reason);
+    renderShotAnalysisControls();
+    return shotAnalysisVideoBlob;
+  }
+
   function stopShotAnalysisRecording() {
     if (shotAnalysisNativeRecording) {
       stopNativeMotionCapture();
       return nativeCameraCommand("stopNativeRecording", "recording-stopped").then(async detail => {
         shotAnalysisNativeRecording = false;
-        if (!detail.url) throw new Error("Native recording did not produce a media file.");
-        const response = await fetch(detail.url);
-        if (!response.ok) throw new Error(`Could not read native recording (${response.status}).`);
-        shotAnalysisVideoBlob = await response.blob();
-        if (shotAnalysisSession) shotAnalysisSession.video = { mimeType:shotAnalysisVideoBlob.type || "video/mp4", bytes:shotAnalysisVideoBlob.size, transport:"android-camera2" };
-        analysisLog("recording-stop", { mimeType:shotAnalysisVideoBlob.type, bytes:shotAnalysisVideoBlob.size, transport:"android-camera2" });
-        if (developerSettings.retainVideo && shotAnalysisSession && shotAnalysisVideoBlob.size) {
-          try {
-            await DeveloperShotAnalysis.putArtifact({ id:`${shotAnalysisSession.id}-video`, sessionId:shotAnalysisSession.id, kind:"video", createdAt:new Date().toISOString(), mimeType:shotAnalysisVideoBlob.type, bytes:shotAnalysisVideoBlob.size, blob:shotAnalysisVideoBlob });
-          } catch (error) { analysisLog("storage-error", { message:error.message, artifact:"video" }); }
-        }
-        await persistShotAnalysisSession("recording-stop");
-        renderShotAnalysisControls();
-        return shotAnalysisVideoBlob;
+        return acceptNativeRecording(detail);
       }).catch(error => {
         shotAnalysisNativeRecording = false;
         renderShotAnalysisControls();
@@ -3671,8 +3730,10 @@
 
   async function closeShotAnalysis() {
     if (shotDatasetCaptureRunning) {
+      if (pendingRobotReason === "Record dataset") clearPendingRobotAction();
       await stopPlayback();
-      await shotDatasetFinalizePromise;
+      await shotDatasetFinalizeAction?.("dialog-close");
+      if (shotDatasetFinalizePromise) await shotDatasetFinalizePromise;
     }
     if (shotAnalysisRecordingActive()) await stopShotAnalysisRecording();
     await stopShotAnalysisCamera();
@@ -3708,14 +3769,20 @@
 
   async function startShotDatasetCapture() {
     if (shotDatasetCaptureRunning) {
+      if (pendingRobotReason === "Record dataset") clearPendingRobotAction();
       await stopPlayback();
-      await shotDatasetFinalizePromise;
+      await shotDatasetFinalizeAction?.("user-stop");
+      if (shotDatasetFinalizePromise) await shotDatasetFinalizePromise;
       return;
     }
+    let previousTuning = null;
     try {
       const landmarkCount = developerSettings.calibration?.landmarks?.length || 0;
       await startShotAnalysisCamera();
-      if (!shotAnalysisNativeCameraActive && developerSettings.captureAudio && !shotAnalysisStream?.getAudioTracks?.().length) throw new Error("Microphone audio is required while Capture microphone audio is enabled.");
+      if (developerSettings.captureAudio) {
+        const hasAudio = shotAnalysisNativeCameraActive ? shotAnalysisNativeAudioEnabled : Boolean(shotAnalysisStream?.getAudioTracks?.().length);
+        if (!hasAudio) throw new Error("Microphone audio is required while Capture microphone audio is enabled. Grant microphone permission or turn that option off.");
+      }
 
       const config = shotDatasetConfigFromInputs();
       developerSettings.datasetRepetitions = config.repetitions;
@@ -3742,12 +3809,47 @@
         : "Dataset prepared without full table calibration. Recording starts now; add landmarks later to improve trajectory alignment.";
       renderShotAnalysisControls();
 
-      const previousTuning = { ...liveTuning };
+      previousTuning = { ...liveTuning };
       // Capture the complete interaction from the user's button press. This
       // includes robot connection/safety latency before the first ball, rather
       // than starting only once Nova reports Ready.
       shotDatasetCaptureRunning = true;
       shotDatasetFinalizePromise = new Promise(resolve => { resolveShotDatasetFinalize = resolve; });
+      let finalizingPromise = null;
+      shotDatasetFinalizeAction = (reason = "playback-finished") => {
+        if (finalizingPromise) return finalizingPromise;
+        finalizingPromise = (async () => {
+          try {
+            analysisLog("dataset-playback-ended", { completedSamples:shotDatasetDelivered, expectedSamples:manifest.sampleCount, reason });
+            if (reason === "playback-finished") await new Promise(resolve => setTimeout(resolve, 1000));
+            if (shotAnalysisCameraOn()) await captureShotAnalysisImage("post-sequence");
+            if (shotAnalysisRecordingActive()) await stopShotAnalysisRecording();
+            session.dataset.completedSamples = shotDatasetDelivered;
+            session.dataset.status = shotDatasetDelivered >= manifest.sampleCount ? "complete" : "stopped-early";
+            session.dataset.finishReason = reason;
+            session.dataset.finishedAt = new Date().toISOString();
+            await persistShotAnalysisSession("dataset-finished");
+            els.shotDatasetStatus.textContent = session.dataset.status === "complete"
+              ? `Complete · ${shotDatasetDelivered} served-ball events captured. Download the dataset files.`
+              : `Stopped early · ${shotDatasetDelivered} / ${manifest.sampleCount} served-ball events captured.`;
+          } finally {
+            if (previousTuning) {
+              liveTuning = previousTuning;
+              liveTuningRevision += 1;
+              saveLiveTuningPreference();
+            }
+            shotDatasetCaptureRunning = false;
+            shotAnalysisExpectedShot = null;
+            resolveShotDatasetFinalize?.();
+            resolveShotDatasetFinalize = null;
+            shotDatasetFinalizePromise = null;
+            shotDatasetFinalizeAction = null;
+            cleanupTransientDatasetDrill();
+            renderShotAnalysisControls();
+          }
+        })();
+        return finalizingPromise;
+      };
       shotDatasetDelivered = 0;
       session.dataset.status = "recording";
       session.dataset.startedAt = new Date().toISOString();
@@ -3764,38 +3866,26 @@
           renderShotAnalysisControls();
           await new Promise(resolve => setTimeout(resolve, 1500));
         },
-        onFinished:async () => {
-          if (!shotDatasetCaptureRunning) return;
-          try {
-            analysisLog("dataset-playback-ended", { completedSamples:shotDatasetDelivered, expectedSamples:manifest.sampleCount });
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            if (shotAnalysisCameraOn()) await captureShotAnalysisImage("post-sequence");
-            await stopShotAnalysisRecording();
-            session.dataset.completedSamples = shotDatasetDelivered;
-            session.dataset.status = shotDatasetDelivered >= manifest.sampleCount ? "complete" : "stopped-early";
-            session.dataset.finishedAt = new Date().toISOString();
-            await persistShotAnalysisSession("dataset-finished");
-            els.shotDatasetStatus.textContent = session.dataset.status === "complete"
-              ? `Complete · ${shotDatasetDelivered} served-ball events captured. Download the dataset files.`
-              : `Stopped early · ${shotDatasetDelivered} / ${manifest.sampleCount} served-ball events captured.`;
-          } finally {
-            liveTuning = previousTuning;
-            liveTuningRevision += 1;
-            saveLiveTuningPreference();
-            shotDatasetCaptureRunning = false;
-            shotAnalysisExpectedShot = null;
-            resolveShotDatasetFinalize?.();
-            resolveShotDatasetFinalize = null;
-            shotDatasetFinalizePromise = null;
-            cleanupTransientDatasetDrill();
-            renderShotAnalysisControls();
-          }
-        },
+        onFinished:async () => { if (shotDatasetCaptureRunning) await shotDatasetFinalizeAction?.("playback-finished"); },
       });
+      if (shotDatasetCaptureRunning && !playbackRunning && pendingRobotReason !== "Record dataset" && !els.confirmDialog.open) {
+        await shotDatasetFinalizeAction?.("playback-did-not-start");
+      }
     } catch (error) {
-      if (shotAnalysisRecordingActive()) await stopShotAnalysisRecording();
-      shotDatasetCaptureRunning = false;
-      cleanupTransientDatasetDrill();
+      if (shotDatasetFinalizeAction) await shotDatasetFinalizeAction("start-error");
+      else {
+        if (shotAnalysisRecordingActive()) await stopShotAnalysisRecording();
+        if (previousTuning) {
+          liveTuning = previousTuning;
+          liveTuningRevision += 1;
+          saveLiveTuningPreference();
+        }
+        shotDatasetCaptureRunning = false;
+        resolveShotDatasetFinalize?.();
+        resolveShotDatasetFinalize = null;
+        shotDatasetFinalizePromise = null;
+        cleanupTransientDatasetDrill();
+      }
       els.shotDatasetStatus.textContent = `Dataset capture could not start: ${error.message}`;
       analysisLog("dataset-error", { message:error.message });
       toast(error.message);
@@ -10646,7 +10736,11 @@
           "Play despite trajectory warning?",
           trajectoryWarningAcknowledgementText(validation.trajectoryWarnings),
           () => { acknowledgedTrajectoryWarnings.add(acknowledgementKey); void startPlayback(options); },
-          { actionLabel: "Play anyway", actionClass: "primary" }
+          {
+            actionLabel: "Play anyway",
+            actionClass: "primary",
+            onCancel:options.purpose === "balanced-dataset" ? () => { void shotDatasetFinalizeAction?.("trajectory-warning-canceled"); } : null,
+          }
         );
         return;
       }
@@ -10657,14 +10751,18 @@
         "Check the robot position?",
         "This saved position has not been used or checked in two weeks. If the robot may have moved, cancel and choose Update pose. Otherwise continue with the saved position.",
         () => { poseStaleAcknowledged = true; void startPlayback(options); },
-        { actionLabel: "Continue with saved pose", actionClass: "primary" }
+        {
+          actionLabel: "Continue with saved pose",
+          actionClass: "primary",
+          onCancel:options.purpose === "balanced-dataset" ? () => { void shotDatasetFinalizeAction?.("pose-confirmation-canceled"); } : null,
+        }
       );
       return;
     }
     if (!robot) { els.runStatus.textContent = "Robot controller unavailable"; toast("Robot controller module did not load."); return; }
     if (!robot.connected || !robot.authenticated) {
       els.runStatus.textContent = "Connect Nova to start the drill";
-      requestRobotConnection("Play drill", () => startPlayback(options));
+      requestRobotConnection(options.purpose === "balanced-dataset" ? "Record dataset" : "Play drill", () => startPlayback(options));
       return;
     }
 
@@ -11449,6 +11547,7 @@
 
   function askConfirm(title, text, callback, options = {}) {
     confirmCallback = callback;
+    confirmCancelCallback = typeof options.onCancel === "function" ? options.onCancel : null;
     els.confirmTitle.textContent = title;
     els.confirmText.textContent = text;
     els.confirmActionBtn.textContent = options.actionLabel || "Confirm";
@@ -11962,7 +12061,17 @@
     els.robotDialogConnectBtn?.addEventListener("click", () => { void connectOrDisconnectRobot(); });
     els.robotStatusBtn.addEventListener("click", () => navigateApp("robot", { push: true }));
     els.robotDiagnosticsBtn?.addEventListener("click", () => { updateRobotUI(); els.robotDialog.showModal(); });
-    els.closeRobotDialogBtn.addEventListener("click", () => { clearPendingRobotAction(); els.robotDialog.close(); });
+    els.closeRobotDialogBtn.addEventListener("click", () => {
+      const canceledDatasetConnection = pendingRobotReason === "Record dataset" && shotDatasetCaptureRunning;
+      clearPendingRobotAction();
+      els.robotDialog.close();
+      if (canceledDatasetConnection) void shotDatasetFinalizeAction?.("connection-canceled");
+    });
+    els.robotDialog.addEventListener("cancel", () => {
+      const canceledDatasetConnection = pendingRobotReason === "Record dataset" && shotDatasetCaptureRunning;
+      clearPendingRobotAction();
+      if (canceledDatasetConnection) void shotDatasetFinalizeAction?.("connection-canceled");
+    });
     els.robotRefreshStatusBtn.addEventListener("click", () => { void refreshRobotStatus(); });
     els.robotDisconnectBtn.addEventListener("click", () => { void disconnectRobotFromDialog(); });
     els.robotCopyLogBtn.addEventListener("click", () => { void copyRobotLog(); });
@@ -12292,7 +12401,15 @@
     els.confirmActionBtn.addEventListener("click", () => {
       const callback = confirmCallback;
       confirmCallback = null;
+      confirmCancelCallback = null;
       if (callback) callback();
+    });
+    els.confirmDialog.addEventListener("close", () => {
+      if (!confirmCallback) return;
+      const cancel = confirmCancelCallback;
+      confirmCallback = null;
+      confirmCancelCallback = null;
+      if (cancel) cancel();
     });
 
     syncVisualViewportHeight();

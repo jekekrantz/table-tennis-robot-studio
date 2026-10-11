@@ -52,7 +52,7 @@ final class NativeCameraManager {
     private final List<JSONArray> frameMetadata = new ArrayList<>();
     private HandlerThread cameraThread;
     private Handler cameraHandler;
-    private CameraDevice camera;
+    private volatile CameraDevice camera;
     private CameraCaptureSession session;
     private Surface previewSurface;
     private MediaRecorder recorder;
@@ -64,8 +64,10 @@ final class NativeCameraManager {
     private String startRequestId = "";
     private String pendingPermissionRequestId = "";
     private String pendingPreviewRequestId = "";
-    private boolean captureAudio;
-    private boolean recording;
+    private volatile boolean cameraRequested;
+    private boolean captureAudioRequested;
+    private volatile boolean captureAudio;
+    private volatile boolean recording;
     private long droppedFrameMetadata;
     private int viewportLeft = Integer.MIN_VALUE;
     private int viewportTop = Integer.MIN_VALUE;
@@ -84,9 +86,11 @@ final class NativeCameraManager {
 
     void start(String requestId, String requestedCameraId, boolean withAudio) {
         activity.runOnUiThread(() -> {
+            cameraRequested = true;
             startRequestId = requestId;
             activeCameraId = requestedCameraId == null ? "" : requestedCameraId;
-            captureAudio = withAudio;
+            captureAudioRequested = withAudio;
+            captureAudio = withAudio && hasMicrophonePermission();
             previewContainer.setVisibility(android.view.View.VISIBLE);
             if (!hasPermissions(withAudio)) {
                 pendingPermissionRequestId = requestId;
@@ -100,15 +104,21 @@ final class NativeCameraManager {
     void onPermissionResult(int[] grantResults) {
         String requestId = pendingPermissionRequestId;
         pendingPermissionRequestId = "";
-        if (grantResults.length == 0) { emit(error(requestId, "Camera and microphone permissions were not granted.")); return; }
-        for (int result : grantResults) if (result != android.content.pm.PackageManager.PERMISSION_GRANTED) { emit(error(requestId, "Camera and microphone permissions are required for native capture.")); return; }
+        if (!hasCameraPermission()) {
+            cameraRequested = false;
+            startRequestId = "";
+            activity.runOnUiThread(() -> previewContainer.setVisibility(android.view.View.GONE));
+            emit(error(requestId, "Camera permission is required for native capture."));
+            return;
+        }
+        captureAudio = captureAudioRequested && hasMicrophonePermission();
         activity.runOnUiThread(this::openWhenReady);
     }
 
     private void openWhenReady() {
-        if (!surfaceReady()) return;
+        if (!cameraRequested || !surfaceReady()) return;
         try { openCamera(); }
-        catch (Exception error) { emit(error(startRequestId, error.getMessage())); }
+        catch (Exception error) { failCameraStart(startRequestId, error.getMessage()); }
     }
 
     @SuppressWarnings("MissingPermission")
@@ -123,6 +133,10 @@ final class NativeCameraManager {
         recordingSize = chooseSize(map.getOutputSizes(MediaRecorder.class), 1920, 1080);
         long minimumFrameDuration = map.getOutputMinFrameDuration(MediaRecorder.class, recordingSize);
         recordingFrameRate = minimumFrameDuration > 0 && minimumFrameDuration <= 17_000_000L ? 60 : 30;
+        Range<Integer>[] fpsRanges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        boolean supportsSelectedRate = false;
+        if (fpsRanges != null) for (Range<Integer> range : fpsRanges) if (range.contains(recordingFrameRate)) supportsSelectedRate = true;
+        if (!supportsSelectedRate) recordingFrameRate = 30;
         previewView.getHolder().setFixedSize(previewSize.getWidth(), previewSize.getHeight());
         updatePreviewLayout();
         cameraManager.openCamera(activeCameraId, deviceCallback, cameraHandler);
@@ -140,15 +154,21 @@ final class NativeCameraManager {
     }
 
     private final SurfaceHolder.Callback surfaceCallback = new SurfaceHolder.Callback() {
-        @Override public void surfaceCreated(SurfaceHolder holder) { if (!startRequestId.isEmpty() && camera == null && hasPermissions(captureAudio)) openWhenReady(); }
+        @Override public void surfaceCreated(SurfaceHolder holder) { if (cameraRequested && camera == null && hasCameraPermission()) openWhenReady(); }
         @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { updatePreviewLayout(); }
-        @Override public void surfaceDestroyed(SurfaceHolder holder) { closeCamera(false); }
+        @Override public void surfaceDestroyed(SurfaceHolder holder) { if (cameraRequested) onHostPause(); else closeCamera(false); }
     };
 
     private final CameraDevice.StateCallback deviceCallback = new CameraDevice.StateCallback() {
         @Override public void onOpened(CameraDevice device) { camera = device; createPreviewSession(startRequestId); }
-        @Override public void onDisconnected(CameraDevice device) { emit(event("camera-disconnected", startRequestId)); closeCamera(false); }
-        @Override public void onError(CameraDevice device, int code) { emit(error(startRequestId, "Camera2 error " + code + ".")); closeCamera(false); }
+        @Override public void onDisconnected(CameraDevice device) { cameraRequested = false; emit(event("camera-disconnected", startRequestId)); closeCamera(true); }
+        @Override public void onError(CameraDevice device, int code) {
+            String requestId = startRequestId;
+            cameraRequested = false;
+            emit(error(requestId, "Camera2 error " + code + "."));
+            emit(event("camera-disconnected", requestId));
+            closeCamera(true);
+        }
     };
 
     private void createPreviewSession(String requestId) {
@@ -165,11 +185,11 @@ final class NativeCameraManager {
                         configureAuto(builder);
                         pendingPreviewRequestId = requestId == null ? "" : requestId;
                         session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler);
-                    } catch (Exception error) { emit(error(requestId, error.getMessage())); }
+                    } catch (Exception error) { failCameraStart(requestId, error.getMessage()); }
                 }
-                @Override public void onConfigureFailed(CameraCaptureSession failed) { emit(error(requestId, "Could not configure native camera preview.")); }
+                @Override public void onConfigureFailed(CameraCaptureSession failed) { failCameraStart(requestId, "Could not configure native camera preview."); }
             }, cameraHandler);
-        } catch (Exception error) { emit(error(requestId, error.getMessage())); }
+        } catch (Exception error) { failCameraStart(requestId, error.getMessage()); }
     }
 
     void startRecording(String requestId, String captureId) {
@@ -223,19 +243,42 @@ final class NativeCameraManager {
                         put(detail, "height", recordingSize.getHeight());
                         put(detail, "frameRate", recordingFrameRate);
                         put(detail, "mimeType", "video/mp4");
+                        put(detail, "audioEnabled", captureAudio);
                         emit(detail);
-                    } catch (Exception error) { emit(error(requestId, error.getMessage())); }
+                    } catch (Exception error) {
+                        recording = false;
+                        releaseRecorder();
+                        emit(error(requestId, error.getMessage()));
+                        createPreviewSession("");
+                    }
                 }
-                @Override public void onConfigureFailed(CameraCaptureSession failed) { emit(error(requestId, "Could not configure native video recording.")); }
+                @Override public void onConfigureFailed(CameraCaptureSession failed) {
+                    recording = false;
+                    releaseRecorder();
+                    emit(error(requestId, "Could not configure native video recording."));
+                    createPreviewSession("");
+                }
             }, cameraHandler);
-        } catch (Exception error) { releaseRecorder(); emit(error(requestId, error.getMessage())); }
+        } catch (Exception error) {
+            recording = false;
+            releaseRecorder();
+            emit(error(requestId, error.getMessage()));
+            if (camera != null) createPreviewSession("");
+        }
     }
 
     void stopRecording(String requestId) {
         if (!recording) { emit(error(requestId, "Native recording is not active.")); return; }
         try { session.stopRepeating(); } catch (Exception ignored) {}
         try { recorder.stop(); }
-        catch (Exception error) { if (recordingFile != null) recordingFile.delete(); emit(error(requestId, "Native recording could not be finalized: " + error.getMessage())); }
+        catch (Exception error) {
+            if (recordingFile != null) recordingFile.delete();
+            recording = false;
+            releaseRecorder();
+            emit(error(requestId, "Native recording could not be finalized: " + error.getMessage()));
+            createPreviewSession("");
+            return;
+        }
         recording = false;
         releaseRecorder();
         if (recordingFile != null && recordingFile.isFile()) mediaFiles.put(recordingFile.getName(), recordingFile);
@@ -279,8 +322,47 @@ final class NativeCameraManager {
 
     void stop(String requestId) {
         if (recording) stopRecording("");
+        cameraRequested = false;
+        startRequestId = "";
+        pendingPermissionRequestId = "";
         closeCamera(true);
         emit(event("camera-stopped", requestId));
+    }
+
+    void onHostPause() {
+        if (!cameraRequested || (camera == null && !recording)) return;
+        JSONObject detail = event("camera-suspended", "");
+        put(detail, "cameraId", activeCameraId);
+        put(detail, "recordingInterrupted", recording);
+        if (recording) {
+            try { if (session != null) session.stopRepeating(); } catch (Exception ignored) {}
+            try {
+                recorder.stop();
+                if (recordingFile != null && recordingFile.isFile()) {
+                    mediaFiles.put(recordingFile.getName(), recordingFile);
+                    put(detail, "url", "https://appassets.androidplatform.net/native-media/" + recordingFile.getName());
+                    put(detail, "bytes", recordingFile.length());
+                    put(detail, "mimeType", "video/mp4");
+                }
+            } catch (Exception error) {
+                if (recordingFile != null) recordingFile.delete();
+                put(detail, "recordingError", error.getMessage());
+            }
+        }
+        cameraRequested = false;
+        startRequestId = "";
+        closeCamera(true);
+        emit(detail);
+    }
+
+    String stateJson() {
+        JSONObject state = new JSONObject();
+        put(state, "cameraRequested", cameraRequested);
+        put(state, "cameraOpen", camera != null);
+        put(state, "recording", recording);
+        put(state, "audioEnabled", captureAudio);
+        put(state, "cameraId", activeCameraId);
+        return state.toString();
     }
 
     String drainFrameMetadata() {
@@ -335,6 +417,8 @@ final class NativeCameraManager {
                 put(detail, "width", previewSize.getWidth());
                 put(detail, "height", previewSize.getHeight());
                 put(detail, "frameRate", recordingFrameRate);
+                put(detail, "audioEnabled", captureAudio);
+                put(detail, "focalLengthMm", result.get(CaptureResult.LENS_FOCAL_LENGTH));
                 emit(detail);
             }
             if (!recording) return;
@@ -363,11 +447,19 @@ final class NativeCameraManager {
 
     private void configureAuto(CaptureRequest.Builder builder) {
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
-        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
         try {
-            Range<Integer>[] ranges = cameraManager.getCameraCharacteristics(activeCameraId).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(activeCameraId);
+            int[] afModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES);
+            if (contains(afModes, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+            else if (contains(afModes, CaptureRequest.CONTROL_AF_MODE_AUTO)) builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO);
+            else builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                int[] rotateModes = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_ROTATE_AND_CROP_MODES);
+                if (contains(rotateModes, CaptureRequest.SCALER_ROTATE_AND_CROP_AUTO)) builder.set(CaptureRequest.SCALER_ROTATE_AND_CROP, CaptureRequest.SCALER_ROTATE_AND_CROP_AUTO);
+            }
+            Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
             if (ranges != null) {
                 Range<Integer> best = null;
                 for (Range<Integer> range : ranges) {
@@ -377,6 +469,13 @@ final class NativeCameraManager {
                 if (best != null) builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, best);
             }
         } catch (Exception ignored) {}
+    }
+
+    private void failCameraStart(String requestId, String message) {
+        cameraRequested = false;
+        startRequestId = "";
+        closeCamera(true);
+        emit(error(requestId, message));
     }
 
     private boolean surfaceReady() {
@@ -402,8 +501,11 @@ final class NativeCameraManager {
     private void releaseRecorder() { if (recorder != null) { try { recorder.reset(); recorder.release(); } catch (Exception ignored) {} recorder = null; } }
     void destroy() { closeCamera(true); if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; cameraHandler = null; } }
     private void startThread() { cameraThread = new HandlerThread("RobotStudioCamera2"); cameraThread.start(); cameraHandler = new Handler(cameraThread.getLooper()); }
+    private boolean hasCameraPermission() { return activity.checkSelfPermission(Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED; }
+    private boolean hasMicrophonePermission() { return activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED; }
     private boolean hasPermissions(boolean audio) { if (activity.checkSelfPermission(Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false; return !audio || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED; }
     private String[] requiredPermissions(boolean audio) { return audio ? new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO} : new String[]{Manifest.permission.CAMERA}; }
+    private static boolean contains(int[] values, int expected) { if (values != null) for (int value : values) if (value == expected) return true; return false; }
     private static Size chooseSize(Size[] sizes, int preferredWidth, int preferredHeight) { if (sizes == null || sizes.length == 0) return new Size(1280, 720); return Arrays.stream(sizes).filter(size -> size.getWidth() <= preferredWidth && size.getHeight() <= preferredHeight).min(Comparator.comparingLong(size -> Math.abs((long) size.getWidth() * preferredHeight - (long) size.getHeight() * preferredWidth) + Math.abs((long) size.getWidth() * size.getHeight() - (long) preferredWidth * preferredHeight))).orElse(sizes[0]); }
     private static String safeName(String value) { return (value == null ? "capture" : value).replaceAll("[^A-Za-z0-9._-]", "_"); }
     private void emit(JSONObject detail) { String script = "window.__nativeCameraEvent&&window.__nativeCameraEvent(" + JSONObject.quote(detail.toString()) + ")"; activity.runOnUiThread(() -> webView.evaluateJavascript(script, null)); }

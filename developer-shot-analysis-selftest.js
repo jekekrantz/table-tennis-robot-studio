@@ -46,6 +46,16 @@ assert.strictEqual(Analysis.normalizeCalibration({ landmarks: landmarks.slice(0,
 const fakeRecorder = { isTypeSupported: type => type.includes("vp8") };
 assert.strictEqual(Analysis.preferredRecorderMimeType(fakeRecorder), "video/webm;codecs=vp8,opus");
 
+const mainFov = Analysis.cameraHorizontalFovDeg({ physicalSizeMm:{ width:5.6 }, focalLengthsMm:[4.6] });
+const ultraWideFov = Analysis.cameraHorizontalFovDeg({ physicalSizeMm:{ width:5.6 }, focalLengthsMm:[1.8] });
+assert(mainFov > 60 && mainFov < 80);
+assert(ultraWideFov > mainFov && ultraWideFov < 130);
+assert(Analysis.cameraHorizontalFovDeg({ physicalSizeMm:{ width:5.6 }, focalLengthsMm:[1.8,4.6], activeFocalLengthMm:4.6 }) < 80);
+assert.strictEqual(Analysis.cameraHorizontalFovDeg({}, 81), 81);
+assert.strictEqual(Analysis.calibrationMatchesCamera({ camera:{ cameraId:"0" } }, "0"), true);
+assert.strictEqual(Analysis.calibrationMatchesCamera({ camera:{ cameraId:"0" } }, "2"), false);
+assert.strictEqual(Analysis.calibrationMatchesCamera({ camera:{} }, "2"), true);
+
 const schedule = Analysis.balancedDatasetSchedule(["a", "b", "c"], 3);
 assert.strictEqual(schedule.length, 9);
 assert.deepStrictEqual(schedule.map(item => item.conditionId), ["a", "b", "c", "b", "c", "a", "c", "a", "b"]);

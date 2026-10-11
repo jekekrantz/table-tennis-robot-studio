@@ -65,7 +65,16 @@ final class NativeCaptureMetadataManager implements SensorEventListener {
         try {
             CameraManager manager = activity.getSystemService(CameraManager.class);
             if (manager != null) {
-                for (String cameraId : manager.getCameraIdList()) cameras.put(cameraObject(cameraId, manager.getCameraCharacteristics(cameraId)));
+                for (String cameraId : manager.getCameraIdList()) {
+                    try {
+                        cameras.put(cameraObject(cameraId, manager.getCameraCharacteristics(cameraId)));
+                    } catch (Exception cameraError) {
+                        JSONObject unavailable = new JSONObject();
+                        put(unavailable, "cameraId", cameraId);
+                        put(unavailable, "error", cameraError.getMessage());
+                        cameras.put(unavailable);
+                    }
+                }
             }
         } catch (Exception error) {
             put(root, "error", error.getMessage());
@@ -119,7 +128,8 @@ final class NativeCaptureMetadataManager implements SensorEventListener {
         if (map != null) {
             put(camera, "videoSizes", sizes(map.getOutputSizes(MediaRecorder.class)));
             put(camera, "jpegSizes", sizes(map.getOutputSizes(android.graphics.ImageFormat.JPEG)));
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) put(camera, "highSpeedVideoSizes", sizes(map.getHighSpeedVideoSizes()));
+            try { put(camera, "highSpeedVideoSizes", sizes(map.getHighSpeedVideoSizes())); }
+            catch (Exception error) { put(camera, "highSpeedVideoSizesError", error.getMessage()); }
         }
         JSONArray requestKeys = new JSONArray();
         for (CaptureRequest.Key<?> key : c.getAvailableCaptureRequestKeys()) requestKeys.put(key.getName());
