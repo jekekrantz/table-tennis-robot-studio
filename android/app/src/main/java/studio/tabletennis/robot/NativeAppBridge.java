@@ -10,14 +10,36 @@ import org.json.JSONObject;
 
 final class NativeAppBridge {
     private final Activity activity;
+    private final NativeBluetoothManager bluetooth;
 
-    NativeAppBridge(Activity activity) {
+    NativeAppBridge(Activity activity, NativeBluetoothManager bluetooth) {
         this.activity = activity;
+        this.bluetooth = bluetooth;
     }
 
     @JavascriptInterface
     public boolean isNativeHost() {
         return true;
+    }
+
+    @JavascriptInterface
+    public boolean supportsNativeBluetooth() {
+        return bluetooth.isSupported();
+    }
+
+    @JavascriptInterface
+    public void bluetoothConnect() {
+        bluetooth.connect();
+    }
+
+    @JavascriptInterface
+    public void bluetoothWrite(String requestId, String hex) {
+        bluetooth.write(requestId, hex);
+    }
+
+    @JavascriptInterface
+    public void bluetoothDisconnect() {
+        bluetooth.disconnect();
     }
 
     @JavascriptInterface

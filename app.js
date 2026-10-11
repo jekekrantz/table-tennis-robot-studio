@@ -11195,7 +11195,7 @@
 
   function robotPhaseLabel(snapshot = robot?.snapshot()) {
     if (!snapshot) return "Controller unavailable";
-    if (!snapshot.browserSupported && !snapshot.connected) return "Web Bluetooth unavailable";
+    if (!snapshot.browserSupported && !snapshot.connected) return "Bluetooth unavailable";
     if (!snapshot.connected) {
       const pending = {
         "choosing-device": "Choose Nova…",
@@ -11452,7 +11452,10 @@
     els.robotStatusBtn.classList.add(statusClass);
     [els.robotPageDot].filter(Boolean).forEach(dot => { dot.className = `status-dot ${snapshot.connected ? "connected" : "disconnected"}`; });
     if (els.robotPageConnection) els.robotPageConnection.textContent = snapshot.connected ? `Nova ${label}` : "Nova disconnected";
-    if (els.robotPageDevice) els.robotPageDevice.textContent = snapshot.connected ? (snapshot.deviceName || snapshot.serial || "Connected") : (snapshot.browserSupported ? "Web Bluetooth available" : "Web Bluetooth unavailable");
+    if (els.robotPageDevice) els.robotPageDevice.textContent = snapshot.connected
+      ? (snapshot.deviceName || snapshot.serial || "Connected")
+      : snapshot.transport === "native-android" ? "Native Android Bluetooth available"
+      : snapshot.browserSupported ? "Web Bluetooth available" : "Web Bluetooth unavailable";
 
     els.robotDialogConnection.textContent = snapshot.connected
       ? `${snapshot.authenticated ? "Authenticated" : "Connected"} · ${label}`
@@ -11465,7 +11468,12 @@
     els.robotRefreshStatusBtn.disabled = !snapshot.connected || !snapshot.authenticated;
     els.robotDisconnectBtn.disabled = !snapshot.connected;
 
-    if (!globalThis.isSecureContext || !navigator.bluetooth) {
+    if (snapshot.transport === "native-android") {
+      els.robotBrowserNotice.className = "robot-browser-notice ok";
+      els.robotBrowserNotice.textContent = snapshot.connected
+        ? "Native Android BLE session active. Heartbeat runs every 10 seconds while connected."
+        : "Native Android Bluetooth is ready. Press Connect Nova and choose the robot found nearby.";
+    } else if (!globalThis.isSecureContext || !navigator.bluetooth) {
       els.robotBrowserNotice.className = "robot-browser-notice error";
       els.robotBrowserNotice.textContent = browserBluetoothInstructions();
     } else {

@@ -30,11 +30,19 @@
       this.lastDoneSignature = "";
       this.lastStartAt = 0;
       this.disconnectRequested = false;
+      this.nativeConnected = false;
+      this.nativeDeviceName = "";
+      this.nativeDeviceId = "";
+      this.nativeConnectWaiter = null;
+      this.nativeWriteWaiters = new Map();
+      this.nativeWriteCounter = 0;
       this.onCharacteristicValueChanged = this.onCharacteristicValueChanged.bind(this);
       this.onGattDisconnected = this.onGattDisconnected.bind(this);
+      if (this.nativeSupported) root.__nativeBluetoothEvent = payload => this.onNativeBluetoothEvent(payload);
     }
 
     get connected() {
+      if (this.nativeSupported) return this.nativeConnected;
       return Boolean(this.device?.gatt?.connected && this.writeChar && this.notifyChar);
     }
 
@@ -43,7 +51,15 @@
     }
 
     get browserSupported() {
-      return Boolean(root.isSecureContext && root.navigator?.bluetooth);
+      return this.nativeSupported || Boolean(root.isSecureContext && root.navigator?.bluetooth);
+    }
+
+    get nativeSupported() {
+      try {
+        return Boolean(root.NativeApp?.isNativeHost?.() && root.NativeApp?.supportsNativeBluetooth?.());
+      } catch (_) {
+        return false;
+      }
     }
 
     snapshot() {
@@ -53,13 +69,14 @@
         authenticated: this.authenticated,
         phase: this.phase,
         serial: this.serial,
-        deviceName: this.device?.name || "",
-        deviceId: this.device?.id || "",
+        deviceName: this.nativeSupported ? this.nativeDeviceName : (this.device?.name || ""),
+        deviceId: this.nativeSupported ? this.nativeDeviceId : (this.device?.id || ""),
         wireState: this.wireState,
         stateDetail: this.stateDetail,
         ballCounter: this.ballCounter,
         stateName: this.wireState == null ? "Unknown" : P.stateName(this.wireState),
         browserSupported: this.browserSupported,
+        transport: this.nativeSupported ? "native-android" : "web-bluetooth",
       };
     }
 
@@ -94,6 +111,7 @@
       if (this.connected) return this.snapshot();
 
       this.disconnectRequested = false;
+      if (this.nativeSupported) return this.connectNative();
       this.setPhase("choosing-device");
       this.log("Opening Nova device chooser");
       const device = await navigator.bluetooth.requestDevice({
@@ -114,6 +132,31 @@
         this.notifyChar.addEventListener("characteristicvaluechanged", this.onCharacteristicValueChanged);
         this.log("Notifications enabled");
 
+        await this.authenticate();
+        await this.refreshDeviceInfo().catch(error => this.log(`Device-info query skipped: ${error.message}`, "warn"));
+        await this.prepareConnectionState();
+        await this.sendHeartbeat().catch(error => this.log(`Initial heartbeat failed: ${error.message}`, "warn"));
+        this.startHeartbeat();
+        this.emitState();
+        return this.snapshot();
+      } catch (error) {
+        this.log(`Connection failed: ${error.message}`, "error");
+        this.forceDisconnect();
+        throw error;
+      }
+    }
+
+    async connectNative() {
+      this.setPhase("choosing-device");
+      this.log("Opening native Android Nova chooser");
+      await new Promise((resolve, reject) => {
+        this.nativeConnectWaiter = { resolve, reject };
+        try { root.NativeApp.bluetoothConnect(); }
+        catch (error) { this.nativeConnectWaiter = null; reject(error); }
+      });
+      try {
+        this.setPhase("authenticating");
+        this.log(`Connected to ${this.nativeDeviceName || "selected device"} using native Android BLE`);
         await this.authenticate();
         await this.refreshDeviceInfo().catch(error => this.log(`Device-info query skipped: ${error.message}`, "warn"));
         await this.prepareConnectionState();
@@ -396,17 +439,22 @@
       this.disconnectRequested = true;
       this.stopHeartbeat();
       try {
-        if (this.connected && this.authenticated && this.writeChar) {
+        if (this.connected && this.authenticated) {
           const payload = P.toUint8(P.COMMANDS.stop);
-          if (typeof this.writeChar.writeValueWithoutResponse === "function") {
+          if (this.nativeSupported) {
+            root.NativeApp?.bluetoothWrite?.(`emergency-${Date.now()}`, P.hex(payload));
+          } else if (typeof this.writeChar?.writeValueWithoutResponse === "function") {
             void this.writeChar.writeValueWithoutResponse(payload).catch(() => {});
-          } else if (typeof this.writeChar.writeValue === "function") {
+          } else if (typeof this.writeChar?.writeValue === "function") {
             void this.writeChar.writeValue(payload).catch(() => {});
           }
           this.log("Page closing: best-effort STOP queued", "tx", payload);
         }
       } catch (_) {}
-      try { if (this.device?.gatt?.connected) this.device.gatt.disconnect(); } catch (_) {}
+      try {
+        if (this.nativeSupported) root.NativeApp?.bluetoothDisconnect?.();
+        else if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+      } catch (_) {}
       this.forceDisconnect();
     }
 
@@ -428,11 +476,19 @@
         this.device?.removeEventListener("gattserverdisconnected", this.onGattDisconnected);
       } catch (_) {}
       try {
-        if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+        if (this.nativeSupported && this.nativeConnected) root.NativeApp?.bluetoothDisconnect?.();
+        else if (this.device?.gatt?.connected) this.device.gatt.disconnect();
       } catch (_) {}
       this.server = null;
       this.writeChar = null;
       this.notifyChar = null;
+      this.nativeConnected = false;
+      this.nativeDeviceName = "";
+      this.nativeDeviceId = "";
+      if (this.nativeConnectWaiter) this.nativeConnectWaiter.reject(new Error("Nova disconnected"));
+      this.nativeConnectWaiter = null;
+      for (const waiter of this.nativeWriteWaiters.values()) waiter.reject(new Error("Nova disconnected"));
+      this.nativeWriteWaiters.clear();
       this.authenticated = false;
       this.wireState = null;
       this.stateDetail = 0;
@@ -447,6 +503,13 @@
       this.server = null;
       this.writeChar = null;
       this.notifyChar = null;
+      this.nativeConnected = false;
+      this.nativeDeviceName = "";
+      this.nativeDeviceId = "";
+      if (this.nativeConnectWaiter) this.nativeConnectWaiter.reject(new Error("Nova disconnected"));
+      this.nativeConnectWaiter = null;
+      for (const waiter of this.nativeWriteWaiters.values()) waiter.reject(new Error("Nova disconnected"));
+      this.nativeWriteWaiters.clear();
       this.authenticated = false;
       this.wireState = null;
       this.stateDetail = 0;
@@ -460,6 +523,10 @@
     onCharacteristicValueChanged(event) {
       const value = event.target.value;
       const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      this.processIncomingBytes(bytes);
+    }
+
+    processIncomingBytes(bytes) {
       let frame;
       try {
         frame = P.parseResponse(bytes);
@@ -510,6 +577,46 @@
         if (!queue.length) this.waiters.delete(frame.opcode);
         clearTimeout(waiter.timer);
         waiter.resolve(frame);
+      }
+    }
+
+    onNativeBluetoothEvent(payload) {
+      let detail;
+      try { detail = typeof payload === "string" ? JSON.parse(payload) : payload; }
+      catch (error) { this.log(`Malformed native Bluetooth event: ${error.message}`, "error"); return; }
+      if (!detail?.type) return;
+      if (detail.type === "scan-start") {
+        this.setPhase("choosing-device");
+      } else if (detail.type === "connecting") {
+        this.setPhase("connecting");
+      } else if (detail.type === "connected") {
+        this.nativeConnected = true;
+        this.nativeDeviceName = detail.name || "Pongbot Nova";
+        this.nativeDeviceId = detail.id || "";
+        const waiter = this.nativeConnectWaiter;
+        this.nativeConnectWaiter = null;
+        waiter?.resolve();
+        this.emitState();
+      } else if (detail.type === "notification") {
+        try { this.processIncomingBytes(P.bytesFromHex(detail.hex || "")); }
+        catch (error) { this.log(`Malformed native BLE notification: ${error.message}`, "error"); }
+      } else if (detail.type === "write-complete" || detail.type === "write-error") {
+        const waiter = this.nativeWriteWaiters.get(detail.requestId);
+        if (!waiter) return;
+        this.nativeWriteWaiters.delete(detail.requestId);
+        if (detail.type === "write-complete") waiter.resolve();
+        else waiter.reject(new Error(detail.message || "Native BLE write failed"));
+      } else if (detail.type === "disconnected") {
+        this.onGattDisconnected();
+      } else if (detail.type === "error") {
+        const error = new Error(detail.message || "Native Bluetooth error");
+        if (detail.operation === "connect" && this.nativeConnectWaiter) {
+          const waiter = this.nativeConnectWaiter;
+          this.nativeConnectWaiter = null;
+          waiter.reject(error);
+        } else {
+          this.log(error.message, "error");
+        }
       }
     }
 
@@ -580,6 +687,23 @@
 
     enqueueWrite(bytes) {
       this.writeLock = this.writeLock.catch(() => {}).then(async () => {
+        if (this.nativeSupported) {
+          if (!this.nativeConnected) throw new Error("Nova is not connected");
+          const requestId = `write-${++this.nativeWriteCounter}`;
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              this.nativeWriteWaiters.delete(requestId);
+              reject(new Error("Native BLE write timed out"));
+            }, 6000);
+            this.nativeWriteWaiters.set(requestId, {
+              resolve:() => { clearTimeout(timer); resolve(); },
+              reject:error => { clearTimeout(timer); reject(error); },
+            });
+            try { root.NativeApp.bluetoothWrite(requestId, P.hex(P.toUint8(bytes))); }
+            catch (error) { clearTimeout(timer); this.nativeWriteWaiters.delete(requestId); reject(error); }
+          });
+          return;
+        }
         if (!this.writeChar) throw new Error("Nova write characteristic is unavailable");
         const payload = P.toUint8(bytes);
         const properties = this.writeChar.properties || {};

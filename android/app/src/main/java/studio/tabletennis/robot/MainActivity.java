@@ -55,6 +55,7 @@ public final class MainActivity extends Activity {
     private static final int MAX_UPDATE_MANIFEST_BYTES = 64 * 1024;
 
     private WebView webView;
+    private NativeBluetoothManager nativeBluetooth;
     private PermissionRequest pendingWebPermission;
     private String[] pendingWebResources;
     private final ExecutorService updateExecutor = Executors.newSingleThreadExecutor();
@@ -116,7 +117,8 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
-        webView.addJavascriptInterface(new NativeAppBridge(this), "NativeApp");
+        nativeBluetooth = new NativeBluetoothManager(this, webView);
+        webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth), "NativeApp");
         webView.setWebViewClient(new LocalOnlyWebViewClient(assetLoader));
         webView.setWebChromeClient(new LocalWebChromeClient());
         webView.loadUrl(START_URL);
@@ -134,6 +136,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (nativeBluetooth != null) nativeBluetooth.destroy();
         if (webView != null) {
             webView.removeJavascriptInterface("NativeApp");
             webView.destroy();
@@ -281,6 +284,10 @@ public final class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NativeBluetoothManager.PERMISSION_REQUEST) {
+            if (nativeBluetooth != null) nativeBluetooth.onPermissionResult(grantResults);
+            return;
+        }
         if (requestCode != MEDIA_PERMISSION_REQUEST || pendingWebPermission == null) return;
 
         PermissionRequest request = pendingWebPermission;

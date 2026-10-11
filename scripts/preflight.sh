@@ -7,7 +7,7 @@ python3 scripts/build_runtime_bundle.py --check
 
 echo "[2/13] JavaScript syntax"
 for file in \
-  app.js pongbot-protocol.js pongbot-ble.js selftest.js emergency-shutdown-selftest.js \
+  app.js pongbot-protocol.js pongbot-ble.js selftest.js native-ble-selftest.js emergency-shutdown-selftest.js \
   robot-geometry.js robot-geometry-selftest.js geometry-calibration-selftest.js guided-calibration.js guided-calibration-selftest.js \
   launch-model.js launch-model-selftest.js linear-model-selftest.js \
   drill-adjustments.js drill-adjustments-selftest.js pose-calibration.js pose-calibration-selftest.js shot-variation.js shot-variation-selftest.js table-bounce.js table-bounce-selftest.js adaptive-timing.js adaptive-timing-selftest.js developer-shot-analysis.js developer-shot-analysis-selftest.js \
@@ -19,6 +19,7 @@ done
 
 echo "[3/13] Protocol/BLE mock self-test"
 node selftest.js
+node native-ble-selftest.js
 
 echo "[4/13] Page-exit emergency STOP/disconnect self-test"
 node emergency-shutdown-selftest.js
@@ -59,6 +60,7 @@ bash -n scripts/build_android_debug.sh
 test -f android/app/src/main/AndroidManifest.xml
 test -f android/app/src/main/java/studio/tabletennis/robot/MainActivity.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
+test -f android/app/src/main/java/studio/tabletennis/robot/NativeBluetoothManager.java
 grep -q 'WebViewAssetLoader' android/app/src/main/java/studio/tabletennis/robot/MainActivity.java
 grep -q 'camera2Capture.*, false' android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
 test -f downloads/table-tennis-robot-studio-android-preview.apk

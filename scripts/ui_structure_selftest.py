@@ -517,6 +517,9 @@ for token in ('.global-developer-button', '.developer-page-grid', '.shot-analysi
     if token not in css:
         raise SystemExit(f"Missing developer shot-analysis responsive styling: {token}")
 android_main = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'MainActivity.java').read_text()
+android_bridge = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeAppBridge.java').read_text()
+android_ble = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeBluetoothManager.java').read_text()
+android_manifest = (root / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml').read_text()
 for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
               'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)'):
     if token not in android_main:
@@ -527,8 +530,20 @@ for token in ('UPDATE_MANIFEST_URL', 'checkForAppUpdate()', 'BuildConfig.VERSION
     if token not in android_main:
         raise SystemExit(f"Android startup update flow missing: {token}")
 for token in ('enterShotAnalysisLandscape', 'exitShotAnalysisLandscape'):
-    if token not in android_main and token not in (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeAppBridge.java').read_text():
+    if token not in android_main and token not in android_bridge:
         raise SystemExit(f"Android landscape camera orientation missing: {token}")
+for token in ('supportsNativeBluetooth', 'bluetoothConnect', 'bluetoothWrite', 'bluetoothDisconnect'):
+    if token not in android_bridge:
+        raise SystemExit(f"Android native BLE bridge missing: {token}")
+for token in ('BluetoothLeScanner', 'connectGatt', 'setCharacteristicNotification', 'writeCharacteristic', 'PERMISSION_REQUEST', 'if (devices.size() == 1)'):
+    if token not in android_ble:
+        raise SystemExit(f"Android native BLE transport missing: {token}")
+for token in ('android.permission.BLUETOOTH_SCAN', 'android.permission.BLUETOOTH_CONNECT', 'android.hardware.bluetooth_le'):
+    if token not in android_manifest:
+        raise SystemExit(f"Android native BLE manifest declaration missing: {token}")
+for token in ('this.nativeSupported', 'connectNative()', 'onNativeBluetoothEvent(payload)', 'transport: this.nativeSupported ? "native-android" : "web-bluetooth"'):
+    if token not in ble:
+        raise SystemExit(f"JavaScript native BLE transport selection missing: {token}")
 for token in ('shotAnalysisProjectedTable', 'PROJECTED TABLE · NET + CENTRE LINE',
               'enterShotAnalysisLandscape', 'exitShotAnalysisLandscape'):
     if token not in app:
