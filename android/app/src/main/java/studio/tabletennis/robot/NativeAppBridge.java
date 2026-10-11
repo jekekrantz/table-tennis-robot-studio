@@ -11,10 +11,14 @@ import org.json.JSONObject;
 final class NativeAppBridge {
     private final Activity activity;
     private final NativeBluetoothManager bluetooth;
+    private final NativeCaptureMetadataManager captureMetadata;
+    private final NativeCameraManager camera;
 
-    NativeAppBridge(Activity activity, NativeBluetoothManager bluetooth) {
+    NativeAppBridge(Activity activity, NativeBluetoothManager bluetooth, NativeCaptureMetadataManager captureMetadata, NativeCameraManager camera) {
         this.activity = activity;
         this.bluetooth = bluetooth;
+        this.captureMetadata = captureMetadata;
+        this.camera = camera;
     }
 
     @JavascriptInterface
@@ -43,6 +47,66 @@ final class NativeAppBridge {
     }
 
     @JavascriptInterface
+    public String getCameraMetadata() {
+        return captureMetadata.cameraMetadataJson();
+    }
+
+    @JavascriptInterface
+    public String getSensorCatalog() {
+        return captureMetadata.sensorCatalogJson();
+    }
+
+    @JavascriptInterface
+    public String startMotionCapture(String sessionId) {
+        return captureMetadata.startMotionCapture(sessionId);
+    }
+
+    @JavascriptInterface
+    public String drainMotionSamples() {
+        return captureMetadata.drainMotionSamples();
+    }
+
+    @JavascriptInterface
+    public String stopMotionCapture() {
+        return captureMetadata.stopMotionCapture();
+    }
+
+    @JavascriptInterface
+    public void startNativeCamera(String requestId, String cameraId, boolean captureAudio) {
+        camera.start(requestId, cameraId, captureAudio);
+    }
+
+    @JavascriptInterface
+    public void stopNativeCamera(String requestId) {
+        camera.stop(requestId);
+    }
+
+    @JavascriptInterface
+    public void startNativeRecording(String requestId, String captureId) {
+        camera.startRecording(requestId, captureId);
+    }
+
+    @JavascriptInterface
+    public void stopNativeRecording(String requestId) {
+        camera.stopRecording(requestId);
+    }
+
+    @JavascriptInterface
+    public void captureNativeStill(String requestId, String captureId) {
+        camera.captureStill(requestId, captureId);
+    }
+
+    @JavascriptInterface
+    public String drainNativeFrameMetadata() {
+        return camera.drainFrameMetadata();
+    }
+
+    @JavascriptInterface
+    public void setNativeCameraViewport(double left, double top, double width, double height) {
+        camera.setViewport(left, top, width, height);
+    }
+
+    @JavascriptInterface
     public void enterShotAnalysisLandscape() {
         activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
     }
@@ -64,7 +128,9 @@ final class NativeAppBridge {
             info.put("applicationId", BuildConfig.APPLICATION_ID);
             info.put("versionName", BuildConfig.VERSION_NAME);
             info.put("versionCode", BuildConfig.VERSION_CODE);
-            info.put("camera2Capture", false);
+            info.put("camera2Capture", true);
+            info.put("camera2StaticMetadata", true);
+            info.put("nativeMotionSensors", true);
         } catch (JSONException ignored) {
             return "{\"platform\":\"android\"}";
         }

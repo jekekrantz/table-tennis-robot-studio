@@ -61,8 +61,10 @@ test -f android/app/src/main/AndroidManifest.xml
 test -f android/app/src/main/java/studio/tabletennis/robot/MainActivity.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeBluetoothManager.java
+test -f android/app/src/main/java/studio/tabletennis/robot/NativeCaptureMetadataManager.java
+test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraManager.java
 grep -q 'WebViewAssetLoader' android/app/src/main/java/studio/tabletennis/robot/MainActivity.java
-grep -q 'camera2Capture.*, false' android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
+grep -q 'camera2Capture.*, true' android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
 test -f downloads/table-tennis-robot-studio-android-preview.apk
 grep -q 'downloads/table-tennis-robot-studio-android-preview.apk' index.html
 python3 scripts/android_update_manifest.py

@@ -14,6 +14,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.TextureView;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -56,6 +57,8 @@ public final class MainActivity extends Activity {
 
     private WebView webView;
     private NativeBluetoothManager nativeBluetooth;
+    private NativeCaptureMetadataManager nativeCaptureMetadata;
+    private NativeCameraManager nativeCamera;
     private PermissionRequest pendingWebPermission;
     private String[] pendingWebResources;
     private final ExecutorService updateExecutor = Executors.newSingleThreadExecutor();
@@ -71,6 +74,9 @@ public final class MainActivity extends Activity {
 
         FrameLayout appRoot = new FrameLayout(this);
         appRoot.setBackgroundColor(Color.rgb(17, 21, 26));
+        TextureView nativeCameraPreview = new TextureView(this);
+        nativeCameraPreview.setVisibility(android.view.View.GONE);
+        appRoot.addView(nativeCameraPreview, new FrameLayout.LayoutParams(1, 1));
         webView = new WebView(this);
         appRoot.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -116,9 +122,12 @@ public final class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        webView.setBackgroundColor(Color.TRANSPARENT);
 
         nativeBluetooth = new NativeBluetoothManager(this, webView);
-        webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth), "NativeApp");
+        nativeCaptureMetadata = new NativeCaptureMetadataManager(this);
+        nativeCamera = new NativeCameraManager(this, nativeCameraPreview, webView);
+        webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth, nativeCaptureMetadata, nativeCamera), "NativeApp");
         webView.setWebViewClient(new LocalOnlyWebViewClient(assetLoader));
         webView.setWebChromeClient(new LocalWebChromeClient());
         webView.loadUrl(START_URL);
@@ -137,6 +146,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (nativeBluetooth != null) nativeBluetooth.destroy();
+        if (nativeCaptureMetadata != null) nativeCaptureMetadata.destroy();
+        if (nativeCamera != null) nativeCamera.destroy();
         if (webView != null) {
             webView.removeJavascriptInterface("NativeApp");
             webView.destroy();
@@ -288,6 +299,10 @@ public final class MainActivity extends Activity {
             if (nativeBluetooth != null) nativeBluetooth.onPermissionResult(grantResults);
             return;
         }
+        if (requestCode == NativeCameraManager.PERMISSION_REQUEST) {
+            if (nativeCamera != null) nativeCamera.onPermissionResult(grantResults);
+            return;
+        }
         if (requestCode != MEDIA_PERMISSION_REQUEST || pendingWebPermission == null) return;
 
         PermissionRequest request = pendingWebPermission;
@@ -312,6 +327,16 @@ public final class MainActivity extends Activity {
 
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            if (nativeCamera != null && request.getUrl().getPath() != null && request.getUrl().getPath().startsWith("/native-media/")) {
+                String name = request.getUrl().getLastPathSegment();
+                File file = nativeCamera.mediaFile(name);
+                if (file != null) {
+                    try {
+                        String mime = name.endsWith(".mp4") ? "video/mp4" : "image/jpeg";
+                        return new WebResourceResponse(mime, null, new java.io.FileInputStream(file));
+                    } catch (Exception ignored) {}
+                }
+            }
             return assetLoader.shouldInterceptRequest(request.getUrl());
         }
 

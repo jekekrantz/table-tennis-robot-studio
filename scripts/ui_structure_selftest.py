@@ -519,6 +519,8 @@ for token in ('.global-developer-button', '.developer-page-grid', '.shot-analysi
 android_main = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'MainActivity.java').read_text()
 android_bridge = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeAppBridge.java').read_text()
 android_ble = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeBluetoothManager.java').read_text()
+android_capture = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCaptureMetadataManager.java').read_text()
+android_camera = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraManager.java').read_text()
 android_manifest = (root / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml').read_text()
 for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
               'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)'):
@@ -535,6 +537,21 @@ for token in ('enterShotAnalysisLandscape', 'exitShotAnalysisLandscape'):
 for token in ('supportsNativeBluetooth', 'bluetoothConnect', 'bluetoothWrite', 'bluetoothDisconnect'):
     if token not in android_bridge:
         raise SystemExit(f"Android native BLE bridge missing: {token}")
+for token in ('getCameraMetadata', 'getSensorCatalog', 'startMotionCapture', 'drainMotionSamples', 'stopMotionCapture'):
+    if token not in android_bridge:
+        raise SystemExit(f"Android capture metadata bridge missing: {token}")
+for token in ('startNativeCamera', 'stopNativeCamera', 'startNativeRecording', 'stopNativeRecording',
+              'captureNativeStill', 'drainNativeFrameMetadata', 'setNativeCameraViewport'):
+    if token not in android_bridge:
+        raise SystemExit(f"Android native Camera2 bridge missing: {token}")
+for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE', 'SENSOR_EXPOSURE_TIME',
+              'SENSOR_SENSITIVITY', 'SENSOR_ROLLING_SHUTTER_SKEW', 'COLOR_CORRECTION_GAINS'):
+    if token not in android_camera:
+        raise SystemExit(f"Android native Camera2 capture missing: {token}")
+for token in ('LENS_INTRINSIC_CALIBRATION', 'SENSOR_INFO_EXPOSURE_TIME_RANGE', 'Sensor.TYPE_ACCELEROMETER',
+              'Sensor.TYPE_GYROSCOPE', 'Sensor.TYPE_ROTATION_VECTOR', 'event.timestamp'):
+    if token not in android_capture:
+        raise SystemExit(f"Android camera/sensor metadata capture missing: {token}")
 for token in ('BluetoothLeScanner', 'connectGatt', 'setCharacteristicNotification', 'writeCharacteristic', 'PERMISSION_REQUEST', 'if (devices.size() == 1)'):
     if token not in android_ble:
         raise SystemExit(f"Android native BLE transport missing: {token}")

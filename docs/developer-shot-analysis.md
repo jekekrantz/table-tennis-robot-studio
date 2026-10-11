@@ -20,6 +20,11 @@ The shot-analysis window provides:
 - monotonic timestamps for Nova state, log, active-shot and `0x05` served-ball
   events;
 - per-presented-frame video metadata while recording, capped at 30,000 entries;
+- Android Camera2 characteristics for every lens, including intrinsic parameters
+  when reported, distortion, sensor geometry, exposure/ISO ranges, focal lengths,
+  apertures, stabilization modes and supported recording sizes;
+- synchronized native Android accelerometer, gyroscope, gravity,
+  linear-acceleration, magnetic-field and rotation-vector samples;
 - manual still and empty-background reference capture;
 - six guided table landmarks: four corners followed by both net-post tops;
 - an image-to-table homography from the first four landmarks;
@@ -47,12 +52,13 @@ warm-up, battery state or elapsed time.
 
 **Record balanced dataset** performs one finite run:
 
-1. It checks that the camera is active, microphone audio is present when
-   requested, and all six table/net landmarks are saved.
+1. It checks that the camera is active and microphone audio is present when
+   requested. Table/net landmarks improve interpretation but are optional.
 2. It creates a temporary `Developer dataset · balanced trajectories` execution
    plan that is removed when capture ends; it never appears in My drills.
-3. It records a 1.5-second pre-roll and still image, freezes variation and live
-   tuning, and runs the exact protocol.
+3. Recording and native motion capture start when the dataset button is pressed,
+   covering robot connection and safety latency. It also captures a pre-sequence
+   still, freezes variation and live tuning, and runs the exact protocol.
 4. It joins every Nova served-ball event to the expected condition, repetition
    and compiled physical command.
 5. It records one second of post-roll and a final still, then stops recording
@@ -69,6 +75,20 @@ settings/constraints/capabilities, frame timestamps, raw robot events, and exact
 compiled wheel/pitch/yaw/frequency records. Media and images share the JSON
 session ID. **Download dataset files** downloads the manifest, recording and
 captured pre/post stills.
+
+Android sensor samples use the hardware `SensorEvent.timestamp` nanosecond clock
+and include simultaneous `elapsedRealtime` and epoch anchors, so they can be
+aligned with video-frame, robot-event and audio time. Rotation-vector sensors
+provide phone-orientation observations that can be combined with the marked
+table geometry to estimate camera extrinsic rotation.
+
+The Android app owns the preview, MP4/H.264/AAC recorder and still capture with
+Camera2. Every completed recording frame has a Camera2 result row containing its
+sensor timestamp, exposure time, ISO, frame duration, rolling-shutter skew,
+focus distance, focal length, aperture, AE/AWB/AF state, crop region and colour
+gains. These rows are drained into the JSON manifest once per second alongside
+the motion sensors. The browser-hosted web app keeps its existing browser APIs;
+camera dataset capture remains routed to the Android app.
 
 ## Capture workflow
 
@@ -99,7 +119,8 @@ This release collects synchronized, inspectable evidence but does not yet:
 
 - detect or track the ball;
 - classify audio impacts;
-- solve camera intrinsics or airborne 3D position;
+- solve camera intrinsics or airborne 3D position (reported factory intrinsics
+  and the manual table homography are recorded as inputs);
 - estimate speed, net clearance, landing position or spin; or
 - use captured data to create or command a Nova shot.
 
