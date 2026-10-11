@@ -46,6 +46,7 @@ final class NativeCameraManager {
     private final Activity activity;
     private final FrameLayout previewContainer;
     private final SurfaceView previewView;
+    private final NativeCameraOverlayView overlayView;
     private final WebView webView;
     private final CameraManager cameraManager;
     private final Map<String, File> mediaFiles = new HashMap<>();
@@ -74,10 +75,11 @@ final class NativeCameraManager {
     private int viewportWidth = -1;
     private int viewportHeight = -1;
 
-    NativeCameraManager(Activity activity, FrameLayout previewContainer, SurfaceView previewView, WebView webView) {
+    NativeCameraManager(Activity activity, FrameLayout previewContainer, SurfaceView previewView, NativeCameraOverlayView overlayView, WebView webView) {
         this.activity = activity;
         this.previewContainer = previewContainer;
         this.previewView = previewView;
+        this.overlayView = overlayView;
         this.webView = webView;
         this.cameraManager = activity.getSystemService(CameraManager.class);
         previewView.getHolder().addCallback(surfaceCallback);
@@ -407,6 +409,10 @@ final class NativeCameraManager {
         });
     }
 
+    void setOverlay(String dataUrl) {
+        overlayView.setDataUrl(dataUrl);
+    }
+
     private final CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
         @Override public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
             if (!pendingPreviewRequestId.isEmpty()) {
@@ -497,7 +503,7 @@ final class NativeCameraManager {
     }
 
     private void closeSession() { if (session != null) { try { session.close(); } catch (Exception ignored) {} session = null; } previewSurface = null; }
-    private void closeCamera(boolean hide) { pendingPreviewRequestId = ""; closeSession(); if (camera != null) { camera.close(); camera = null; } releaseRecorder(); recording = false; if (hide) activity.runOnUiThread(() -> previewContainer.setVisibility(android.view.View.GONE)); }
+    private void closeCamera(boolean hide) { pendingPreviewRequestId = ""; closeSession(); if (camera != null) { camera.close(); camera = null; } releaseRecorder(); recording = false; if (hide) activity.runOnUiThread(() -> { overlayView.clear(); previewContainer.setVisibility(android.view.View.GONE); }); }
     private void releaseRecorder() { if (recorder != null) { try { recorder.reset(); recorder.release(); } catch (Exception ignored) {} recorder = null; } }
     void destroy() { closeCamera(true); if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; cameraHandler = null; } }
     private void startThread() { cameraThread = new HandlerThread("RobotStudioCamera2"); cameraThread.start(); cameraHandler = new Handler(cameraThread.getLooper()); }

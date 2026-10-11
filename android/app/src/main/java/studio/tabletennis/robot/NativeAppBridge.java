@@ -112,6 +112,11 @@ final class NativeAppBridge {
     }
 
     @JavascriptInterface
+    public void setNativeCameraOverlay(String dataUrl) {
+        camera.setOverlay(dataUrl);
+    }
+
+    @JavascriptInterface
     public void enterShotAnalysisLandscape() {
         activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
     }

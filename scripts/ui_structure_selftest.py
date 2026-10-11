@@ -522,6 +522,7 @@ android_bridge = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' 
 android_ble = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeBluetoothManager.java').read_text()
 android_capture = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCaptureMetadataManager.java').read_text()
 android_camera = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraManager.java').read_text()
+android_camera_overlay = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraOverlayView.java').read_text()
 android_manifest = (root / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml').read_text()
 for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
               'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)',
@@ -543,7 +544,8 @@ for token in ('getCameraMetadata', 'getSensorCatalog', 'startMotionCapture', 'dr
     if token not in android_bridge:
         raise SystemExit(f"Android capture metadata bridge missing: {token}")
 for token in ('startNativeCamera', 'stopNativeCamera', 'startNativeRecording', 'stopNativeRecording',
-              'captureNativeStill', 'drainNativeFrameMetadata', 'getNativeCameraState', 'setNativeCameraViewport'):
+              'captureNativeStill', 'drainNativeFrameMetadata', 'getNativeCameraState', 'setNativeCameraViewport',
+              'setNativeCameraOverlay'):
     if token not in android_bridge:
         raise SystemExit(f"Android native Camera2 bridge missing: {token}")
 for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE', 'SENSOR_EXPOSURE_TIME',
@@ -557,9 +559,20 @@ for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE
 for token in ('SurfaceView nativeCameraPreview', 'nativeCameraPreviewContainer.setClipChildren(true)'):
     if token not in android_main:
         raise SystemExit(f"Android composited camera preview missing: {token}")
+if android_main.index('appRoot.addView(webView') > android_main.index('appRoot.addView(nativeCameraPreviewContainer'):
+    raise SystemExit("Native camera preview must be layered above the Android WebView")
+for token in ('nativeCameraPreview.setZOrderMediaOverlay(true)', 'nativeCameraPreviewContainer.setClickable(false)',
+              'NativeCameraOverlayView nativeCameraOverlay'):
+    if token not in android_main:
+        raise SystemExit(f"Android foreground camera layer missing: {token}")
+for token in ('class NativeCameraOverlayView', 'setDataUrl(String dataUrl)', 'setClickable(false)',
+              'canvas.drawBitmap'):
+    if token not in android_camera_overlay:
+        raise SystemExit(f"Android native camera guide overlay missing: {token}")
 for token in ('function setNativeCameraPreviewMode(active)',
               'document.documentElement.classList.toggle("native-camera-preview", active)',
               'function startNativeCameraViewportSync()', 'nativeCameraViewportSignature',
+              'function syncNativeCameraOverlay()', 'toDataURL("image/png")',
               'function acceptNativeRecording(detail, reason = "recording-stop")',
               'getNativeCameraState', 'shotDatasetFinalizeAction',
               'DeveloperShotAnalysis.cameraHorizontalFovDeg',

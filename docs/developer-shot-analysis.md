@@ -90,9 +90,10 @@ provide phone-orientation observations that can be combined with the marked
 table geometry to estimate camera extrinsic rotation.
 
 The Android app owns the preview, MP4/H.264/AAC recorder and still capture with
-Camera2. Its clipped native `SurfaceView` sits beneath a transparent WebView so
-Samsung devices can display the camera while retaining the projected-table
-canvas and web controls. While the analysis panel scrolls, an animation-frame
+Camera2. Its clipped native `SurfaceView` sits above the hardware WebView so
+Samsung devices do not have to reveal a surface through a transparent WebView.
+The projected-table canvas is mirrored into a non-interactive native overlay;
+touches still pass through to the web controls and landmark canvas. While the analysis panel scrolls, an animation-frame
 sync keeps the native surface clipped to the camera stage and skips unchanged
 Android layout updates. Camera startup is acknowledged only after Camera2
 returns its first completed frame. Every completed recording frame has a Camera2 result row containing its

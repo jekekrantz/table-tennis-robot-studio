@@ -2307,6 +2307,7 @@ html.native-camera-preview,html.native-camera-preview body { background:transpar
 .shot-analysis-dialog.native-camera-active .shot-analysis-camera-card { background:transparent; }
 .shot-analysis-dialog.native-camera-active .shot-analysis-camera-stage { background:transparent; }
 .shot-analysis-dialog.native-camera-active .shot-analysis-camera-stage video { display:none; }
+.shot-analysis-dialog.native-camera-active .shot-analysis-frame > header { position:relative; top:auto; }
 .shot-analysis-camera-stage canvas { z-index:2; pointer-events:none; touch-action:none; }
 .shot-analysis-camera-stage canvas.marking { pointer-events:auto; cursor:crosshair; }
 .shot-analysis-camera-empty { z-index:3; width:min(80%,420px); display:grid; gap:6px; color:var(--muted); text-align:center; font-size:.72rem; line-height:1.4; pointer-events:none; }

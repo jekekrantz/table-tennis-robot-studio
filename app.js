@@ -433,6 +433,7 @@
   const nativeCameraRequests = new Map();
   let nativeCameraViewportFrameId = null;
   let nativeCameraViewportSignature = "";
+  let nativeCameraOverlayFrameId = null;
   let shotAnalysisRecorderChunks = [];
   let shotAnalysisVideoBlob = null;
   let shotAnalysisSession = null;
@@ -2725,7 +2726,22 @@
     document.documentElement.classList.toggle("native-camera-preview", active);
     document.body.classList.toggle("native-camera-preview", active);
     els.shotAnalysisDialog?.classList.toggle("native-camera-active", active);
-    if (!active) stopNativeCameraViewportSync();
+    if (!active) {
+      stopNativeCameraViewportSync();
+      if (nativeCameraOverlayFrameId != null) cancelAnimationFrame(nativeCameraOverlayFrameId);
+      nativeCameraOverlayFrameId = null;
+      try { globalThis.NativeApp?.setNativeCameraOverlay?.(""); } catch (_) {}
+    }
+  }
+
+  function syncNativeCameraOverlay() {
+    if (!shotAnalysisNativeCameraActive || typeof globalThis.NativeApp?.setNativeCameraOverlay !== "function") return;
+    if (nativeCameraOverlayFrameId != null) cancelAnimationFrame(nativeCameraOverlayFrameId);
+    nativeCameraOverlayFrameId = requestAnimationFrame(() => {
+      nativeCameraOverlayFrameId = null;
+      try { globalThis.NativeApp.setNativeCameraOverlay(els.shotAnalysisOverlay?.toDataURL("image/png") || ""); }
+      catch (error) { console.warn("Could not mirror the camera guide to Android", error); }
+    });
   }
 
   function updateNativeCameraViewport() {
@@ -3137,6 +3153,7 @@
         context.setLineDash([8, 7]);
         context.strokeRect(content.x + content.width * .08, content.y + content.height * .12, content.width * .84, content.height * .76);
         context.setLineDash([]);
+        syncNativeCameraOverlay();
         return;
       }
       // Regulation table markings: 20 mm perimeter lines and a 3 mm
@@ -3169,6 +3186,7 @@
       context.fillText("PROJECTED TABLE · NET + CENTRE LINE", content.x + content.width / 2, content.y + 20);
       context.font = "600 11px system-ui";
       context.fillText(`${projected.camera.distanceCm} cm side distance · net + ${projected.camera.heightCm} cm · ${projected.camera.pitchDeg}° pitch`, content.x + content.width / 2, content.y + 38);
+      syncNativeCameraOverlay();
       return;
     }
     context.beginPath();
@@ -3202,6 +3220,7 @@
       context.textAlign = "center";
       context.fillText(String(index + 1), point.x, point.y + 3.5);
     });
+    syncNativeCameraOverlay();
   }
 
   function shotAnalysisLandmarkText() {
