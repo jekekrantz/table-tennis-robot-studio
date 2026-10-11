@@ -513,8 +513,7 @@ for token in ('developerSettings.retainLogs = true;', 'developerSettings.retainV
         raise SystemExit(f"Development mode must enable all debugging capture options: {token}")
 for token in ('.global-developer-button', '.developer-page-grid', '.shot-analysis-dialog',
               '.shot-analysis-camera-stage', '.shot-camera-position-controls',
-              '.shot-analysis-dataset', '.developer-settings-card',
-              'html.native-camera-preview,html.native-camera-preview body'):
+              '.shot-analysis-dataset', '.developer-settings-card'):
     if token not in css:
         raise SystemExit(f"Missing developer shot-analysis responsive styling: {token}")
 android_main = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'MainActivity.java').read_text()
@@ -522,6 +521,7 @@ android_bridge = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' 
 android_ble = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeBluetoothManager.java').read_text()
 android_capture = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCaptureMetadataManager.java').read_text()
 android_camera = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraManager.java').read_text()
+android_camera_preview = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraPreview.java').read_text()
 android_camera_overlay = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraOverlayView.java').read_text()
 android_manifest = (root / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml').read_text()
 for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
@@ -556,21 +556,18 @@ for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE
               'if (recordingFile != null) recordingFile.delete();'):
     if token not in android_camera:
         raise SystemExit(f"Android native Camera2 capture missing: {token}")
-for token in ('SurfaceView nativeCameraPreview', 'nativeCameraPreviewContainer.setClipChildren(true)'):
-    if token not in android_main:
-        raise SystemExit(f"Android composited camera preview missing: {token}")
-if android_main.index('appRoot.addView(webView') > android_main.index('appRoot.addView(nativeCameraPreviewContainer'):
+if android_main.index('appRoot.addView(webView') > android_main.index('appRoot.addView(nativeCameraPreview'):
     raise SystemExit("Native camera preview must be layered above the Android WebView")
-for token in ('nativeCameraPreview.setZOrderMediaOverlay(true)', 'nativeCameraPreviewContainer.setClickable(false)',
-              'NativeCameraOverlayView nativeCameraOverlay'):
-    if token not in android_main:
+for token in ('class NativeCameraPreview', 'surfaceView.setZOrderMediaOverlay(true)', 'setClickable(false)',
+              'void showAt(', 'void fitSurface(', 'void hideAndClear()'):
+    if token not in android_camera_preview:
         raise SystemExit(f"Android foreground camera layer missing: {token}")
 for token in ('class NativeCameraOverlayView', 'setDataUrl(String dataUrl)', 'setClickable(false)',
               'canvas.drawBitmap'):
     if token not in android_camera_overlay:
         raise SystemExit(f"Android native camera guide overlay missing: {token}")
-for token in ('function setNativeCameraPreviewMode(active)',
-              'document.documentElement.classList.toggle("native-camera-preview", active)',
+for token in ('function setNativeCameraUiActive(active)',
+              'els.shotAnalysisDialog?.classList.toggle("native-camera-active", active)',
               'function startNativeCameraViewportSync()', 'nativeCameraViewportSignature',
               'function syncNativeCameraOverlay()', 'toDataURL("image/png")',
               'function acceptNativeRecording(detail, reason = "recording-stop")',
@@ -580,7 +577,7 @@ for token in ('function setNativeCameraPreviewMode(active)',
               'playback-did-not-start'):
     if token not in app:
         raise SystemExit(f"Native camera transparency lifecycle missing: {token}")
-for token in ('previewContainer.setX(pixelLeft)', 'previewContainer.setY(pixelTop)',
+for token in ('preview.showAt(pixelLeft, pixelTop, pixelWidth, pixelHeight, resized)',
               'pixelLeft == viewportLeft && pixelTop == viewportTop'):
     if token not in android_camera:
         raise SystemExit(f"Android camera viewport synchronization missing: {token}")

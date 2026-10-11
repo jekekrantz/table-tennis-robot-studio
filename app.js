@@ -474,7 +474,7 @@
       shotAnalysisNativeRecording = false;
       shotAnalysisNativeAudioEnabled = false;
       if (interruptedRecording) stopNativeMotionCapture();
-      setNativeCameraPreviewMode(false);
+      setNativeCameraUiActive(false);
       if (detail.url) {
         void acceptNativeRecording(detail, "recording-interrupted").catch(error => {
           analysisLog("recording-error", { message:error.message, reason:detail.type });
@@ -2722,9 +2722,7 @@
     return shotAnalysisNativeRecording || shotAnalysisRecorder?.state === "recording";
   }
 
-  function setNativeCameraPreviewMode(active) {
-    document.documentElement.classList.toggle("native-camera-preview", active);
-    document.body.classList.toggle("native-camera-preview", active);
+  function setNativeCameraUiActive(active) {
     els.shotAnalysisDialog?.classList.toggle("native-camera-active", active);
     if (!active) {
       stopNativeCameraViewportSync();
@@ -3349,13 +3347,13 @@
         };
       });
       const selected = deviceId || shotAnalysisNativeCameraId || shotAnalysisVideoDevices[0]?.deviceId || "";
-      setNativeCameraPreviewMode(true);
+      setNativeCameraUiActive(true);
       let detail;
       try {
         detail = await nativeCameraCommand("startNativeCamera", "camera-started", selected, developerSettings.captureAudio);
       } catch (error) {
         try { globalThis.NativeApp?.stopNativeCamera?.(`camera-cleanup-${Date.now()}`); } catch (_) {}
-        setNativeCameraPreviewMode(false);
+        setNativeCameraUiActive(false);
         throw error;
       }
       shotAnalysisNativeCameraActive = true;
@@ -3413,7 +3411,7 @@
       shotAnalysisNativeCameraActive = false;
       shotAnalysisNativeRecording = false;
       shotAnalysisNativeAudioEnabled = false;
-      setNativeCameraPreviewMode(false);
+      setNativeCameraUiActive(false);
     }
     if (shotAnalysisNativeCameraActive) {
       updateNativeCameraViewport();
@@ -3448,7 +3446,7 @@
       await nativeCameraCommand("stopNativeCamera", "camera-stopped");
       shotAnalysisNativeCameraActive = false;
       shotAnalysisNativeAudioEnabled = false;
-      setNativeCameraPreviewMode(false);
+      setNativeCameraUiActive(false);
       els.shotAnalysisCameraStatus.textContent = "Camera off.";
       shotAnalysisMarking = false;
       renderShotAnalysisControls();

@@ -90,7 +90,8 @@ provide phone-orientation observations that can be combined with the marked
 table geometry to estimate camera extrinsic rotation.
 
 The Android app owns the preview, MP4/H.264/AAC recorder and still capture with
-Camera2. Its clipped native `SurfaceView` sits above the hardware WebView so
+Camera2. A single native preview component owns the clipped `SurfaceView` and
+non-interactive guide overlay above the hardware WebView, so
 Samsung devices do not have to reveal a surface through a transparent WebView.
 The projected-table canvas is mirrored into a non-interactive native overlay;
 touches still pass through to the web controls and landmark canvas. While the analysis panel scrolls, an animation-frame

@@ -27,7 +27,6 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.webkit.WebView;
-import android.widget.FrameLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -44,9 +43,8 @@ import java.util.Map;
 final class NativeCameraManager {
     static final int PERMISSION_REQUEST = 1003;
     private final Activity activity;
-    private final FrameLayout previewContainer;
+    private final NativeCameraPreview preview;
     private final SurfaceView previewView;
-    private final NativeCameraOverlayView overlayView;
     private final WebView webView;
     private final CameraManager cameraManager;
     private final Map<String, File> mediaFiles = new HashMap<>();
@@ -75,11 +73,10 @@ final class NativeCameraManager {
     private int viewportWidth = -1;
     private int viewportHeight = -1;
 
-    NativeCameraManager(Activity activity, FrameLayout previewContainer, SurfaceView previewView, NativeCameraOverlayView overlayView, WebView webView) {
+    NativeCameraManager(Activity activity, NativeCameraPreview preview, WebView webView) {
         this.activity = activity;
-        this.previewContainer = previewContainer;
-        this.previewView = previewView;
-        this.overlayView = overlayView;
+        this.preview = preview;
+        this.previewView = preview.surfaceView();
         this.webView = webView;
         this.cameraManager = activity.getSystemService(CameraManager.class);
         previewView.getHolder().addCallback(surfaceCallback);
@@ -93,7 +90,7 @@ final class NativeCameraManager {
             activeCameraId = requestedCameraId == null ? "" : requestedCameraId;
             captureAudioRequested = withAudio;
             captureAudio = withAudio && hasMicrophonePermission();
-            previewContainer.setVisibility(android.view.View.VISIBLE);
+            preview.setVisibility(android.view.View.VISIBLE);
             if (!hasPermissions(withAudio)) {
                 pendingPermissionRequestId = requestId;
                 activity.requestPermissions(requiredPermissions(withAudio), PERMISSION_REQUEST);
@@ -109,7 +106,7 @@ final class NativeCameraManager {
         if (!hasCameraPermission()) {
             cameraRequested = false;
             startRequestId = "";
-            activity.runOnUiThread(() -> previewContainer.setVisibility(android.view.View.GONE));
+            activity.runOnUiThread(preview::hideAndClear);
             emit(error(requestId, "Camera permission is required for native capture."));
             return;
         }
@@ -297,8 +294,8 @@ final class NativeCameraManager {
     void captureStill(String requestId, String captureId) {
         activity.runOnUiThread(() -> {
             try {
-                int width = Math.max(1, previewContainer.getWidth());
-                int height = Math.max(1, previewContainer.getHeight());
+                int width = Math.max(1, preview.getWidth());
+                int height = Math.max(1, preview.getHeight());
                 Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
                 PixelCopy.request(previewView, bitmap, result -> {
                     if (result != PixelCopy.SUCCESS) {
@@ -401,16 +398,13 @@ final class NativeCameraManager {
             viewportTop = pixelTop;
             viewportWidth = pixelWidth;
             viewportHeight = pixelHeight;
-            if (resized) previewContainer.setLayoutParams(new FrameLayout.LayoutParams(pixelWidth, pixelHeight));
-            previewContainer.setX(pixelLeft);
-            previewContainer.setY(pixelTop);
-            previewContainer.setVisibility(android.view.View.VISIBLE);
+            preview.showAt(pixelLeft, pixelTop, pixelWidth, pixelHeight, resized);
             if (resized) updatePreviewLayout();
         });
     }
 
     void setOverlay(String dataUrl) {
-        overlayView.setDataUrl(dataUrl);
+        preview.setGuide(dataUrl);
     }
 
     private final CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
@@ -490,20 +484,21 @@ final class NativeCameraManager {
     }
 
     private void updatePreviewLayout() {
-        if (previewSize == null || previewContainer.getWidth() <= 0 || previewContainer.getHeight() <= 0) return;
-        int containerWidth = previewContainer.getWidth();
-        int containerHeight = previewContainer.getHeight();
-        double scale = Math.max((double) containerWidth / previewSize.getWidth(), (double) containerHeight / previewSize.getHeight());
-        int width = Math.max(1, (int) Math.ceil(previewSize.getWidth() * scale));
-        int height = Math.max(1, (int) Math.ceil(previewSize.getHeight() * scale));
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
-        params.leftMargin = (containerWidth - width) / 2;
-        params.topMargin = (containerHeight - height) / 2;
-        previewView.setLayoutParams(params);
+        preview.fitSurface(previewSize);
     }
 
     private void closeSession() { if (session != null) { try { session.close(); } catch (Exception ignored) {} session = null; } previewSurface = null; }
-    private void closeCamera(boolean hide) { pendingPreviewRequestId = ""; closeSession(); if (camera != null) { camera.close(); camera = null; } releaseRecorder(); recording = false; if (hide) activity.runOnUiThread(() -> { overlayView.clear(); previewContainer.setVisibility(android.view.View.GONE); }); }
+    private void closeCamera(boolean hide) {
+        pendingPreviewRequestId = "";
+        closeSession();
+        if (camera != null) {
+            camera.close();
+            camera = null;
+        }
+        releaseRecorder();
+        recording = false;
+        if (hide) activity.runOnUiThread(preview::hideAndClear);
+    }
     private void releaseRecorder() { if (recorder != null) { try { recorder.reset(); recorder.release(); } catch (Exception ignored) {} recorder = null; } }
     void destroy() { closeCamera(true); if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; cameraHandler = null; } }
     private void startThread() { cameraThread = new HandlerThread("RobotStudioCamera2"); cameraThread.start(); cameraHandler = new Handler(cameraThread.getLooper()); }

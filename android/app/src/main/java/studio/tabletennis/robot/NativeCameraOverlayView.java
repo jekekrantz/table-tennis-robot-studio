@@ -6,7 +6,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
-import android.util.AttributeSet;
 import android.util.Base64;
 import android.view.View;
 
@@ -20,11 +19,6 @@ final class NativeCameraOverlayView extends View {
         initialize();
     }
 
-    NativeCameraOverlayView(Context context, AttributeSet attrs) {
-        super(context, attrs);
-        initialize();
-    }
-
     private void initialize() {
         setWillNotDraw(false);
         setClickable(false);
@@ -35,7 +29,7 @@ final class NativeCameraOverlayView extends View {
     void setDataUrl(String dataUrl) {
         Bitmap decoded = null;
         try {
-            if (dataUrl != null && !dataUrl.isEmpty()) {
+            if (dataUrl != null && dataUrl.startsWith("data:image/png;base64,")) {
                 int separator = dataUrl.indexOf(',');
                 if (separator >= 0) {
                     byte[] bytes = Base64.decode(dataUrl.substring(separator + 1), Base64.DEFAULT);

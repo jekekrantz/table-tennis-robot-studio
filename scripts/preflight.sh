@@ -63,6 +63,7 @@ test -f android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeBluetoothManager.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeCaptureMetadataManager.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraManager.java
+test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraPreview.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraOverlayView.java
 grep -q 'WebViewAssetLoader' android/app/src/main/java/studio/tabletennis/robot/MainActivity.java
 grep -q 'camera2Capture.*, true' android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java

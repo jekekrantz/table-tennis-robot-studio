@@ -14,7 +14,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.view.SurfaceView;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -79,27 +78,10 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
-        FrameLayout nativeCameraPreviewContainer = new FrameLayout(this);
-        nativeCameraPreviewContainer.setClipChildren(true);
-        nativeCameraPreviewContainer.setBackgroundColor(Color.BLACK);
-        nativeCameraPreviewContainer.setVisibility(android.view.View.GONE);
-        nativeCameraPreviewContainer.setClickable(false);
-        nativeCameraPreviewContainer.setFocusable(false);
-        nativeCameraPreviewContainer.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-        SurfaceView nativeCameraPreview = new SurfaceView(this);
-        nativeCameraPreview.setZOrderOnTop(false);
-        nativeCameraPreview.setZOrderMediaOverlay(true);
-        nativeCameraPreview.setClickable(false);
-        nativeCameraPreview.setFocusable(false);
-        nativeCameraPreviewContainer.addView(nativeCameraPreview, new FrameLayout.LayoutParams(1, 1));
-        NativeCameraOverlayView nativeCameraOverlay = new NativeCameraOverlayView(this);
-        nativeCameraPreviewContainer.addView(nativeCameraOverlay, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
+        NativeCameraPreview nativeCameraPreview = new NativeCameraPreview(this);
         // Keep the camera above the hardware-accelerated WebView. Samsung WebView
         // builds may not reveal a SurfaceView placed behind a transparent WebView.
-        appRoot.addView(nativeCameraPreviewContainer, new FrameLayout.LayoutParams(1, 1));
+        appRoot.addView(nativeCameraPreview, new FrameLayout.LayoutParams(1, 1));
         appRoot.setOnApplyWindowInsetsListener((view, insets) -> {
             int left;
             int top;
@@ -144,7 +126,7 @@ public final class MainActivity extends Activity {
 
         nativeBluetooth = new NativeBluetoothManager(this, webView);
         nativeCaptureMetadata = new NativeCaptureMetadataManager(this);
-        nativeCamera = new NativeCameraManager(this, nativeCameraPreviewContainer, nativeCameraPreview, nativeCameraOverlay, webView);
+        nativeCamera = new NativeCameraManager(this, nativeCameraPreview, webView);
         webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth, nativeCaptureMetadata, nativeCamera), "NativeApp");
         webView.setWebViewClient(new LocalOnlyWebViewClient(assetLoader));
         webView.setWebChromeClient(new LocalWebChromeClient());
