@@ -2302,6 +2302,7 @@ body:not(.ball-details) #inspectorAiMount { display:none; }
 .shot-analysis-dialog.native-camera-active { background:transparent; }
 .shot-analysis-dialog.native-camera-active::backdrop { background:transparent; }
 .native-camera-preview { background:transparent!important; }
+html.native-camera-preview,html.native-camera-preview body { background:transparent!important; }
 .native-camera-preview > .app-topbar,.native-camera-preview > .app-layout { visibility:hidden; }
 .shot-analysis-dialog.native-camera-active .shot-analysis-camera-card { background:transparent; }
 .shot-analysis-dialog.native-camera-active .shot-analysis-camera-stage { background:transparent; }

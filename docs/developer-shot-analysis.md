@@ -83,7 +83,10 @@ provide phone-orientation observations that can be combined with the marked
 table geometry to estimate camera extrinsic rotation.
 
 The Android app owns the preview, MP4/H.264/AAC recorder and still capture with
-Camera2. Every completed recording frame has a Camera2 result row containing its
+Camera2. Its clipped native `SurfaceView` sits beneath a transparent WebView so
+Samsung devices can display the camera while retaining the projected-table
+canvas and web controls. Camera startup is acknowledged only after Camera2
+returns its first completed frame. Every completed recording frame has a Camera2 result row containing its
 sensor timestamp, exposure time, ISO, frame duration, rolling-shutter skew,
 focus distance, focal length, aperture, AE/AWB/AF state, crop region and colour
 gains. These rows are drained into the JSON manifest once per second alongside

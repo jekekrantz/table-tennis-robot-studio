@@ -3,9 +3,7 @@ package studio.tabletennis.robot;
 import android.Manifest;
 import android.app.Activity;
 import android.graphics.Bitmap;
-import android.graphics.Matrix;
 import android.graphics.Rect;
-import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -20,11 +18,14 @@ import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Range;
 import android.util.Size;
+import android.view.PixelCopy;
 import android.view.Surface;
-import android.view.TextureView;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 
@@ -43,7 +44,8 @@ import java.util.Map;
 final class NativeCameraManager {
     static final int PERMISSION_REQUEST = 1003;
     private final Activity activity;
-    private final TextureView previewView;
+    private final FrameLayout previewContainer;
+    private final SurfaceView previewView;
     private final WebView webView;
     private final CameraManager cameraManager;
     private final Map<String, File> mediaFiles = new HashMap<>();
@@ -61,17 +63,18 @@ final class NativeCameraManager {
     private String activeCameraId = "";
     private String startRequestId = "";
     private String pendingPermissionRequestId = "";
+    private String pendingPreviewRequestId = "";
     private boolean captureAudio;
     private boolean recording;
     private long droppedFrameMetadata;
 
-    NativeCameraManager(Activity activity, TextureView previewView, WebView webView) {
+    NativeCameraManager(Activity activity, FrameLayout previewContainer, SurfaceView previewView, WebView webView) {
         this.activity = activity;
+        this.previewContainer = previewContainer;
         this.previewView = previewView;
         this.webView = webView;
         this.cameraManager = activity.getSystemService(CameraManager.class);
-        previewView.setOpaque(true);
-        previewView.setSurfaceTextureListener(surfaceListener);
+        previewView.getHolder().addCallback(surfaceCallback);
         startThread();
     }
 
@@ -80,7 +83,7 @@ final class NativeCameraManager {
             startRequestId = requestId;
             activeCameraId = requestedCameraId == null ? "" : requestedCameraId;
             captureAudio = withAudio;
-            previewView.setVisibility(android.view.View.VISIBLE);
+            previewContainer.setVisibility(android.view.View.VISIBLE);
             if (!hasPermissions(withAudio)) {
                 pendingPermissionRequestId = requestId;
                 activity.requestPermissions(requiredPermissions(withAudio), PERMISSION_REQUEST);
@@ -99,7 +102,7 @@ final class NativeCameraManager {
     }
 
     private void openWhenReady() {
-        if (!previewView.isAvailable()) return;
+        if (!surfaceReady()) return;
         try { openCamera(); }
         catch (Exception error) { emit(error(startRequestId, error.getMessage())); }
     }
@@ -112,12 +115,12 @@ final class NativeCameraManager {
         CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(activeCameraId);
         StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         if (map == null) throw new IllegalStateException("Camera stream configuration is unavailable.");
-        previewSize = chooseSize(map.getOutputSizes(SurfaceTexture.class), 1920, 1080);
+        previewSize = chooseSize(map.getOutputSizes(SurfaceHolder.class), 1920, 1080);
         recordingSize = chooseSize(map.getOutputSizes(MediaRecorder.class), 1920, 1080);
         long minimumFrameDuration = map.getOutputMinFrameDuration(MediaRecorder.class, recordingSize);
         recordingFrameRate = minimumFrameDuration > 0 && minimumFrameDuration <= 17_000_000L ? 60 : 30;
-        previewView.getSurfaceTexture().setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-        configureTransform();
+        previewView.getHolder().setFixedSize(previewSize.getWidth(), previewSize.getHeight());
+        updatePreviewLayout();
         cameraManager.openCamera(activeCameraId, deviceCallback, cameraHandler);
     }
 
@@ -132,11 +135,10 @@ final class NativeCameraManager {
         return fallback;
     }
 
-    private final TextureView.SurfaceTextureListener surfaceListener = new TextureView.SurfaceTextureListener() {
-        @Override public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) { if (!startRequestId.isEmpty() && camera == null && hasPermissions(captureAudio)) openWhenReady(); }
-        @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) { configureTransform(); }
-        @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) { closeCamera(false); return true; }
-        @Override public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
+    private final SurfaceHolder.Callback surfaceCallback = new SurfaceHolder.Callback() {
+        @Override public void surfaceCreated(SurfaceHolder holder) { if (!startRequestId.isEmpty() && camera == null && hasPermissions(captureAudio)) openWhenReady(); }
+        @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { updatePreviewLayout(); }
+        @Override public void surfaceDestroyed(SurfaceHolder holder) { closeCamera(false); }
     };
 
     private final CameraDevice.StateCallback deviceCallback = new CameraDevice.StateCallback() {
@@ -146,11 +148,9 @@ final class NativeCameraManager {
     };
 
     private void createPreviewSession(String requestId) {
-        if (camera == null || !previewView.isAvailable()) return;
+        if (camera == null || !surfaceReady()) return;
         closeSession();
-        SurfaceTexture texture = previewView.getSurfaceTexture();
-        texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-        previewSurface = new Surface(texture);
+        previewSurface = previewView.getHolder().getSurface();
         try {
             camera.createCaptureSession(Arrays.asList(previewSurface), new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(CameraCaptureSession configured) {
@@ -159,12 +159,8 @@ final class NativeCameraManager {
                         CaptureRequest.Builder builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                         builder.addTarget(previewSurface);
                         configureAuto(builder);
+                        pendingPreviewRequestId = requestId == null ? "" : requestId;
                         session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler);
-                        JSONObject detail = event("camera-started", requestId);
-                        put(detail, "cameraId", activeCameraId);
-                        put(detail, "width", previewSize.getWidth());
-                        put(detail, "height", previewSize.getHeight());
-                        emit(detail);
                     } catch (Exception error) { emit(error(requestId, error.getMessage())); }
                 }
                 @Override public void onConfigureFailed(CameraCaptureSession failed) { emit(error(requestId, "Could not configure native camera preview.")); }
@@ -204,9 +200,7 @@ final class NativeCameraManager {
             recorder.prepare();
             Surface recordSurface = recorder.getSurface();
             closeSession();
-            SurfaceTexture texture = previewView.getSurfaceTexture();
-            texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-            previewSurface = new Surface(texture);
+            previewSurface = previewView.getHolder().getSurface();
             camera.createCaptureSession(Arrays.asList(previewSurface, recordSurface), new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(CameraCaptureSession configured) {
                     session = configured;
@@ -254,17 +248,27 @@ final class NativeCameraManager {
     void captureStill(String requestId, String captureId) {
         activity.runOnUiThread(() -> {
             try {
-                Bitmap bitmap = previewView.getBitmap();
-                if (bitmap == null) throw new IllegalStateException("Native preview has not produced an image yet.");
-                File file = new File(activity.getCacheDir(), safeName(captureId) + ".jpg");
-                try (FileOutputStream output = new FileOutputStream(file)) { bitmap.compress(Bitmap.CompressFormat.JPEG, 94, output); }
-                bitmap.recycle();
-                mediaFiles.put(file.getName(), file);
-                JSONObject detail = event("still-captured", requestId);
-                put(detail, "url", "https://appassets.androidplatform.net/native-media/" + file.getName());
-                put(detail, "bytes", file.length());
-                put(detail, "mimeType", "image/jpeg");
-                emit(detail);
+                int width = Math.max(1, previewContainer.getWidth());
+                int height = Math.max(1, previewContainer.getHeight());
+                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                PixelCopy.request(previewView, bitmap, result -> {
+                    if (result != PixelCopy.SUCCESS) {
+                        bitmap.recycle();
+                        emit(error(requestId, "Could not copy the native preview frame (PixelCopy " + result + ")."));
+                        return;
+                    }
+                    try {
+                        File file = new File(activity.getCacheDir(), safeName(captureId) + ".jpg");
+                        try (FileOutputStream output = new FileOutputStream(file)) { bitmap.compress(Bitmap.CompressFormat.JPEG, 94, output); }
+                        mediaFiles.put(file.getName(), file);
+                        JSONObject detail = event("still-captured", requestId);
+                        put(detail, "url", "https://appassets.androidplatform.net/native-media/" + file.getName());
+                        put(detail, "bytes", file.length());
+                        put(detail, "mimeType", "image/jpeg");
+                        emit(detail);
+                    } catch (Exception error) { emit(error(requestId, error.getMessage())); }
+                    finally { bitmap.recycle(); }
+                }, new Handler(Looper.getMainLooper()));
             } catch (Exception error) { emit(error(requestId, error.getMessage())); }
         });
     }
@@ -302,14 +306,24 @@ final class NativeCameraManager {
             FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(Math.max(1, (int) Math.round(width * viewWidth)), Math.max(1, (int) Math.round(height * viewHeight)));
             params.leftMargin = webView.getLeft() + (int) Math.round(left * viewWidth);
             params.topMargin = webView.getTop() + (int) Math.round(top * viewHeight);
-            previewView.setLayoutParams(params);
-            previewView.setVisibility(android.view.View.VISIBLE);
-            configureTransform();
+            previewContainer.setLayoutParams(params);
+            previewContainer.setVisibility(android.view.View.VISIBLE);
+            updatePreviewLayout();
         });
     }
 
     private final CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
         @Override public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+            if (!pendingPreviewRequestId.isEmpty()) {
+                String requestId = pendingPreviewRequestId;
+                pendingPreviewRequestId = "";
+                JSONObject detail = event("camera-started", requestId);
+                put(detail, "cameraId", activeCameraId);
+                put(detail, "width", previewSize.getWidth());
+                put(detail, "height", previewSize.getHeight());
+                put(detail, "frameRate", recordingFrameRate);
+                emit(detail);
+            }
             if (!recording) return;
             JSONArray frame = new JSONArray();
             add(frame, result.get(CaptureResult.SENSOR_TIMESTAMP));
@@ -352,17 +366,26 @@ final class NativeCameraManager {
         } catch (Exception ignored) {}
     }
 
-    private void configureTransform() {
-        if (previewSize == null || previewView.getWidth() == 0 || previewView.getHeight() == 0) return;
-        float viewWidth = previewView.getWidth(), viewHeight = previewView.getHeight();
-        float scale = Math.max(viewWidth / previewSize.getWidth(), viewHeight / previewSize.getHeight());
-        Matrix matrix = new Matrix();
-        matrix.setScale(scale, scale, viewWidth / 2f, viewHeight / 2f);
-        previewView.setTransform(matrix);
+    private boolean surfaceReady() {
+        Surface surface = previewView.getHolder().getSurface();
+        return surface != null && surface.isValid();
     }
 
-    private void closeSession() { if (session != null) { try { session.close(); } catch (Exception ignored) {} session = null; } if (previewSurface != null) { try { previewSurface.release(); } catch (Exception ignored) {} previewSurface = null; } }
-    private void closeCamera(boolean hide) { closeSession(); if (camera != null) { camera.close(); camera = null; } releaseRecorder(); recording = false; if (hide) activity.runOnUiThread(() -> previewView.setVisibility(android.view.View.GONE)); }
+    private void updatePreviewLayout() {
+        if (previewSize == null || previewContainer.getWidth() <= 0 || previewContainer.getHeight() <= 0) return;
+        int containerWidth = previewContainer.getWidth();
+        int containerHeight = previewContainer.getHeight();
+        double scale = Math.max((double) containerWidth / previewSize.getWidth(), (double) containerHeight / previewSize.getHeight());
+        int width = Math.max(1, (int) Math.ceil(previewSize.getWidth() * scale));
+        int height = Math.max(1, (int) Math.ceil(previewSize.getHeight() * scale));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
+        params.leftMargin = (containerWidth - width) / 2;
+        params.topMargin = (containerHeight - height) / 2;
+        previewView.setLayoutParams(params);
+    }
+
+    private void closeSession() { if (session != null) { try { session.close(); } catch (Exception ignored) {} session = null; } previewSurface = null; }
+    private void closeCamera(boolean hide) { pendingPreviewRequestId = ""; closeSession(); if (camera != null) { camera.close(); camera = null; } releaseRecorder(); recording = false; if (hide) activity.runOnUiThread(() -> previewContainer.setVisibility(android.view.View.GONE)); }
     private void releaseRecorder() { if (recorder != null) { try { recorder.reset(); recorder.release(); } catch (Exception ignored) {} recorder = null; } }
     void destroy() { closeCamera(true); if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; cameraHandler = null; } }
     private void startThread() { cameraThread = new HandlerThread("RobotStudioCamera2"); cameraThread.start(); cameraHandler = new Handler(cameraThread.getLooper()); }

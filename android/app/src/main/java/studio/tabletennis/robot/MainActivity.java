@@ -14,7 +14,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.view.TextureView;
+import android.view.SurfaceView;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -74,9 +74,15 @@ public final class MainActivity extends Activity {
 
         FrameLayout appRoot = new FrameLayout(this);
         appRoot.setBackgroundColor(Color.rgb(17, 21, 26));
-        TextureView nativeCameraPreview = new TextureView(this);
-        nativeCameraPreview.setVisibility(android.view.View.GONE);
-        appRoot.addView(nativeCameraPreview, new FrameLayout.LayoutParams(1, 1));
+        FrameLayout nativeCameraPreviewContainer = new FrameLayout(this);
+        nativeCameraPreviewContainer.setClipChildren(true);
+        nativeCameraPreviewContainer.setBackgroundColor(Color.BLACK);
+        nativeCameraPreviewContainer.setVisibility(android.view.View.GONE);
+        SurfaceView nativeCameraPreview = new SurfaceView(this);
+        nativeCameraPreview.setZOrderOnTop(false);
+        nativeCameraPreview.setZOrderMediaOverlay(false);
+        nativeCameraPreviewContainer.addView(nativeCameraPreview, new FrameLayout.LayoutParams(1, 1));
+        appRoot.addView(nativeCameraPreviewContainer, new FrameLayout.LayoutParams(1, 1));
         webView = new WebView(this);
         appRoot.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -126,7 +132,7 @@ public final class MainActivity extends Activity {
 
         nativeBluetooth = new NativeBluetoothManager(this, webView);
         nativeCaptureMetadata = new NativeCaptureMetadataManager(this);
-        nativeCamera = new NativeCameraManager(this, nativeCameraPreview, webView);
+        nativeCamera = new NativeCameraManager(this, nativeCameraPreviewContainer, nativeCameraPreview, webView);
         webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth, nativeCaptureMetadata, nativeCamera), "NativeApp");
         webView.setWebViewClient(new LocalOnlyWebViewClient(assetLoader));
         webView.setWebChromeClient(new LocalWebChromeClient());

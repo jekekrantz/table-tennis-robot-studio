@@ -513,7 +513,8 @@ for token in ('developerSettings.retainLogs = true;', 'developerSettings.retainV
         raise SystemExit(f"Development mode must enable all debugging capture options: {token}")
 for token in ('.global-developer-button', '.developer-page-grid', '.shot-analysis-dialog',
               '.shot-analysis-camera-stage', '.shot-camera-position-controls',
-              '.shot-analysis-dataset', '.developer-settings-card'):
+              '.shot-analysis-dataset', '.developer-settings-card',
+              'html.native-camera-preview,html.native-camera-preview body'):
     if token not in css:
         raise SystemExit(f"Missing developer shot-analysis responsive styling: {token}")
 android_main = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'MainActivity.java').read_text()
@@ -545,9 +546,17 @@ for token in ('startNativeCamera', 'stopNativeCamera', 'startNativeRecording', '
     if token not in android_bridge:
         raise SystemExit(f"Android native Camera2 bridge missing: {token}")
 for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE', 'SENSOR_EXPOSURE_TIME',
-              'SENSOR_SENSITIVITY', 'SENSOR_ROLLING_SHUTTER_SKEW', 'COLOR_CORRECTION_GAINS'):
+              'SENSOR_SENSITIVITY', 'SENSOR_ROLLING_SHUTTER_SKEW', 'COLOR_CORRECTION_GAINS',
+              'SurfaceHolder.Callback', 'PixelCopy.request', 'pendingPreviewRequestId'):
     if token not in android_camera:
         raise SystemExit(f"Android native Camera2 capture missing: {token}")
+for token in ('SurfaceView nativeCameraPreview', 'nativeCameraPreviewContainer.setClipChildren(true)'):
+    if token not in android_main:
+        raise SystemExit(f"Android composited camera preview missing: {token}")
+for token in ('function setNativeCameraPreviewMode(active)',
+              'document.documentElement.classList.toggle("native-camera-preview", active)'):
+    if token not in app:
+        raise SystemExit(f"Native camera transparency lifecycle missing: {token}")
 for token in ('LENS_INTRINSIC_CALIBRATION', 'SENSOR_INFO_EXPOSURE_TIME_RANGE', 'Sensor.TYPE_ACCELEROMETER',
               'Sensor.TYPE_GYROSCOPE', 'Sensor.TYPE_ROTATION_VECTOR', 'event.timestamp'):
     if token not in android_capture:

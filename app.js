@@ -2698,6 +2698,12 @@
     return shotAnalysisNativeRecording || shotAnalysisRecorder?.state === "recording";
   }
 
+  function setNativeCameraPreviewMode(active) {
+    document.documentElement.classList.toggle("native-camera-preview", active);
+    document.body.classList.toggle("native-camera-preview", active);
+    els.shotAnalysisDialog?.classList.toggle("native-camera-active", active);
+  }
+
   function updateNativeCameraViewport() {
     if (!shotAnalysisNativeCameraActive || typeof globalThis.NativeApp?.setNativeCameraViewport !== "function") return;
     const stage = els.shotAnalysisOverlay?.parentElement;
@@ -3266,14 +3272,12 @@
       const cameras = Array.isArray(metadata.cameras) ? metadata.cameras.filter(camera => camera.lensFacing === "back") : [];
       shotAnalysisVideoDevices = cameras.map((camera, index) => ({ deviceId:String(camera.cameraId), label:`${camera.lensFacing || "camera"} lens ${index + 1}` }));
       const selected = deviceId || shotAnalysisNativeCameraId || shotAnalysisVideoDevices[0]?.deviceId || "";
-      document.body.classList.add("native-camera-preview");
-      els.shotAnalysisDialog.classList.add("native-camera-active");
+      setNativeCameraPreviewMode(true);
       let detail;
       try {
         detail = await nativeCameraCommand("startNativeCamera", "camera-started", selected, developerSettings.captureAudio);
       } catch (error) {
-        document.body.classList.remove("native-camera-preview");
-        els.shotAnalysisDialog.classList.remove("native-camera-active");
+        setNativeCameraPreviewMode(false);
         throw error;
       }
       shotAnalysisNativeCameraActive = true;
@@ -3351,8 +3355,7 @@
       await nativeCameraCommand("stopNativeCamera", "camera-stopped");
       shotAnalysisNativeCameraActive = false;
       shotAnalysisNativeCameraId = "";
-      document.body.classList.remove("native-camera-preview");
-      els.shotAnalysisDialog.classList.remove("native-camera-active");
+      setNativeCameraPreviewMode(false);
       els.shotAnalysisCameraStatus.textContent = "Camera off.";
       shotAnalysisMarking = false;
       renderShotAnalysisControls();
