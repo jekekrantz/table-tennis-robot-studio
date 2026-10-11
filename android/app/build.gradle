@@ -26,8 +26,8 @@ android {
         applicationId "studio.tabletennis.robot"
         minSdk 26
         targetSdk 36
-        versionCode 11
-        versionName "2026-10-10.11"
+        versionCode 12
+        versionName "2026-10-10.12"
     }
 
     sourceSets {

@@ -3432,7 +3432,7 @@
       return;
     }
     try {
-      if ((developerSettings.calibration?.landmarks?.length || 0) < 6) throw new Error("Mark all four table corners and both net-post tops first.");
+      const landmarkCount = developerSettings.calibration?.landmarks?.length || 0;
       await startShotAnalysisCamera();
       if (developerSettings.captureAudio && !shotAnalysisStream?.getAudioTracks?.().length) throw new Error("Microphone audio is required while Capture microphone audio is enabled.");
 
@@ -3446,6 +3446,8 @@
       session.dataset = {
         ...manifest,
         status:"prepared",
+        calibrationLandmarkCount:landmarkCount,
+        calibrationComplete:landmarkCount >= 6,
         completedSamples:0,
         preRollSeconds:1.5,
         postRollSeconds:1,
@@ -3454,7 +3456,9 @@
       session.drill = { id:drill.id, name:drill.name, source:"user" };
       session.drillDefinition = safeAnalysisValue(drill);
       analysisLog("dataset-prepared", session.dataset);
-      els.shotDatasetStatus.textContent = "Dataset prepared. Complete any Nova safety prompts; recording starts only when playback is ready.";
+      els.shotDatasetStatus.textContent = landmarkCount >= 6
+        ? "Dataset prepared. Complete any Nova safety prompts; recording starts only when playback is ready."
+        : "Dataset prepared without full table calibration. Recording will continue; add landmarks later to improve trajectory alignment.";
       renderShotAnalysisControls();
 
       const previousTuning = { ...liveTuning };
