@@ -3,6 +3,7 @@ package studio.tabletennis.robot;
 import android.os.Build;
 import android.app.Activity;
 import android.content.pm.ActivityInfo;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 
 import org.json.JSONException;
@@ -134,13 +135,34 @@ final class NativeAppBridge {
     }
 
     @JavascriptInterface
+    public String getNativeCaptureStorage() {
+        return camera.captureStorageJson();
+    }
+
+    @JavascriptInterface
+    public String clearNativeCaptureMedia() {
+        return camera.clearStoredMedia();
+    }
+
+    @JavascriptInterface
+    public boolean deleteNativeCaptureMedia(String sourceName) {
+        return camera.deleteStoredMedia(sourceName);
+    }
+
+    @JavascriptInterface
     public void enterShotAnalysisLandscape() {
-        activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+        activity.runOnUiThread(() -> {
+            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        });
     }
 
     @JavascriptInterface
     public void exitShotAnalysisLandscape() {
-        activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED));
+        activity.runOnUiThread(() -> {
+            activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        });
     }
 
     @JavascriptInterface
@@ -159,6 +181,7 @@ final class NativeAppBridge {
             info.put("camera2StaticMetadata", true);
             info.put("nativeMotionSensors", true);
             info.put("nativeArtifactExport", true);
+            info.put("nativeCaptureStorage", true);
         } catch (JSONException ignored) {
             return "{\"platform\":\"android\"}";
         }

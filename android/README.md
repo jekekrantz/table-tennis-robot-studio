@@ -61,7 +61,9 @@ JSON.parse(NativeApp.getInfo())
 
 `camera2Capture` reports the native Camera2 recorder and metadata inventory.
 Generated logs and media use Android's system document saver; complete datasets
-are exported as a single ZIP.
+are exported as a single ZIP. Camera recordings remain in private app storage
+until the developer-artifact cleanup action removes them, so exporting does not
+require copying a large MP4 through the WebView heap.
 
 ## Website distribution
 

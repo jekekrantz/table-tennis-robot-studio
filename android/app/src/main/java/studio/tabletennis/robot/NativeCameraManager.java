@@ -36,9 +36,11 @@ import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 final class NativeCameraManager {
     static final int PERMISSION_REQUEST = 1003;
@@ -47,7 +49,8 @@ final class NativeCameraManager {
     private final SurfaceView previewView;
     private final WebView webView;
     private final CameraManager cameraManager;
-    private final Map<String, File> mediaFiles = new HashMap<>();
+    private final Map<String, File> mediaFiles = new ConcurrentHashMap<>();
+    private final File captureDirectory;
     private final List<JSONArray> frameMetadata = new ArrayList<>();
     private HandlerThread cameraThread;
     private Handler cameraHandler;
@@ -79,6 +82,10 @@ final class NativeCameraManager {
         this.previewView = preview.surfaceView();
         this.webView = webView;
         this.cameraManager = activity.getSystemService(CameraManager.class);
+        this.captureDirectory = new File(activity.getFilesDir(), "developer-captures");
+        if (!captureDirectory.isDirectory()) captureDirectory.mkdirs();
+        File[] existing = captureDirectory.listFiles(File::isFile);
+        if (existing != null) for (File file : existing) mediaFiles.put(file.getName(), file);
         previewView.getHolder().addCallback(surfaceCallback);
         startThread();
     }
@@ -96,7 +103,7 @@ final class NativeCameraManager {
                 activity.requestPermissions(requiredPermissions(withAudio), PERMISSION_REQUEST);
                 return;
             }
-            openWhenReady();
+            postCamera(this::openWhenReady);
         });
     }
 
@@ -111,7 +118,7 @@ final class NativeCameraManager {
             return;
         }
         captureAudio = captureAudioRequested && hasMicrophonePermission();
-        activity.runOnUiThread(this::openWhenReady);
+        postCamera(this::openWhenReady);
     }
 
     private void openWhenReady() {
@@ -136,8 +143,10 @@ final class NativeCameraManager {
         boolean supportsSelectedRate = false;
         if (fpsRanges != null) for (Range<Integer> range : fpsRanges) if (range.contains(recordingFrameRate)) supportsSelectedRate = true;
         if (!supportsSelectedRate) recordingFrameRate = 30;
-        previewView.getHolder().setFixedSize(previewSize.getWidth(), previewSize.getHeight());
-        updatePreviewLayout();
+        runOnUiThreadAndWait(() -> {
+            previewView.getHolder().setFixedSize(previewSize.getWidth(), previewSize.getHeight());
+            updatePreviewLayout();
+        });
         cameraManager.openCamera(activeCameraId, deviceCallback, cameraHandler);
     }
 
@@ -153,7 +162,7 @@ final class NativeCameraManager {
     }
 
     private final SurfaceHolder.Callback surfaceCallback = new SurfaceHolder.Callback() {
-        @Override public void surfaceCreated(SurfaceHolder holder) { if (cameraRequested && camera == null && hasCameraPermission()) openWhenReady(); }
+        @Override public void surfaceCreated(SurfaceHolder holder) { if (cameraRequested && camera == null && hasCameraPermission()) postCamera(NativeCameraManager.this::openWhenReady); }
         @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { updatePreviewLayout(); }
         @Override public void surfaceDestroyed(SurfaceHolder holder) { if (cameraRequested) onHostPause(); else closeCamera(false); }
     };
@@ -192,9 +201,13 @@ final class NativeCameraManager {
     }
 
     void startRecording(String requestId, String captureId) {
+        postCamera(() -> startRecordingNow(requestId, captureId));
+    }
+
+    private void startRecordingNow(String requestId, String captureId) {
         if (camera == null || recording) { emit(error(requestId, recording ? "Recording is already active." : "Native camera is not ready.")); return; }
         try {
-            recordingFile = new File(activity.getCacheDir(), safeName(captureId) + ".mp4");
+            recordingFile = new File(captureDirectory, safeName(captureId) + ".mp4");
             recorder = new MediaRecorder();
             if (captureAudio) recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
             recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
@@ -267,6 +280,10 @@ final class NativeCameraManager {
     }
 
     void stopRecording(String requestId) {
+        postCamera(() -> stopRecordingNow(requestId));
+    }
+
+    private void stopRecordingNow(String requestId) {
         if (!recording) { emit(error(requestId, "Native recording is not active.")); return; }
         try { session.stopRepeating(); } catch (Exception ignored) {}
         try { recorder.stop(); }
@@ -304,7 +321,7 @@ final class NativeCameraManager {
                         return;
                     }
                     try {
-                        File file = new File(activity.getCacheDir(), safeName(captureId) + ".jpg");
+                        File file = new File(captureDirectory, safeName(captureId) + ".jpg");
                         try (FileOutputStream output = new FileOutputStream(file)) { bitmap.compress(Bitmap.CompressFormat.JPEG, 94, output); }
                         mediaFiles.put(file.getName(), file);
                         JSONObject detail = event("still-captured", requestId);
@@ -320,7 +337,11 @@ final class NativeCameraManager {
     }
 
     void stop(String requestId) {
-        if (recording) stopRecording("");
+        postCamera(() -> stopNow(requestId));
+    }
+
+    private void stopNow(String requestId) {
+        if (recording) stopRecordingNow("");
         cameraRequested = false;
         startRequestId = "";
         pendingPermissionRequestId = "";
@@ -329,6 +350,10 @@ final class NativeCameraManager {
     }
 
     void onHostPause() {
+        postCamera(this::onHostPauseNow);
+    }
+
+    private void onHostPauseNow() {
         if (!cameraRequested || (camera == null && !recording)) return;
         JSONObject detail = event("camera-suspended", "");
         put(detail, "cameraId", activeCameraId);
@@ -381,7 +406,59 @@ final class NativeCameraManager {
     File mediaFile(String name) {
         if (name == null || name.contains("/") || name.contains("..")) return null;
         File file = mediaFiles.get(name);
+        if (file == null) {
+            File candidate = new File(captureDirectory, name);
+            if (candidate.isFile()) {
+                file = candidate;
+                mediaFiles.put(name, candidate);
+            }
+        }
         return file != null && file.isFile() ? file : null;
+    }
+
+    String captureStorageJson() {
+        long bytes = 0;
+        int files = 0;
+        File[] stored = captureDirectory.listFiles(File::isFile);
+        if (stored != null) {
+            files = stored.length;
+            for (File file : stored) bytes += Math.max(0, file.length());
+        }
+        JSONObject state = new JSONObject();
+        put(state, "directory", "internal-app-storage");
+        put(state, "files", files);
+        put(state, "bytes", bytes);
+        put(state, "availableBytes", captureDirectory.getUsableSpace());
+        return state.toString();
+    }
+
+    String clearStoredMedia() {
+        int deleted = 0;
+        long bytes = 0;
+        File active = recording ? recordingFile : null;
+        File[] stored = captureDirectory.listFiles(File::isFile);
+        if (stored != null) for (File file : stored) {
+            if (active != null && active.equals(file)) continue;
+            long length = Math.max(0, file.length());
+            if (file.delete()) {
+                mediaFiles.remove(file.getName());
+                deleted += 1;
+                bytes += length;
+            }
+        }
+        JSONObject result = new JSONObject();
+        put(result, "deletedFiles", deleted);
+        put(result, "deletedBytes", bytes);
+        put(result, "recordingPreserved", active != null);
+        return result.toString();
+    }
+
+    boolean deleteStoredMedia(String name) {
+        File file = mediaFile(name);
+        if (file == null || (recording && recordingFile != null && recordingFile.equals(file))) return false;
+        boolean deleted = file.delete();
+        if (deleted) mediaFiles.remove(file.getName());
+        return deleted;
     }
 
     void setViewport(double left, double top, double width, double height) {
@@ -500,8 +577,34 @@ final class NativeCameraManager {
         if (hide) activity.runOnUiThread(preview::hideAndClear);
     }
     private void releaseRecorder() { if (recorder != null) { try { recorder.reset(); recorder.release(); } catch (Exception ignored) {} recorder = null; } }
-    void destroy() { closeCamera(true); if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; cameraHandler = null; } }
+    void destroy() {
+        Handler handler = cameraHandler;
+        HandlerThread thread = cameraThread;
+        cameraHandler = null;
+        cameraThread = null;
+        if (handler != null) handler.post(() -> {
+            if (cameraRequested || recording) onHostPauseNow();
+            else closeCamera(true);
+            if (thread != null) thread.quitSafely();
+        });
+    }
     private void startThread() { cameraThread = new HandlerThread("RobotStudioCamera2"); cameraThread.start(); cameraHandler = new Handler(cameraThread.getLooper()); }
+    private void postCamera(Runnable action) {
+        Handler handler = cameraHandler;
+        if (handler != null) handler.post(action);
+    }
+    private void runOnUiThreadAndWait(Runnable action) throws Exception {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action.run();
+            return;
+        }
+        CountDownLatch done = new CountDownLatch(1);
+        activity.runOnUiThread(() -> {
+            try { action.run(); }
+            finally { done.countDown(); }
+        });
+        if (!done.await(2, TimeUnit.SECONDS)) throw new IllegalStateException("Camera preview layout timed out.");
+    }
     private boolean hasCameraPermission() { return activity.checkSelfPermission(Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED; }
     private boolean hasMicrophonePermission() { return activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED; }
     private boolean hasPermissions(boolean audio) { if (activity.checkSelfPermission(Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false; return !audio || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED; }

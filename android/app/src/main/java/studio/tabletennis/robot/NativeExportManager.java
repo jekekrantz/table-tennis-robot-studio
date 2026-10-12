@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -56,7 +57,7 @@ final class NativeExportManager {
 
     void exportMedia(String sourceName, String filename, String mimeType) {
         File file = camera.mediaFile(sourceName);
-        if (file == null) {
+        if (file == null || file.length() <= 0) {
             showError("Recording is no longer available", null);
             return;
         }
@@ -64,6 +65,7 @@ final class NativeExportManager {
     }
 
     void exportDataset(String filename, String manifestJson, String mediaJson) {
+        mainHandler.post(() -> Toast.makeText(activity, "Preparing dataset ZIP…", Toast.LENGTH_SHORT).show());
         executor.execute(() -> {
             File zip = null;
             try {
@@ -71,12 +73,17 @@ final class NativeExportManager {
                 JSONArray media = new JSONArray(mediaJson == null ? "[]" : mediaJson);
                 Set<String> archiveNames = new HashSet<>();
                 try (ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(zip)))) {
+                    // Camera MP4/JPEG files are already compressed. Deflating them again
+                    // delays the Save dialog without materially shrinking the dataset.
+                    output.setLevel(Deflater.NO_COMPRESSION);
                     addBytes(output, archiveNames, "manifest.json", (manifestJson == null ? "{}" : manifestJson).getBytes(StandardCharsets.UTF_8));
                     for (int index = 0; index < media.length(); index += 1) {
                         JSONObject entry = media.optJSONObject(index);
                         if (entry == null) continue;
                         File source = camera.mediaFile(entry.optString("sourceName"));
-                        if (source == null) continue;
+                        if (source == null || source.length() <= 0) {
+                            throw new IllegalStateException("A requested capture file is missing: " + entry.optString("archiveName"));
+                        }
                         addFile(output, archiveNames, safeArchiveName(entry.optString("archiveName")), source);
                     }
                 }

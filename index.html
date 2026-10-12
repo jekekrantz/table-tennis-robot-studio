@@ -216,7 +216,7 @@
           <section class="developer-settings-card panel-card">
             <div><h3>Development mode</h3><p>Enable temporary diagnostic tools. New debugging sessions retain all available logs, media and images by default.</p></div>
             <div id="androidAppDownloadCard" class="android-app-download-card">
-              <div><strong>Use the Android app for camera capture</strong><small>The local app runs this same interface. Native Camera2 metadata will be added here as capture work progresses.</small></div>
+              <div><strong>Use the Android app for camera capture</strong><small>The local app runs this same interface with native Camera2 recording, frame metadata and motion sensors.</small></div>
               <a id="androidAppDownloadBtn" class="button primary wide" href="downloads/table-tennis-robot-studio-android-preview.apk" download>Download Android app</a>
               <small class="helper">Preview build for Android 8 or newer. Android may ask you to allow installation from this browser.</small>
             </div>
@@ -646,7 +646,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="runtime.bundle.js?v=2026-10-12.1" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
+  <script src="runtime.bundle.js?v=2026-10-12.2" onerror="globalThis.__TTRS_BUNDLE_LOAD_ERROR = true"></script>
   <script>
     (() => {
       if (globalThis.__TTRS_BUNDLE_LOAD_ERROR) {

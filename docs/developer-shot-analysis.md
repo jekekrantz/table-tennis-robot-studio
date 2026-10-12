@@ -19,7 +19,7 @@ The shot-analysis window provides:
   only when the device omits optical metadata;
 - approximate camera-distance, height-above-net and downward-pitch guides,
   initially set to 50 cm, 30 cm and 2°;
-- `MediaRecorder` video/audio capture with a manual download;
+- native H.264/AAC video/audio capture with direct file and dataset-ZIP export;
 - monotonic timestamps for Nova state, log, active-shot and `0x05` served-ball
   events;
 - per-presented-frame video metadata while recording, capped at 30,000 entries;
@@ -33,12 +33,13 @@ The shot-analysis window provides:
 - an image-to-table homography from the first four landmarks;
 - a versioned JSON session log containing the active drill identity, selected
   model context, camera settings, calibration, events and frame timestamps; and
-- independent opt-in retention for logs, video/audio and images in browser
-  IndexedDB.
+- independent opt-in retention for logs and images in browser IndexedDB, with
+  native video/audio retained in the app's private capture storage.
 
 Developer settings and camera landmarks use their own local-storage key and are
 not part of portable drill exports. **Clear stored artifacts** deletes retained
-IndexedDB captures but does not delete drills or the saved table landmarks.
+IndexedDB captures and native capture files, but does not delete drills or the
+saved table landmarks.
 The compact **Capture session** disclosure contains raw recent events and file
 downloads; its frame counter refers to recorded frame metadata, not live preview
 frames. In the Android app, log and recording downloads use the system Save
@@ -61,7 +62,8 @@ warm-up, battery state or elapsed time.
 **Record balanced dataset** performs one finite run:
 
 1. It checks that the camera is active and microphone audio is present when
-   requested. Table/net landmarks improve interpretation but are optional.
+   requested. It also checks that Android reports enough free app storage for
+   the selected run. Table/net landmarks improve interpretation but are optional.
 2. It creates a temporary `Developer dataset · balanced trajectories` execution
    plan that is removed when capture ends; it never appears in My drills.
 3. Recording and native motion capture start when the dataset button is pressed,
@@ -72,7 +74,8 @@ warm-up, battery state or elapsed time.
 5. It records one second of post-roll and a final still, then stops recording
    automatically and marks the run complete or stopped early.
 
-Canceling the Nova connection prompt, closing the analysis window, locking the
+The analysis window keeps the Android screen awake while it is open, preventing
+an ordinary display timeout from interrupting a run. Canceling the Nova connection prompt, closing the analysis window, locking the
 phone, or pressing the dataset button again now finalizes the partial recording
 and resolves the dataset run instead of leaving it waiting indefinitely.
 
@@ -136,8 +139,9 @@ lens rather than trusting stale JavaScript state.
 6. With nobody in view, choose **Set empty background**.
 7. For an ad-hoc capture, start recording and start/stop the current drill. For
    a comparable corpus, use **Record balanced dataset** and let it finish.
-8. Download the dataset files, or use the retained
-   browser artifacts during local development.
+8. Download the dataset files. Native recordings remain in private app storage
+   until **Clear stored artifacts** is used; logs and images are also available
+   through retained browser artifacts when enabled.
 
 ## Deliberate limitations
 

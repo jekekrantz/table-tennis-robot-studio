@@ -553,11 +553,12 @@ for token in ('getCameraMetadata', 'getSensorCatalog', 'startMotionCapture', 'dr
         raise SystemExit(f"Android capture metadata bridge missing: {token}")
 for token in ('startNativeCamera', 'stopNativeCamera', 'startNativeRecording', 'stopNativeRecording',
               'captureNativeStill', 'drainNativeFrameMetadata', 'getNativeCameraState', 'setNativeCameraViewport',
-              'setNativeCameraOverlay', 'exportTextFile', 'exportNativeMedia', 'exportDatasetZip'):
+              'setNativeCameraOverlay', 'exportTextFile', 'exportNativeMedia', 'exportDatasetZip',
+              'getNativeCaptureStorage', 'clearNativeCaptureMedia', 'deleteNativeCaptureMedia', 'FLAG_KEEP_SCREEN_ON'):
     if token not in android_bridge:
         raise SystemExit(f"Android native Camera2 bridge missing: {token}")
-for token in ('Intent.ACTION_CREATE_DOCUMENT', 'ZipOutputStream', 'manifest.json',
-              'camera.mediaFile', 'Finish the current save first.'):
+for token in ('Intent.ACTION_CREATE_DOCUMENT', 'ZipOutputStream', 'Deflater.NO_COMPRESSION',
+              'Preparing dataset ZIP', 'manifest.json', 'camera.mediaFile', 'Finish the current save first.'):
     if token not in android_export:
         raise SystemExit(f"Android native artifact export missing: {token}")
 for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE', 'SENSOR_EXPOSURE_TIME',
@@ -565,7 +566,8 @@ for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE
               'SurfaceHolder.Callback', 'PixelCopy.request', 'pendingPreviewRequestId',
               'void onHostPause()', 'camera-suspended', 'cameraRequested = false',
               'captureAudio = captureAudioRequested && hasMicrophonePermission()',
-              'if (recordingFile != null) recordingFile.delete();'):
+              'if (recordingFile != null) recordingFile.delete();', 'developer-captures',
+              'ConcurrentHashMap', 'captureStorageJson()', 'clearStoredMedia()'):
     if token not in android_camera:
         raise SystemExit(f"Android native Camera2 capture missing: {token}")
 if android_main.index('appRoot.addView(webView') > android_main.index('appRoot.addView(nativeCameraPreview'):
@@ -585,6 +587,11 @@ for token in ('function setNativeCameraUiActive(active)',
               'NativeApp?.exportTextFile', 'NativeApp?.exportNativeMedia', 'NativeApp?.exportDatasetZip',
               'function acceptNativeRecording(detail, reason = "recording-stop")',
               'getNativeCameraState', 'shotDatasetFinalizeAction',
+              'shotAnalysisCameraStartPromise', 'shotAnalysisRecordingTransitionPromise',
+              'getNativeCaptureStorage', 'expectedCaptureBytes', 'shotAnalysisVideoAvailable()',
+              'discardUnretainedNativeMedia()',
+              'shotDatasetRequestedFinishReason = "user-stop"',
+              'reason === "playback-finished" && shotDatasetDelivered >= manifest.sampleCount',
               'DeveloperShotAnalysis.cameraHorizontalFovDeg',
               'onCancel:options.purpose === "balanced-dataset"',
               'playback-did-not-start'):
