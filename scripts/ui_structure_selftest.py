@@ -528,6 +528,7 @@ android_capture = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio'
 android_camera = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraManager.java').read_text()
 android_camera_preview = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraPreview.java').read_text()
 android_camera_overlay = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeCameraOverlayView.java').read_text()
+android_export = (root / 'android' / 'app' / 'src' / 'main' / 'java' / 'studio' / 'tabletennis' / 'robot' / 'NativeExportManager.java').read_text()
 android_manifest = (root / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml').read_text()
 for token in ('setOnApplyWindowInsetsListener', 'WindowInsets.Type.systemBars()',
               'WindowInsets.Type.displayCutout()', 'view.setPadding(left, top, right, bottom)',
@@ -539,6 +540,8 @@ for token in ('UPDATE_MANIFEST_URL', 'checkForAppUpdate()', 'BuildConfig.VERSION
               'FileProvider.getUriForFile'):
     if token not in android_main:
         raise SystemExit(f"Android startup update flow missing: {token}")
+if 'info.put("nativeArtifactExport", true)' not in android_bridge:
+    raise SystemExit("Android app info must advertise native artifact export")
 for token in ('enterShotAnalysisLandscape', 'exitShotAnalysisLandscape'):
     if token not in android_main and token not in android_bridge:
         raise SystemExit(f"Android landscape camera orientation missing: {token}")
@@ -550,9 +553,13 @@ for token in ('getCameraMetadata', 'getSensorCatalog', 'startMotionCapture', 'dr
         raise SystemExit(f"Android capture metadata bridge missing: {token}")
 for token in ('startNativeCamera', 'stopNativeCamera', 'startNativeRecording', 'stopNativeRecording',
               'captureNativeStill', 'drainNativeFrameMetadata', 'getNativeCameraState', 'setNativeCameraViewport',
-              'setNativeCameraOverlay'):
+              'setNativeCameraOverlay', 'exportTextFile', 'exportNativeMedia', 'exportDatasetZip'):
     if token not in android_bridge:
         raise SystemExit(f"Android native Camera2 bridge missing: {token}")
+for token in ('Intent.ACTION_CREATE_DOCUMENT', 'ZipOutputStream', 'manifest.json',
+              'camera.mediaFile', 'Finish the current save first.'):
+    if token not in android_export:
+        raise SystemExit(f"Android native artifact export missing: {token}")
 for token in ('CameraDevice.TEMPLATE_RECORD', 'MediaRecorder.VideoSource.SURFACE', 'SENSOR_EXPOSURE_TIME',
               'SENSOR_SENSITIVITY', 'SENSOR_ROLLING_SHUTTER_SKEW', 'COLOR_CORRECTION_GAINS',
               'SurfaceHolder.Callback', 'PixelCopy.request', 'pendingPreviewRequestId',
@@ -575,6 +582,7 @@ for token in ('function setNativeCameraUiActive(active)',
               'els.shotAnalysisDialog?.classList.toggle("native-camera-active", active)',
               'function startNativeCameraViewportSync()', 'nativeCameraViewportSignature',
               'function syncNativeCameraOverlay()', 'toDataURL("image/png")',
+              'NativeApp?.exportTextFile', 'NativeApp?.exportNativeMedia', 'NativeApp?.exportDatasetZip',
               'function acceptNativeRecording(detail, reason = "recording-stop")',
               'getNativeCameraState', 'shotDatasetFinalizeAction',
               'DeveloperShotAnalysis.cameraHorizontalFovDeg',

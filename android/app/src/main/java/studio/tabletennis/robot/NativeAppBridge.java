@@ -13,12 +13,14 @@ final class NativeAppBridge {
     private final NativeBluetoothManager bluetooth;
     private final NativeCaptureMetadataManager captureMetadata;
     private final NativeCameraManager camera;
+    private final NativeExportManager export;
 
-    NativeAppBridge(Activity activity, NativeBluetoothManager bluetooth, NativeCaptureMetadataManager captureMetadata, NativeCameraManager camera) {
+    NativeAppBridge(Activity activity, NativeBluetoothManager bluetooth, NativeCaptureMetadataManager captureMetadata, NativeCameraManager camera, NativeExportManager export) {
         this.activity = activity;
         this.bluetooth = bluetooth;
         this.captureMetadata = captureMetadata;
         this.camera = camera;
+        this.export = export;
     }
 
     @JavascriptInterface
@@ -117,6 +119,21 @@ final class NativeAppBridge {
     }
 
     @JavascriptInterface
+    public void exportTextFile(String filename, String mimeType, String content) {
+        export.exportText(filename, mimeType, content);
+    }
+
+    @JavascriptInterface
+    public void exportNativeMedia(String sourceName, String filename, String mimeType) {
+        export.exportMedia(sourceName, filename, mimeType);
+    }
+
+    @JavascriptInterface
+    public void exportDatasetZip(String filename, String manifestJson, String mediaJson) {
+        export.exportDataset(filename, manifestJson, mediaJson);
+    }
+
+    @JavascriptInterface
     public void enterShotAnalysisLandscape() {
         activity.runOnUiThread(() -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
     }
@@ -141,6 +158,7 @@ final class NativeAppBridge {
             info.put("camera2Capture", true);
             info.put("camera2StaticMetadata", true);
             info.put("nativeMotionSensors", true);
+            info.put("nativeArtifactExport", true);
         } catch (JSONException ignored) {
             return "{\"platform\":\"android\"}";
         }

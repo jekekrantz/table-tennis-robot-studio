@@ -58,6 +58,7 @@ public final class MainActivity extends Activity {
     private NativeBluetoothManager nativeBluetooth;
     private NativeCaptureMetadataManager nativeCaptureMetadata;
     private NativeCameraManager nativeCamera;
+    private NativeExportManager nativeExport;
     private PermissionRequest pendingWebPermission;
     private String[] pendingWebResources;
     private final ExecutorService updateExecutor = Executors.newSingleThreadExecutor();
@@ -127,7 +128,8 @@ public final class MainActivity extends Activity {
         nativeBluetooth = new NativeBluetoothManager(this, webView);
         nativeCaptureMetadata = new NativeCaptureMetadataManager(this);
         nativeCamera = new NativeCameraManager(this, nativeCameraPreview, webView);
-        webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth, nativeCaptureMetadata, nativeCamera), "NativeApp");
+        nativeExport = new NativeExportManager(this, nativeCamera);
+        webView.addJavascriptInterface(new NativeAppBridge(this, nativeBluetooth, nativeCaptureMetadata, nativeCamera, nativeExport), "NativeApp");
         webView.setWebViewClient(new LocalOnlyWebViewClient(assetLoader));
         webView.setWebChromeClient(new LocalWebChromeClient());
         webView.loadUrl(START_URL);
@@ -154,12 +156,19 @@ public final class MainActivity extends Activity {
         if (nativeBluetooth != null) nativeBluetooth.destroy();
         if (nativeCaptureMetadata != null) nativeCaptureMetadata.destroy();
         if (nativeCamera != null) nativeCamera.destroy();
+        if (nativeExport != null) nativeExport.destroy();
         if (webView != null) {
             webView.removeJavascriptInterface("NativeApp");
             webView.destroy();
         }
         updateExecutor.shutdownNow();
         super.onDestroy();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (nativeExport != null) nativeExport.onActivityResult(requestCode, resultCode, data);
     }
 
     private void checkForAppUpdate() {

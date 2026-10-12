@@ -65,6 +65,7 @@ test -f android/app/src/main/java/studio/tabletennis/robot/NativeCaptureMetadata
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraManager.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraPreview.java
 test -f android/app/src/main/java/studio/tabletennis/robot/NativeCameraOverlayView.java
+test -f android/app/src/main/java/studio/tabletennis/robot/NativeExportManager.java
 grep -q 'WebViewAssetLoader' android/app/src/main/java/studio/tabletennis/robot/MainActivity.java
 grep -q 'camera2Capture.*, true' android/app/src/main/java/studio/tabletennis/robot/NativeAppBridge.java
 test -f downloads/table-tennis-robot-studio-android-preview.apk

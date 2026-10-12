@@ -41,7 +41,9 @@ not part of portable drill exports. **Clear stored artifacts** deletes retained
 IndexedDB captures but does not delete drills or the saved table landmarks.
 The compact **Capture session** disclosure contains raw recent events and file
 downloads; its frame counter refers to recorded frame metadata, not live preview
-frames.
+frames. In the Android app, log and recording downloads use the system Save
+dialog. **Download dataset files** creates one ZIP containing the JSON manifest
+and all native media still available for the current session.
 
 ## Balanced dataset recorder
 

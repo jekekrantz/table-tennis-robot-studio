@@ -436,6 +436,7 @@
   let nativeCameraOverlayFrameId = null;
   let shotAnalysisRecorderChunks = [];
   let shotAnalysisVideoBlob = null;
+  let shotAnalysisNativeVideoName = "";
   let shotAnalysisSession = null;
   let shotAnalysisImages = [];
   let shotAnalysisWorkingLandmarks = [];
@@ -2917,6 +2918,7 @@
     };
     shotAnalysisImages = [];
     shotAnalysisVideoBlob = null;
+    shotAnalysisNativeVideoName = "";
     shotAnalysisRecorderChunks = [];
     shotDatasetDelivered = 0;
     shotAnalysisExpectedShot = null;
@@ -3247,7 +3249,7 @@
     const recordedFrameRecords = Math.max(session.frames.length, nativeFrameRecords);
     const recent = session.events.slice(-6).map(event => `${(event.monotonicMs / 1000).toFixed(3)}s  ${event.type}`).join("\n");
     els.shotAnalysisEventSummary.textContent = `${session.events.length} events · ${recordedFrameRecords} recorded frame records · ${session.imageCount} stills\n${recent || "Waiting for events…"}`;
-    els.shotAnalysisDownloadLogBtn.disabled = false;
+    els.shotAnalysisDownloadLogBtn.disabled = shotAnalysisRecordingActive();
   }
 
   function shotDatasetConfigFromInputs() {
@@ -3270,7 +3272,7 @@
     els.shotDatasetStartBtn.classList.toggle("running", shotDatasetCaptureRunning);
     els.shotDatasetRepetitions.disabled = shotDatasetCaptureRunning;
     els.shotDatasetInterval.disabled = shotDatasetCaptureRunning;
-    els.shotDatasetDownloadBtn.disabled = !shotAnalysisSession || (!shotAnalysisVideoBlob && !shotAnalysisSession.dataset);
+    els.shotDatasetDownloadBtn.disabled = shotAnalysisRecordingActive() || !shotAnalysisSession || (!shotAnalysisVideoBlob && !shotAnalysisSession.dataset);
     els.shotAnalysisNewSessionBtn.disabled = shotDatasetCaptureRunning;
     if (shotDatasetCaptureRunning && shotAnalysisSession?.dataset) {
       els.shotDatasetStatus.textContent = `${shotDatasetDelivered} / ${shotAnalysisSession.dataset.sampleCount} served-ball events captured. Keep the tripod fixed.`;
@@ -3302,7 +3304,7 @@
     els.shotAnalysisCaptureBadge.className = `status-badge ${recording ? "warning" : cameraOn ? "success" : "neutral"}`;
     const retained = [developerSettings.retainLogs && "logs", developerSettings.retainVideo && "video/audio", developerSettings.retainImages && "images"].filter(Boolean);
     els.shotAnalysisRetentionSummary.textContent = retained.length ? `Retaining ${retained.join(", ")} in local browser storage.` : "Persistent retention is off; the current session remains in memory until this page is closed.";
-    els.shotAnalysisDownloadVideoBtn.disabled = !shotAnalysisVideoBlob;
+    els.shotAnalysisDownloadVideoBtn.disabled = recording || !shotAnalysisVideoBlob;
     renderShotDatasetControls();
     renderShotAnalysisSummary();
     drawShotAnalysisOverlay();
@@ -3500,6 +3502,7 @@
       if (shotAnalysisNativeRecording) return;
       ensureShotAnalysisSession();
       shotAnalysisVideoBlob = null;
+      shotAnalysisNativeVideoName = "";
       const detail = await nativeCameraCommand("startNativeRecording", "recording-started", shotAnalysisSession.id);
       shotAnalysisNativeRecording = true;
       shotAnalysisNativeAudioEnabled = Boolean(detail.audioEnabled);
@@ -3515,6 +3518,7 @@
     ensureShotAnalysisSession();
     shotAnalysisRecorderChunks = [];
     shotAnalysisVideoBlob = null;
+    shotAnalysisNativeVideoName = "";
     const mimeType = DeveloperShotAnalysis.preferredRecorderMimeType(MediaRecorder);
     const options = mimeType ? { mimeType, videoBitsPerSecond:6_000_000 } : { videoBitsPerSecond:6_000_000 };
     shotAnalysisRecorder = new MediaRecorder(shotAnalysisStream, options);
@@ -3530,6 +3534,7 @@
     const response = await fetch(detail.url);
     if (!response.ok) throw new Error(`Could not read native recording (${response.status}).`);
     shotAnalysisVideoBlob = await response.blob();
+    shotAnalysisNativeVideoName = decodeURIComponent(new URL(detail.url).pathname.split("/").pop() || "");
     if (shotAnalysisSession) shotAnalysisSession.video = {
       mimeType:shotAnalysisVideoBlob.type || detail.mimeType || "video/mp4",
       bytes:shotAnalysisVideoBlob.size,
@@ -3613,15 +3618,17 @@
       const session = ensureShotAnalysisSession();
       const index = session.imageCount + 1;
       let blob;
+      let nativeMediaName = "";
       if (shotAnalysisNativeCameraActive) {
         const detail = await nativeCameraCommand("captureNativeStill", "still-captured", `${session.id}-${kind}-${index}`);
         const response = await fetch(detail.url);
         if (!response.ok) throw new Error(`Could not read native still (${response.status}).`);
         blob = await response.blob();
+        nativeMediaName = decodeURIComponent(new URL(detail.url).pathname.split("/").pop() || "");
       } else {
         blob = await videoFrameBlob();
       }
-      const metadata = { id:`${session.id}-${kind}-${index}`, sessionId:session.id, kind, createdAt:new Date().toISOString(), mimeType:blob.type, bytes:blob.size };
+      const metadata = { id:`${session.id}-${kind}-${index}`, sessionId:session.id, kind, createdAt:new Date().toISOString(), mimeType:blob.type, bytes:blob.size, nativeMediaName };
       session.imageCount = index;
       shotAnalysisImages.push({ ...metadata, blob });
       if (shotAnalysisImages.length > 20) shotAnalysisImages.shift();
@@ -3719,13 +3726,24 @@
 
   function downloadShotAnalysisLog() {
     if (!shotAnalysisSession) return;
-    downloadTextFile(`${shotAnalysisSession.id}.json`, JSON.stringify(shotAnalysisLogObject(), null, 2), "application/json");
+    const filename = `${shotAnalysisSession.id}.json`;
+    const content = JSON.stringify(shotAnalysisLogObject(), null, 2);
+    if (typeof globalThis.NativeApp?.exportTextFile === "function") {
+      globalThis.NativeApp.exportTextFile(filename, "application/json", content);
+      return;
+    }
+    downloadTextFile(filename, content, "application/json");
   }
 
   function downloadShotAnalysisVideo() {
     if (!shotAnalysisVideoBlob || !shotAnalysisSession) return;
     const extension = shotAnalysisVideoBlob.type.includes("mp4") ? "mp4" : "webm";
-    downloadBlobFile(`${shotAnalysisSession.id}.${extension}`, shotAnalysisVideoBlob);
+    const filename = `${shotAnalysisSession.id}.${extension}`;
+    if (shotAnalysisNativeVideoName && typeof globalThis.NativeApp?.exportNativeMedia === "function") {
+      globalThis.NativeApp.exportNativeMedia(shotAnalysisNativeVideoName, filename, shotAnalysisVideoBlob.type || "video/mp4");
+      return;
+    }
+    downloadBlobFile(filename, shotAnalysisVideoBlob);
   }
 
   async function openShotAnalysis({ focusDataset = false } = {}) {
@@ -3779,6 +3797,20 @@
 
   function downloadShotDatasetFiles() {
     if (!shotAnalysisSession) return;
+    if (typeof globalThis.NativeApp?.exportDatasetZip === "function") {
+      const media = [];
+      if (shotAnalysisNativeVideoName && shotAnalysisVideoBlob) {
+        const extension = shotAnalysisVideoBlob.type.includes("mp4") ? "mp4" : "webm";
+        media.push({ sourceName:shotAnalysisNativeVideoName, archiveName:`${shotAnalysisSession.id}.${extension}` });
+      }
+      shotAnalysisImages.forEach((image, index) => {
+        if (!image.nativeMediaName) return;
+        const extension = image.mimeType?.includes("png") ? "png" : "jpg";
+        media.push({ sourceName:image.nativeMediaName, archiveName:`${shotAnalysisSession.id}-${String(index + 1).padStart(2,"0")}-${image.kind}.${extension}` });
+      });
+      globalThis.NativeApp.exportDatasetZip(`${shotAnalysisSession.id}.zip`, JSON.stringify(shotAnalysisLogObject(), null, 2), JSON.stringify(media));
+      return;
+    }
     downloadShotAnalysisLog();
     if (shotAnalysisVideoBlob) downloadShotAnalysisVideo();
     shotAnalysisImages.forEach((image, index) => {

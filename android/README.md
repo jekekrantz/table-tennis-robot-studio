@@ -1,8 +1,9 @@
 # Android wrapper
 
-This is a minimal, local Android host for Table Tennis Robot Studio. It bundles
-the generated web application into the APK and displays it in a locked-down
-WebView. It does not yet implement the native Camera2 dataset recorder.
+This is a local Android host for Table Tennis Robot Studio. It bundles the
+generated web application into the APK and displays it in a locked-down WebView.
+Camera2 recording, motion-sensor capture, native Bluetooth, and system document
+export are implemented by the Android bridge.
 
 ## Build a development APK
 
@@ -58,9 +59,9 @@ Trusted bundled JavaScript can inspect the host using:
 JSON.parse(NativeApp.getInfo())
 ```
 
-`camera2Capture` is currently `false`. The next native increment should add a
-Camera2 capability inventory and synchronized recording service without moving
-video frames through the JavaScript bridge.
+`camera2Capture` reports the native Camera2 recorder and metadata inventory.
+Generated logs and media use Android's system document saver; complete datasets
+are exported as a single ZIP.
 
 ## Website distribution
 
